@@ -597,7 +597,10 @@
 
             <div style="margin-top: 2rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
                 <h3 style="margin-bottom: 0;">📋 Minhas Demandas</h3>
-                <button class="btn btn-sm" style="width: auto; background: transparent; color: var(--led-green); border: 1px solid var(--led-green);" onclick="showWhatsAppText()">💬 Gerar Texto WhatsApp</button>
+                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                    <button class="btn btn-sm" style="width: auto; background: transparent; color: var(--led-green); border: 1px solid var(--led-green);" onclick="showWhatsAppText()">💬 Gerar Texto WhatsApp</button>
+                    <button class="btn btn-sm" style="width: auto; background: transparent; color: var(--led-blue); border: 1px solid var(--led-blue);" onclick="downloadDemandsHtml()">📄 Exportar HTML</button>
+                </div>
             </div>
             <div style="margin-top: 1rem;">
                 <div id="demandsList" class="demands-list">
@@ -1445,6 +1448,111 @@
             } catch (e) {
                 console.error('Erro:', e);
             }
+        }
+
+        // ============= EXPORTAR HTML =============
+        const REPORT_STATUS_STYLES = {
+            'nao-iniciado': { label: 'Não Iniciado', color: '#6b7280' },
+            'andamento': { label: 'Em Andamento', color: '#b45309' },
+            'aguardando': { label: 'Aguardando', color: '#0369a1' },
+            'aprovacao': { label: 'Aprovação', color: '#7c3aed' },
+            'concluido': { label: 'Concluído', color: '#15803d' }
+        };
+        const REPORT_PRIORITY_STYLES = {
+            'baixa': { label: 'Baixa', color: '#6b7280' },
+            'media': { label: 'Média', color: '#0369a1' },
+            'alta': { label: 'Alta', color: '#b45309' },
+            'urgente': { label: 'Urgente', color: '#b91c1c' }
+        };
+
+        function renderReportCard(d) {
+            const s = REPORT_STATUS_STYLES[d.status] || REPORT_STATUS_STYLES['nao-iniciado'];
+            const p = REPORT_PRIORITY_STYLES[d.priority] || REPORT_PRIORITY_STYLES['media'];
+            return `
+                <div class="demand-card">
+                    <div class="title">${d.location} - ${d.activity}</div>
+                    ${d.context ? `<div class="ctx">📌 ${d.context}</div>` : ''}
+                    <div class="badges">
+                        <span class="badge" style="color:${s.color};">${s.label}</span>
+                        <span class="badge" style="color:${p.color};">${p.label}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function generateDemandsHtml() {
+            const today = new Date().toLocaleDateString('pt-BR');
+
+            const sections = currentGroups
+                .map(g => ({ group: g, items: currentDemands.filter(d => d.workGroupId === g.id) }))
+                .filter(g => g.items.length > 0);
+
+            const orphanItems = currentDemands.filter(d => !currentGroups.some(g => g.id === d.workGroupId));
+
+            const sectionsHtml = sections.map(({ group, items }) => `
+                <section class="group-section">
+                    <h2 style="border-left: 4px solid ${group.color || '#f5a623'};">${group.emoji || '📌'} ${group.name}</h2>
+                    <div class="cards-grid">${items.map(renderReportCard).join('')}</div>
+                </section>
+            `).join('');
+
+            const orphanHtml = orphanItems.length > 0 ? `
+                <section class="group-section">
+                    <h2 style="border-left: 4px solid #6b7280;">📌 Sem Grupo</h2>
+                    <div class="cards-grid">${orphanItems.map(renderReportCard).join('')}</div>
+                </section>
+            ` : '';
+
+            const emptyHtml = (sections.length === 0 && orphanItems.length === 0)
+                ? '<p style="color:#6b7280;">Nenhuma demanda pendente.</p>' : '';
+
+            return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Relatório de Demandas - ${today}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', Roboto, Arial, sans-serif; background: #f4f5f7; color: #1f2329; margin: 0; padding: 2rem; }
+  .report-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 2px solid #e2e4e8; }
+  .report-header h1 { font-size: 1.4rem; margin: 0; }
+  .report-header .meta { color: #6b7280; font-size: 0.85rem; margin-top: 0.25rem; }
+  .print-btn { background: #f5a623; color: #1a1305; border: none; padding: 0.5rem 1rem; border-radius: 6px; font-weight: 700; cursor: pointer; }
+  .group-section { margin-bottom: 2rem; }
+  .group-section h2 { font-size: 1rem; padding-left: 0.75rem; margin-bottom: 1rem; }
+  .cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+  .demand-card { background: #fff; border: 1px solid #e2e4e8; border-radius: 8px; padding: 1rem; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+  .demand-card .title { font-weight: 600; margin-bottom: 0.4rem; }
+  .demand-card .ctx { font-size: 0.85rem; color: #6b7280; margin-bottom: 0.6rem; }
+  .badges { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+  .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid currentColor; }
+  @media print {
+    .print-btn { display: none; }
+    body { background: #fff; padding: 0.5rem; }
+  }
+</style>
+</head>
+<body>
+  <div class="report-header">
+    <div>
+      <h1>📋 Relatório de Demandas</h1>
+      <div class="meta">Gerado em ${today}</div>
+    </div>
+    <button class="print-btn" onclick="window.print()">🖨️ Imprimir</button>
+  </div>
+  ${sectionsHtml}${orphanHtml}${emptyHtml}
+</body>
+</html>`;
+        }
+
+        function downloadDemandsHtml() {
+            const html = generateDemandsHtml();
+            const blob = new Blob([html], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `demandas_${new Date().toISOString().split('T')[0]}.html`;
+            a.click();
         }
 
         function changePassword() {
