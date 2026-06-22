@@ -22,6 +22,10 @@ if DATABASE_URL.startswith('postgres://'):
     DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'pool_pre_ping': True,  # testa a conexão antes de usar; reconecta se o Neon já tiver derrubado
+    'pool_recycle': 280,    # recicla conexões periodicamente, antes do banco fechar por ociosidade
+}
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', secrets.token_urlsafe(32))
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(days=30)
