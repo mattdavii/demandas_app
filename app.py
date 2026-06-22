@@ -1,6 +1,6 @@
 import os
 import secrets
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
@@ -182,6 +182,21 @@ def index():
 def reset_page():
     """Servir página de reset de senha"""
     return render_template('reset.html')
+
+# ============= PWA: MANIFEST, SERVICE WORKER, FAVICON =============
+@app.route('/manifest.json')
+def manifest():
+    return send_from_directory('static', 'manifest.json', mimetype='application/manifest+json')
+
+@app.route('/sw.js')
+def service_worker():
+    response = send_from_directory('static', 'sw.js', mimetype='application/javascript')
+    response.headers['Service-Worker-Allowed'] = '/'
+    return response
+
+@app.route('/favicon.ico')
+def favicon():
+    return send_from_directory('static', 'favicon.ico', mimetype='image/vnd.microsoft.icon')
 
 # ============= ROTAS DE AUTENTICAÇÃO =============
 @app.route('/api/auth/register', methods=['POST'])
