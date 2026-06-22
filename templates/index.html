@@ -1452,17 +1452,17 @@
 
         // ============= EXPORTAR HTML =============
         const REPORT_STATUS_STYLES = {
-            'nao-iniciado': { label: 'Não Iniciado', color: '#6b7280' },
-            'andamento': { label: 'Em Andamento', color: '#b45309' },
-            'aguardando': { label: 'Aguardando', color: '#0369a1' },
-            'aprovacao': { label: 'Aprovação', color: '#7c3aed' },
-            'concluido': { label: 'Concluído', color: '#15803d' }
+            'nao-iniciado': { label: 'Não Iniciado', color: '#9aa0a7' },
+            'andamento': { label: 'Em Andamento', color: '#ffc35c' },
+            'aguardando': { label: 'Aguardando', color: '#4fc3f7' },
+            'aprovacao': { label: 'Aprovação', color: '#b388ff' },
+            'concluido': { label: 'Concluído', color: '#3ddc84' }
         };
         const REPORT_PRIORITY_STYLES = {
-            'baixa': { label: 'Baixa', color: '#6b7280' },
-            'media': { label: 'Média', color: '#0369a1' },
-            'alta': { label: 'Alta', color: '#b45309' },
-            'urgente': { label: 'Urgente', color: '#b91c1c' }
+            'baixa': { label: 'Baixa', color: '#9aa0a7' },
+            'media': { label: 'Média', color: '#4fc3f7' },
+            'alta': { label: 'Alta', color: '#ffc35c' },
+            'urgente': { label: 'Urgente', color: '#ff5b5b' }
         };
 
         function renderReportCard(d) {
@@ -1473,8 +1473,8 @@
                     <div class="title">${d.location} - ${d.activity}</div>
                     ${d.context ? `<div class="ctx">📌 ${d.context}</div>` : ''}
                     <div class="badges">
-                        <span class="badge" style="color:${s.color};">${s.label}</span>
-                        <span class="badge" style="color:${p.color};">${p.label}</span>
+                        <span class="badge" style="color:${s.color}; border-color:${s.color};">${s.label}</span>
+                        <span class="badge" style="color:${p.color}; border-color:${p.color};">${p.label}</span>
                     </div>
                 </div>
             `;
@@ -1491,20 +1491,20 @@
 
             const sectionsHtml = sections.map(({ group, items }) => `
                 <section class="group-section">
-                    <h2 style="border-left: 4px solid ${group.color || '#f5a623'};">${group.emoji || '📌'} ${group.name}</h2>
+                    <h2 style="border-left-color: ${group.color || '#f5a623'};">${group.emoji || '📌'} ${group.name}</h2>
                     <div class="cards-grid">${items.map(renderReportCard).join('')}</div>
                 </section>
             `).join('');
 
             const orphanHtml = orphanItems.length > 0 ? `
                 <section class="group-section">
-                    <h2 style="border-left: 4px solid #6b7280;">📌 Sem Grupo</h2>
+                    <h2 style="border-left-color: #5b6168;">📌 Sem Grupo</h2>
                     <div class="cards-grid">${orphanItems.map(renderReportCard).join('')}</div>
                 </section>
             ` : '';
 
             const emptyHtml = (sections.length === 0 && orphanItems.length === 0)
-                ? '<p style="color:#6b7280;">Nenhuma demanda pendente.</p>' : '';
+                ? '<p style="color:#868d95;">Nenhuma demanda pendente.</p>' : '';
 
             return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -1512,23 +1512,50 @@
 <meta charset="UTF-8">
 <title>Relatório de Demandas - ${today}</title>
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap');
+  :root {
+    --bg-deep: #0b0d0f;
+    --panel: #16191d;
+    --panel-raised: #1e2227;
+    --border: #2a2f35;
+    --amber: #f5a623;
+    --amber-bright: #ffc35c;
+    --text-primary: #e9e6df;
+    --text-secondary: #868d95;
+  }
   * { box-sizing: border-box; }
-  body { font-family: -apple-system, 'Segoe UI', Roboto, Arial, sans-serif; background: #f4f5f7; color: #1f2329; margin: 0; padding: 2rem; }
-  .report-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 2px solid #e2e4e8; }
-  .report-header h1 { font-size: 1.4rem; margin: 0; }
-  .report-header .meta { color: #6b7280; font-size: 0.85rem; margin-top: 0.25rem; }
-  .print-btn { background: #f5a623; color: #1a1305; border: none; padding: 0.5rem 1rem; border-radius: 6px; font-weight: 700; cursor: pointer; }
+  body {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: radial-gradient(circle at 50% 0%, #1a1d21 0%, var(--bg-deep) 65%);
+    color: var(--text-primary);
+    margin: 0;
+    padding: 2rem;
+  }
+  .report-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+  .report-header h1 { font-size: 1.3rem; margin: 0; text-transform: uppercase; letter-spacing: 0.04em; color: var(--amber-bright); }
+  .report-header .meta { color: var(--text-secondary); font-size: 0.8rem; margin-top: 0.4rem; }
+  .print-btn { background: var(--amber); color: #1a1305; border: none; padding: 0.6rem 1.1rem; border-radius: 6px; font-weight: 700; font-family: inherit; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; cursor: pointer; }
   .group-section { margin-bottom: 2rem; }
-  .group-section h2 { font-size: 1rem; padding-left: 0.75rem; margin-bottom: 1rem; }
+  .group-section h2 {
+    font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--text-primary); padding-left: 0.75rem; margin-bottom: 1rem;
+    border-left: 4px solid var(--amber);
+  }
   .cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
-  .demand-card { background: #fff; border: 1px solid #e2e4e8; border-radius: 8px; padding: 1rem; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-  .demand-card .title { font-weight: 600; margin-bottom: 0.4rem; }
-  .demand-card .ctx { font-size: 0.85rem; color: #6b7280; margin-bottom: 0.6rem; }
+  .demand-card { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; }
+  .demand-card .title { font-weight: 600; margin-bottom: 0.4rem; color: var(--text-primary); }
+  .demand-card .ctx { font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem; }
   .badges { display: flex; gap: 0.4rem; flex-wrap: wrap; }
-  .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid currentColor; }
+  .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid currentColor; }
+
+  /* Impressão: força tema claro, fundo escuro gasta tinta e fica ilegível no papel */
   @media print {
     .print-btn { display: none; }
-    body { background: #fff; padding: 0.5rem; }
+    body { background: #ffffff; color: #1f2329; padding: 0.5rem; }
+    .report-header { border-bottom-color: #e2e4e8; }
+    .report-header h1, .group-section h2 { color: #1f2329; }
+    .report-header .meta, .demand-card .ctx { color: #6b7280; }
+    .demand-card { background: #ffffff; border-color: #e2e4e8; }
   }
 </style>
 </head>
