@@ -16,9 +16,7 @@ app = Flask(__name__)
 CORS(app)
 
 # ============= CONFIGURAÇÕES =============
-DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://user:password@localhost/demandas_db')
-if DATABASE_URL.startswith('postgres://'):
-    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///demandas.db')
 
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
