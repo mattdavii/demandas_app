@@ -1847,12 +1847,15 @@
             'urgente': { label: 'Urgente', color: '#ff5b5b' }
         };
 
-        function renderReportCard(d) {
+        function renderReportCard(d, group) {
             const s = REPORT_STATUS_STYLES[d.status] || REPORT_STATUS_STYLES['nao-iniciado'];
             const p = REPORT_PRIORITY_STYLES[d.priority] || REPORT_PRIORITY_STYLES['media'];
             const overdue = isOverdue(d.dueDate);
+            const groupColor = group ? (group.color || '#f5a623') : '#5b6168';
+            const groupLabel = escapeHtml(group ? `${group.emoji || '📌'} ${group.name}` : '📌 Sem Grupo');
             return `
                 <div class="demand-card">
+                    <div class="report-card-group" style="background:${hexToRgba(groupColor, 0.15)}; color:${groupColor}; border-color:${hexToRgba(groupColor, 0.45)};">${groupLabel}</div>
                     <div class="title">${escapeHtml(d.location)} - ${escapeHtml(d.activity)}</div>
                     ${d.dueDate ? `<div class="ctx" style="${overdue ? 'color:#ff5b5b; font-weight:700;' : ''}">${overdue ? '⚠️ Atrasada — venceu em' : '📅 Vence em'} ${formatDateBR(d.dueDate)}</div>` : ''}
                     ${d.context ? `<div class="ctx">📌 ${escapeHtml(d.context)}</div>` : ''}
@@ -1876,14 +1879,14 @@
             const sectionsHtml = sections.map(({ group, items }) => `
                 <section class="group-section">
                     <h2 style="border-left-color: ${group.color || '#f5a623'};">${escapeHtml(group.emoji || '📌')} ${escapeHtml(group.name)}</h2>
-                    <div class="cards-grid">${items.map(renderReportCard).join('')}</div>
+                    <div class="cards-grid">${items.map(d => renderReportCard(d, group)).join('')}</div>
                 </section>
             `).join('');
 
             const orphanHtml = orphanItems.length > 0 ? `
                 <section class="group-section">
                     <h2 style="border-left-color: #5b6168;">📌 Sem Grupo</h2>
-                    <div class="cards-grid">${orphanItems.map(renderReportCard).join('')}</div>
+                    <div class="cards-grid">${orphanItems.map(d => renderReportCard(d, null)).join('')}</div>
                 </section>
             ` : '';
 
@@ -1962,6 +1965,7 @@
   .demand-card .ctx { font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem; }
   .badges { display: flex; gap: 0.4rem; flex-wrap: wrap; }
   .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid currentColor; }
+  .report-card-group { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid currentColor; margin-bottom: 0.6rem; }
 
   .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem; }
   .summary-card { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; text-align: center; }
