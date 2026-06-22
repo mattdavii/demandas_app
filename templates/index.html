@@ -1136,6 +1136,7 @@
                                         <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(d.workGroupId, d.workGroupName)}</div>
                                         <div class="demand-title">${d.location} - ${d.activity}</div>
                                     </div>
+                                    ${getPriorityBadge(d.priority)}
                                 </div>
                                 ${d.context ? `<p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem;">📌 ${d.context}</p>` : ''}
                                 <div style="display: flex; gap: 0.5rem;">
@@ -1393,6 +1394,18 @@
             const emoji = group ? (group.emoji || '📌') : '📌';
             const color = group ? (group.color || '#f5a623') : '#5b6168';
             return `<span style="display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:4px; font-size:0.68rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; background:${hexToRgba(color, 0.15)}; color:${color}; border:1px solid ${hexToRgba(color, 0.45)};">${emoji} ${name}</span>`;
+        }
+
+        const PRIORITY_STYLES = {
+            'baixa': { label: 'Baixa', color: 'var(--led-gray)' },
+            'media': { label: 'Média', color: 'var(--led-blue)' },
+            'alta': { label: 'Alta', color: 'var(--amber)' },
+            'urgente': { label: 'Urgente', color: 'var(--led-red)' }
+        };
+
+        function getPriorityBadge(priority) {
+            const p = PRIORITY_STYLES[priority] || PRIORITY_STYLES['media'];
+            return `<span style="display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:4px; font-size:0.68rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; background:transparent; color:${p.color}; border:1px solid ${p.color}; white-space:nowrap;"><span style="width:6px;height:6px;border-radius:50%;background:${p.color};box-shadow:0 0 4px ${p.color};display:inline-block;"></span>${p.label}</span>`;
         }
 
         // ============= UTILITÁRIOS =============
