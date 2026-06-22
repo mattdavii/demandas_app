@@ -554,8 +554,11 @@
                 </div>
             </div>
 
-            <div style="margin-top: 2rem;">
-                <h3 style="margin-bottom: 1rem;">📋 Minhas Demandas</h3>
+            <div style="margin-top: 2rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+                <h3 style="margin-bottom: 0;">📋 Minhas Demandas</h3>
+                <button class="btn btn-sm" style="width: auto; background: transparent; color: var(--led-green); border: 1px solid var(--led-green);" onclick="showWhatsAppText()">💬 Gerar Texto WhatsApp</button>
+            </div>
+            <div style="margin-top: 1rem;">
                 <div id="demandsList" class="demands-list">
                     <div>Carregando...</div>
                 </div>
@@ -628,6 +631,19 @@
             </div>
             <button class="btn btn-primary" onclick="saveGroupEdit()">Salvar</button>
             <button class="btn btn-secondary" onclick="closeEditGroup()" style="margin-left: 0.5rem;">Cancelar</button>
+        </div>
+    </div>
+
+    <!-- MODAL TEXTO WHATSAPP -->
+    <div id="whatsappModal" class="modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <span class="close-modal" onclick="closeWhatsAppModal()">&times;</span>
+            <div class="modal-header">💬 Texto para WhatsApp</div>
+            <textarea id="whatsappText" readonly style="width: 100%; min-height: 280px; background: var(--panel-raised); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); font-family: inherit; font-size: 0.85rem; padding: 0.75rem; resize: vertical; white-space: pre-wrap;"></textarea>
+            <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+                <button class="btn btn-primary" onclick="copyWhatsAppText()" style="background: var(--led-green); color: #06210f;">📋 Copiar Texto</button>
+                <button class="btn btn-secondary" onclick="openInWhatsApp()">↗ Abrir no WhatsApp</button>
+            </div>
         </div>
     </div>
 
@@ -915,6 +931,45 @@
         function closeEditGroup() {
             document.getElementById('editGroupModal').classList.remove('show');
             editingGroupId = null;
+        }
+
+        // ============= TEXTO WHATSAPP =============
+        let lastWhatsAppText = '';
+
+        async function showWhatsAppText() {
+            try {
+                const response = await fetch(`${API_URL}/whatsapp-text`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await response.json();
+                lastWhatsAppText = data.text || '';
+                document.getElementById('whatsappText').value = lastWhatsAppText.trim() || 'Nenhuma demanda registrada hoje.';
+                document.getElementById('whatsappModal').classList.add('show');
+            } catch (e) {
+                console.error('Erro:', e);
+                alert('Erro ao gerar texto');
+            }
+        }
+
+        function closeWhatsAppModal() {
+            document.getElementById('whatsappModal').classList.remove('show');
+        }
+
+        async function copyWhatsAppText() {
+            try {
+                await navigator.clipboard.writeText(lastWhatsAppText);
+                alert('Texto copiado!');
+            } catch (e) {
+                const textarea = document.getElementById('whatsappText');
+                textarea.select();
+                document.execCommand('copy');
+                alert('Texto copiado!');
+            }
+        }
+
+        function openInWhatsApp() {
+            const encoded = encodeURIComponent(lastWhatsAppText);
+            window.open(`https://wa.me/?text=${encoded}`, '_blank');
         }
 
         async function deleteGroup(id) {
