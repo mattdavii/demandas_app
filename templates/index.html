@@ -1833,13 +1833,6 @@
         }
 
         // ============= EXPORTAR HTML =============
-        const REPORT_STATUS_STYLES = {
-            'nao-iniciado': { label: 'Não Iniciado', color: '#9aa0a7' },
-            'andamento': { label: 'Em Andamento', color: '#ffc35c' },
-            'aguardando': { label: 'Aguardando', color: '#4fc3f7' },
-            'aprovacao': { label: 'Aprovação', color: '#b388ff' },
-            'concluido': { label: 'Concluído', color: '#3ddc84' }
-        };
         const REPORT_PRIORITY_STYLES = {
             'baixa': { label: 'Baixa', color: '#9aa0a7' },
             'media': { label: 'Média', color: '#4fc3f7' },
@@ -1848,7 +1841,6 @@
         };
 
         function renderReportCard(d, group) {
-            const s = REPORT_STATUS_STYLES[d.status] || REPORT_STATUS_STYLES['nao-iniciado'];
             const p = REPORT_PRIORITY_STYLES[d.priority] || REPORT_PRIORITY_STYLES['media'];
             const overdue = isOverdue(d.dueDate);
             const groupColor = group ? (group.color || '#f5a623') : '#5b6168';
@@ -1860,38 +1852,64 @@
                     ${d.dueDate ? `<div class="ctx" style="${overdue ? 'color:#ff5b5b; font-weight:700;' : ''}">${overdue ? '⚠️ Atrasada — venceu em' : '📅 Vence em'} ${formatDateBR(d.dueDate)}</div>` : ''}
                     ${d.context ? `<div class="ctx">📌 ${escapeHtml(d.context)}</div>` : ''}
                     <div class="badges">
-                        <span class="badge" style="color:${s.color}; border-color:${s.color};">${s.label}</span>
                         <span class="badge" style="color:${p.color}; border-color:${p.color};">${p.label}</span>
                     </div>
                 </div>
             `;
         }
 
-        function generateDemandsHtml() {
+        function renderReportHistoryCard(h) {
+            const group = currentGroups.find(g => g.id === h.workGroupId);
+            const groupColor = group ? (group.color || '#f5a623') : '#5b6168';
+            const groupLabel = escapeHtml(group ? `${group.emoji || '📌'} ${group.name}` : '📌 Sem Grupo');
+            return `
+                <div class="demand-card">
+                    <div class="report-card-group" style="background:${hexToRgba(groupColor, 0.15)}; color:${groupColor}; border-color:${hexToRgba(groupColor, 0.45)};">${groupLabel}</div>
+                    <div class="title">${escapeHtml(h.location)} - ${escapeHtml(h.activity)}</div>
+                    ${h.context ? `<div class="ctx">📌 ${escapeHtml(h.context)}</div>` : ''}
+                </div>
+            `;
+        }
+
+        function generateDemandsHtml(history) {
             const today = new Date().toLocaleDateString('pt-BR');
+            const todayIso = toLocalISODate(new Date());
 
-            const sections = currentGroups
-                .map(g => ({ group: g, items: currentDemands.filter(d => d.workGroupId === g.id) }))
-                .filter(g => g.items.length > 0);
+            const concludedToday = (history || []).filter(h => h.status === 'concluido' && h.statusChangeDate === todayIso);
 
-            const orphanItems = currentDemands.filter(d => !currentGroups.some(g => g.id === d.workGroupId));
+            const STATUS_SECTIONS = [
+                { key: 'nao-iniciado', label: 'Não Iniciado', color: '#9aa0a7', emoji: '⚪' },
+                { key: 'andamento', label: 'Em Andamento', color: '#ffc35c', emoji: '🟡' },
+                { key: 'aguardando', label: 'Aguardando', color: '#4fc3f7', emoji: '🔵' },
+                { key: 'aprovacao', label: 'Aprovação', color: '#b388ff', emoji: '🟣' }
+            ];
 
-            const sectionsHtml = sections.map(({ group, items }) => `
+            const concludedSectionHtml = `
                 <section class="group-section">
-                    <h2 style="border-left-color: ${group.color || '#f5a623'};">${escapeHtml(group.emoji || '📌')} ${escapeHtml(group.name)}</h2>
-                    <div class="cards-grid">${items.map(d => renderReportCard(d, group)).join('')}</div>
+                    <h2 style="border-left-color: #3ddc84;">🟢 Concluídas Hoje — ${today}</h2>
+                    <div class="cards-grid">
+                        ${concludedToday.length > 0
+                            ? concludedToday.map(renderReportHistoryCard).join('')
+                            : '<p style="color:#868d95; font-size:0.85rem;">Nenhuma demanda concluída hoje.</p>'}
+                    </div>
                 </section>
-            `).join('');
+            `;
 
-            const orphanHtml = orphanItems.length > 0 ? `
-                <section class="group-section">
-                    <h2 style="border-left-color: #5b6168;">📌 Sem Grupo</h2>
-                    <div class="cards-grid">${orphanItems.map(d => renderReportCard(d, null)).join('')}</div>
-                </section>
-            ` : '';
-
-            const emptyHtml = (sections.length === 0 && orphanItems.length === 0)
-                ? '<p style="color:#868d95;">Nenhuma demanda pendente.</p>' : '';
+            const statusSectionsHtml = STATUS_SECTIONS.map(s => {
+                const items = currentDemands
+                    .filter(d => d.status === s.key)
+                    .sort((a, b) => (PRIORITY_RANK[b.priority] || 0) - (PRIORITY_RANK[a.priority] || 0));
+                return `
+                    <section class="group-section">
+                        <h2 style="border-left-color: ${s.color};">${s.emoji} ${s.label}</h2>
+                        <div class="cards-grid">
+                            ${items.length > 0
+                                ? items.map(d => renderReportCard(d, currentGroups.find(g => g.id === d.workGroupId))).join('')
+                                : '<p style="color:#868d95; font-size:0.85rem;">Nenhuma demanda neste status.</p>'}
+                        </div>
+                    </section>
+                `;
+            }).join('');
 
             const total = currentDemands.length;
             const notStartedCount = currentDemands.filter(d => d.status === 'nao-iniciado').length;
@@ -1899,30 +1917,14 @@
             const inProgressCount = currentDemands.filter(d => d.status === 'andamento').length;
             const overdueCount = currentDemands.filter(d => isOverdue(d.dueDate)).length;
 
-            const statusOrder = [
-                { key: 'nao-iniciado', label: 'Não Iniciado', color: '#9aa0a7' },
-                { key: 'andamento', label: 'Em Andamento', color: '#ffc35c' },
-                { key: 'aguardando', label: 'Aguardando', color: '#4fc3f7' },
-                { key: 'aprovacao', label: 'Aprovação', color: '#b388ff' }
-            ];
-            const maxStatusCount = Math.max(1, ...statusOrder.map(s => currentDemands.filter(d => d.status === s.key).length));
-
-            const summaryHtml = total > 0 ? `
+            const summaryHtml = `
                 <div class="summary-grid">
                     <div class="summary-card"><div class="summary-value">${notStartedCount}</div><div class="summary-label">Pendentes</div></div>
                     <div class="summary-card"><div class="summary-value" style="color:#ff5b5b;">${overdueCount}</div><div class="summary-label">Atrasadas</div></div>
                     <div class="summary-card"><div class="summary-value" style="color:#ffc35c;">${urgentCount}</div><div class="summary-label">Urgentes</div></div>
                     <div class="summary-card"><div class="summary-value" style="color:#4fc3f7;">${inProgressCount}</div><div class="summary-label">Em Andamento</div></div>
                 </div>
-                <div class="group-section">
-                    <h2 style="border-left-color: #f5a623;">📊 Por Status</h2>
-                    ${statusOrder.map(s => {
-                        const count = currentDemands.filter(d => d.status === s.key).length;
-                        const pct = Math.max(2, Math.round((count / maxStatusCount) * 100));
-                        return `<div class="bar-row"><div class="bar-label"><span>${s.label}</span><span>${count}</span></div><div class="bar-track"><div class="bar-fill" style="width:${pct}%; background:${s.color};"></div></div></div>`;
-                    }).join('')}
-                </div>
-            ` : '';
+            `;
 
             return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -1971,10 +1973,6 @@
   .summary-card { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; text-align: center; }
   .summary-value { font-size: 1.6rem; font-weight: 800; }
   .summary-label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); margin-top: 0.3rem; }
-  .bar-row { margin-bottom: 0.7rem; }
-  .bar-label { display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--text-secondary); margin-bottom: 0.3rem; text-transform: uppercase; letter-spacing: 0.03em; }
-  .bar-track { background: var(--panel-raised); border: 1px solid var(--border); border-radius: 4px; height: 7px; overflow: hidden; }
-  .bar-fill { height: 100%; border-radius: 4px; }
 
   /* Impressão: força tema claro, fundo escuro gasta tinta e fica ilegível no papel */
   @media print {
@@ -1982,9 +1980,8 @@
     body { background: #ffffff; color: #1f2329; padding: 0.5rem; }
     .report-header { border-bottom-color: #e2e4e8; }
     .report-header h1, .group-section h2 { color: #1f2329; }
-    .report-header .meta, .demand-card .ctx, .bar-label { color: #6b7280; }
+    .report-header .meta, .demand-card .ctx { color: #6b7280; }
     .demand-card, .summary-card { background: #ffffff; border-color: #e2e4e8; }
-    .bar-track { background: #f4f5f7; }
   }
 </style>
 </head>
@@ -1997,13 +1994,26 @@
     <button class="print-btn" onclick="window.print()">🖨️ Imprimir</button>
   </div>
   ${summaryHtml}
-  ${sectionsHtml}${orphanHtml}${emptyHtml}
+  ${concludedSectionHtml}
+  ${statusSectionsHtml}
 </body>
 </html>`;
         }
 
-        function downloadDemandsHtml() {
-            const html = generateDemandsHtml();
+        async function downloadDemandsHtml() {
+            let history = [];
+            try {
+                const response = await fetch(`${API_URL}/history`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (response.ok) {
+                    history = await response.json();
+                }
+            } catch (e) {
+                console.error('Erro ao buscar histórico para o relatório:', e);
+            }
+
+            const html = generateDemandsHtml(history);
             const blob = new Blob([html], { type: 'text/html' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
