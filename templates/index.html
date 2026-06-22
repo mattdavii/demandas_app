@@ -715,7 +715,7 @@
 
             <div class="card" style="margin-top: 1.5rem;">
                 <h3>🔐 Segurança</h3>
-                <button class="btn btn-secondary" onclick="changePassword()">Alterar Senha</button>
+                <button class="btn btn-secondary" onclick="showChangePasswordModal()">Alterar Senha</button>
             </div>
         </div>
     </div>
@@ -797,6 +797,29 @@
             </div>
             <button class="btn btn-primary" onclick="saveDemandEdit()">Salvar</button>
             <button class="btn btn-secondary" onclick="closeEditDemand()" style="margin-left: 0.5rem;">Cancelar</button>
+        </div>
+    </div>
+
+    <!-- MODAL ALTERAR SENHA -->
+    <div id="changePasswordModal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" onclick="closeChangePasswordModal()">&times;</span>
+            <div class="modal-header">🔒 Alterar Senha</div>
+            <div class="alert" id="changePasswordAlert"></div>
+            <div class="form-group">
+                <label>Senha Atual</label>
+                <input type="password" id="currentPassword">
+            </div>
+            <div class="form-group">
+                <label>Nova Senha</label>
+                <input type="password" id="newPasswordField">
+            </div>
+            <div class="form-group">
+                <label>Confirmar Nova Senha</label>
+                <input type="password" id="newPasswordConfirm">
+            </div>
+            <button class="btn btn-primary" onclick="submitChangePassword()">Salvar Nova Senha</button>
+            <button class="btn btn-secondary" onclick="closeChangePasswordModal()" style="margin-left: 0.5rem;">Cancelar</button>
         </div>
     </div>
 
@@ -1824,8 +1847,57 @@
             a.click();
         }
 
-        function changePassword() {
-            alert('Implementar alteração de senha');
+        function showChangePasswordModal() {
+            document.getElementById('currentPassword').value = '';
+            document.getElementById('newPasswordField').value = '';
+            document.getElementById('newPasswordConfirm').value = '';
+            document.getElementById('changePasswordAlert').classList.remove('show');
+            document.getElementById('changePasswordModal').classList.add('show');
+        }
+
+        function closeChangePasswordModal() {
+            document.getElementById('changePasswordModal').classList.remove('show');
+        }
+
+        async function submitChangePassword() {
+            const current_password = document.getElementById('currentPassword').value;
+            const new_password = document.getElementById('newPasswordField').value;
+            const confirm = document.getElementById('newPasswordConfirm').value;
+
+            if (!current_password || !new_password) {
+                showAlert('changePasswordAlert', 'Preencha todos os campos', 'danger');
+                return;
+            }
+            if (new_password !== confirm) {
+                showAlert('changePasswordAlert', 'As senhas não coincidem', 'danger');
+                return;
+            }
+            if (new_password.length < 6) {
+                showAlert('changePasswordAlert', 'A nova senha deve ter pelo menos 6 caracteres', 'danger');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/auth/change-password`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ current_password, new_password })
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    showAlert('changePasswordAlert', 'Senha alterada com sucesso!', 'success');
+                    setTimeout(closeChangePasswordModal, 1500);
+                } else {
+                    showAlert('changePasswordAlert', data.error || 'Erro ao alterar senha', 'danger');
+                }
+            } catch (e) {
+                console.error('Erro:', e);
+                showAlert('changePasswordAlert', 'Erro de conexão', 'danger');
+            }
         }
 
         function showUploadBackup() {
