@@ -6,6 +6,9 @@
     <meta name="theme-color" content="#0b0d0f">
     <title>Gestor de Demandas - Login</title>
     <link rel="manifest" href="/manifest.json">
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
+    <link rel="icon" href="/favicon.ico">
+    <link rel="apple-touch-icon" href="/static/icon-192.png">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap');
 
@@ -1142,6 +1145,14 @@
                 console.error('Erro:', e);
                 alert('Arquivo inválido (precisa ser o .json exportado pelo Fazer Backup) ou erro de conexão');
             }
+        }
+
+        // ============= PWA: REGISTRO DO SERVICE WORKER =============
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .catch((err) => console.error('Falha ao registrar Service Worker:', err));
+            });
         }
     </script>
 </body>
