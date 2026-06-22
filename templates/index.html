@@ -1066,9 +1066,13 @@
                     document.getElementById('newGroupColor').value = '#3b82f6';
                     document.getElementById('newGroupDescription').value = '';
                     loadGroups();
+                } else {
+                    const data = await response.json().catch(() => ({}));
+                    alert(data.error || 'Erro ao criar grupo');
                 }
             } catch (e) {
                 console.error('Erro:', e);
+                alert('Erro de conexão ao criar grupo');
             }
         }
 
@@ -1098,9 +1102,13 @@
                 if (response.ok) {
                     closeEditGroup();
                     loadGroups();
+                } else {
+                    const data = await response.json().catch(() => ({}));
+                    alert(data.error || 'Erro ao salvar grupo');
                 }
             } catch (e) {
                 console.error('Erro:', e);
+                alert('Erro de conexão ao salvar grupo');
             }
         }
 
@@ -1284,9 +1292,13 @@
                     document.getElementById('newPriority').value = 'media';
                     document.getElementById('newDueDate').value = '';
                     loadDemands();
+                } else {
+                    const data = await response.json().catch(() => ({}));
+                    alert(data.error || 'Erro ao criar demanda');
                 }
             } catch (e) {
                 console.error('Erro:', e);
+                alert('Erro de conexão ao criar demanda');
             }
         }
 
@@ -1303,9 +1315,13 @@
 
                 if (response.ok) {
                     loadDemands();
+                } else {
+                    const data = await response.json().catch(() => ({}));
+                    alert(data.error || 'Erro ao concluir demanda');
                 }
             } catch (e) {
                 console.error('Erro:', e);
+                alert('Erro de conexão ao concluir demanda');
             }
         }
 
