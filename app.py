@@ -337,6 +337,32 @@ def get_current_user():
     
     return jsonify(user.to_dict()), 200
 
+@app.route('/api/auth/change-password', methods=['POST'])
+@jwt_required()
+def change_password():
+    """Alterar senha do usuário logado (requer senha atual)"""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+
+    if not user:
+        return jsonify({'error': 'Usuário não encontrado'}), 404
+
+    data = request.get_json()
+
+    if not data or not data.get('current_password') or not data.get('new_password'):
+        return jsonify({'error': 'Senha atual e nova senha são obrigatórias'}), 400
+
+    if not user.check_password(data['current_password']):
+        return jsonify({'error': 'Senha atual incorreta'}), 401
+
+    if len(data['new_password']) < 6:
+        return jsonify({'error': 'A nova senha deve ter pelo menos 6 caracteres'}), 400
+
+    user.set_password(data['new_password'])
+    db.session.commit()
+
+    return jsonify({'message': 'Senha alterada com sucesso'}), 200
+
 # ============= ROTAS DE GRUPOS DE TRABALHO =============
 @app.route('/api/work-groups', methods=['GET'])
 @jwt_required()
