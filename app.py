@@ -225,7 +225,7 @@ def register():
     
     db.session.commit()
     
-    access_token = create_access_token(identity=user.id)
+    access_token = create_access_token(identity=str(user.id))
     return jsonify({
         'message': 'Usuário registrado com sucesso',
         'user': user.to_dict(),
@@ -248,7 +248,7 @@ def login():
     if not user.is_active:
         return jsonify({'error': 'Usuário desativado'}), 403
     
-    access_token = create_access_token(identity=user.id)
+    access_token = create_access_token(identity=str(user.id))
     return jsonify({
         'message': 'Login realizado com sucesso',
         'user': user.to_dict(),
@@ -314,7 +314,7 @@ def reset_password():
 @jwt_required()
 def get_current_user():
     """Obter dados do usuário atual"""
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
     
     if not user:
@@ -327,7 +327,7 @@ def get_current_user():
 @jwt_required()
 def get_work_groups():
     """Listar grupos de trabalho do usuário"""
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     groups = WorkGroup.query.filter_by(user_id=user_id, is_active=True).order_by(WorkGroup.order).all()
     return jsonify([g.to_dict() for g in groups]), 200
 
@@ -335,7 +335,7 @@ def get_work_groups():
 @jwt_required()
 def create_work_group():
     """Criar novo grupo de trabalho"""
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     data = request.get_json()
     
     if not data or not data.get('name'):
@@ -359,7 +359,7 @@ def create_work_group():
 @jwt_required()
 def update_work_group(group_id):
     """Atualizar grupo de trabalho"""
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     group = WorkGroup.query.get_or_404(group_id)
     
     if group.user_id != user_id:
@@ -385,7 +385,7 @@ def update_work_group(group_id):
 @jwt_required()
 def delete_work_group(group_id):
     """Deletar grupo de trabalho"""
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     group = WorkGroup.query.get_or_404(group_id)
     
     if group.user_id != user_id:
@@ -401,7 +401,7 @@ def delete_work_group(group_id):
 @jwt_required()
 def get_demands():
     """Listar demandas pendentes do usuário"""
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     demands = Demand.query.filter(
         Demand.user_id == user_id,
         Demand.status != 'concluido'
@@ -412,7 +412,7 @@ def get_demands():
 @jwt_required()
 def create_demand():
     """Criar nova demanda"""
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     data = request.get_json()
     
     if not data or not data.get('work_group_id') or not data.get('location') or not data.get('activity'):
@@ -443,7 +443,7 @@ def create_demand():
 @jwt_required()
 def update_demand(demand_id):
     """Atualizar demanda"""
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     demand = Demand.query.get_or_404(demand_id)
     
     if demand.user_id != user_id:
@@ -473,7 +473,7 @@ def update_demand(demand_id):
 @jwt_required()
 def delete_demand(demand_id):
     """Deletar demanda"""
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     demand = Demand.query.get_or_404(demand_id)
     
     if demand.user_id != user_id:
@@ -488,7 +488,7 @@ def delete_demand(demand_id):
 @jwt_required()
 def update_demand_status(demand_id):
     """Atualizar status de demanda e mover para histórico se concluído"""
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     demand = Demand.query.get_or_404(demand_id)
     
     if demand.user_id != user_id:
@@ -525,7 +525,7 @@ def update_demand_status(demand_id):
 @jwt_required()
 def get_history():
     """Listar histórico de demandas"""
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     location = request.args.get('location', '')
     activity = request.args.get('activity', '')
     
@@ -544,7 +544,7 @@ def get_history():
 @jwt_required()
 def get_whatsapp_text():
     """Gera texto formatado para WhatsApp"""
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     today = date.today().strftime('%d/%m/%Y')
     output = f"_*{today}*_\n"
     
@@ -594,7 +594,7 @@ def get_whatsapp_text():
 @jwt_required()
 def export_data():
     """Exportar todos os dados do usuário"""
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     
     demands = Demand.query.filter_by(user_id=user_id).all()
     history = DemandHistory.query.filter_by(user_id=user_id).all()
@@ -611,7 +611,7 @@ def export_data():
 @jwt_required()
 def import_data():
     """Importar dados do usuário"""
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     data = request.get_json()
     
     try:
