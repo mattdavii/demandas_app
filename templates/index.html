@@ -1015,9 +1015,14 @@
                     loadGroups();
                     loadDemands();
                     checkReminders();
-                } else {
+                } else if (response.status === 401) {
+                    // sessão de fato inválida/expirada
                     token = null;
                     localStorage.removeItem('token');
+                } else {
+                    // erro transitório (banco, rede, etc) — não é problema de autenticação,
+                    // então NÃO desloga o usuário. Mantém a tela como está e loga no console.
+                    console.error('Erro ao verificar sessão (mantendo login):', response.status);
                 }
             } catch (e) {
                 console.error('Erro:', e);
