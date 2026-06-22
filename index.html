@@ -1,0 +1,972 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#3b82f6">
+    <title>Gestor de Demandas - Login</title>
+    <link rel="manifest" href="/manifest.json">
+    <style>
+        :root {
+            --primary: #3b82f6;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --info: #06b6d4;
+            --bg-primary: #ffffff;
+            --bg-secondary: #f3f4f6;
+            --text-primary: #1f2937;
+            --text-secondary: #6b7280;
+            --border: #e5e7eb;
+            --radius: 8px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container { width: 100%; max-width: 1200px; }
+        
+        .auth-container {
+            background: white;
+            border-radius: var(--radius);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+            overflow: hidden;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+        }
+
+        @media (max-width: 768px) {
+            .auth-container { grid-template-columns: 1fr; }
+            .auth-form-side { border-left: none; }
+        }
+
+        .auth-info-side {
+            background: linear-gradient(135deg, var(--primary), #2563eb);
+            color: white;
+            padding: 4rem 2rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .auth-info-side h1 { font-size: 2.5rem; margin-bottom: 1rem; }
+        .auth-info-side p { font-size: 1.1rem; opacity: 0.9; line-height: 1.8; }
+        .features { margin-top: 2rem; }
+        .feature { display: flex; gap: 1rem; margin: 1rem 0; }
+        .feature-icon { font-size: 1.5rem; }
+
+        .auth-form-side {
+            padding: 3rem 2rem;
+            border-left: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .auth-form h2 { margin-bottom: 0.5rem; font-size: 1.5rem; }
+        .auth-form p { color: var(--text-secondary); margin-bottom: 2rem; }
+
+        .form-group { margin-bottom: 1.5rem; }
+        label { display: block; font-size: 0.9rem; font-weight: 500; margin-bottom: 0.5rem; color: var(--text-secondary); }
+        input, select {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-size: 0.95rem;
+            font-family: inherit;
+        }
+        input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
+
+        .btn {
+            width: 100%;
+            padding: 0.75rem;
+            border: none;
+            border-radius: var(--radius);
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:hover { background: #2563eb; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(59,130,246,0.3); }
+
+        .btn-secondary { background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border); }
+        .btn-secondary:hover { background: var(--border); }
+
+        .toggle-auth { text-align: center; margin-top: 1.5rem; }
+        .toggle-auth p { margin-bottom: 0.5rem; }
+        .toggle-link { color: var(--primary); cursor: pointer; font-weight: 600; }
+        .toggle-link:hover { text-decoration: underline; }
+
+        .form-hide { display: none; }
+        .form-show { display: block; }
+
+        .alert {
+            padding: 1rem;
+            border-radius: var(--radius);
+            margin-bottom: 1.5rem;
+            display: none;
+        }
+
+        .alert.show { display: block; }
+        .alert-success { background: rgba(16,185,129,0.1); color: #065f46; border-left: 4px solid var(--success); }
+        .alert-danger { background: rgba(239,68,68,0.1); color: #7f1d1d; border-left: 4px solid var(--danger); }
+
+        .app-container { display: none; padding: 1.5rem; }
+        .app-container.show { display: block; }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .header h1 { font-size: 1.75rem; }
+        .user-info { text-align: right; }
+        .user-info p { margin: 0.25rem 0; }
+        .logout-btn { background: var(--danger); color: white; padding: 0.5rem 1rem; border: none; border-radius: 4px; cursor: pointer; }
+
+        .tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; border-bottom: 2px solid var(--border); }
+        .tab-btn { 
+            padding: 0.75rem 1.25rem;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            font-weight: 500;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+        }
+        .tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+        @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+
+        .card {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+
+        .card h3 { margin-bottom: 1rem; color: var(--text-primary); }
+
+        .groups-list { display: grid; gap: 1rem; }
+        .group-item {
+            background: var(--bg-secondary);
+            padding: 1rem;
+            border-radius: var(--radius);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .group-info { flex: 1; }
+        .group-name { font-weight: 600; }
+        .group-emoji { font-size: 1.5rem; margin-right: 0.5rem; }
+        .group-actions { display: flex; gap: 0.5rem; }
+        .btn-sm { padding: 0.4rem 0.75rem; font-size: 0.85rem; }
+        .btn-edit { background: var(--primary); color: white; border: none; border-radius: 4px; cursor: pointer; }
+        .btn-delete { background: var(--danger); color: white; border: none; border-radius: 4px; cursor: pointer; }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.4);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.show { display: flex; }
+        .modal-content { background: white; padding: 2rem; border-radius: var(--radius); max-width: 500px; width: 90%; }
+        .modal-header { font-size: 1.5rem; font-weight: 600; margin-bottom: 1.5rem; }
+        .close-modal { float: right; font-size: 1.5rem; cursor: pointer; }
+
+        .demands-list { display: grid; gap: 1rem; }
+        .demand-card {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+
+        .demand-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 1rem;
+        }
+
+        .demand-title { font-weight: 600; }
+        .demand-location { font-size: 0.85rem; color: var(--text-secondary); text-transform: uppercase; }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .status-nao-iniciado { background: rgba(107,114,128,0.1); color: #374151; }
+        .status-andamento { background: rgba(245,158,11,0.1); color: #b45309; }
+        .status-aguardando { background: rgba(6,182,212,0.1); color: #0891b2; }
+        .status-aprovacao { background: rgba(239,68,68,0.1); color: #991b1b; }
+        .status-concluido { background: rgba(16,185,129,0.1); color: #065f46; }
+    </style>
+</head>
+<body>
+    <!-- SEÇÃO DE AUTENTICAÇÃO -->
+    <div class="container" id="authContainer">
+        <div class="auth-container">
+            <!-- LADO INFORMATIVO -->
+            <div class="auth-info-side">
+                <h1>📊 Gestor de Demandas</h1>
+                <p>Organize, acompanhe e conclua suas atividades de forma eficiente.</p>
+                
+                <div class="features">
+                    <div class="feature">
+                        <div class="feature-icon">👥</div>
+                        <div>Grupos personalizáveis</div>
+                    </div>
+                    <div class="feature">
+                        <div class="feature-icon">📱</div>
+                        <div>Funciona em qualquer dispositivo</div>
+                    </div>
+                    <div class="feature">
+                        <div class="feature-icon">🔐</div>
+                        <div>Seus dados estão seguros</div>
+                    </div>
+                    <div class="feature">
+                        <div class="feature-icon">💾</div>
+                        <div>Sincronização automática</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- LADO DE FORMULÁRIO -->
+            <div class="auth-form-side">
+                <!-- FORMULÁRIO DE LOGIN -->
+                <div id="loginForm" class="auth-form form-show">
+                    <h2>Bem-vindo de volta</h2>
+                    <p>Entre com sua conta</p>
+                    
+                    <div id="loginAlert" class="alert"></div>
+                    
+                    <div class="form-group">
+                        <label>Usuário ou Email</label>
+                        <input type="text" id="loginUsername" placeholder="seu_usuario">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Senha</label>
+                        <input type="password" id="loginPassword" placeholder="••••••••">
+                    </div>
+                    
+                    <button class="btn btn-primary" onclick="doLogin()">Entrar</button>
+                    
+                    <div class="toggle-auth">
+                        <p>Não tem conta?</p>
+                        <span class="toggle-link" onclick="toggleAuth()">Criar conta aqui</span>
+                    </div>
+
+                    <div class="toggle-auth" style="margin-top: 2rem; border-top: 1px solid var(--border); padding-top: 1.5rem;">
+                        <p style="margin-bottom: 1rem;">Esqueceu a senha?</p>
+                        <span class="toggle-link" onclick="showResetForm()">Recuperar senha</span>
+                    </div>
+                </div>
+
+                <!-- FORMULÁRIO DE REGISTRO -->
+                <div id="registerForm" class="auth-form form-hide">
+                    <h2>Criar conta</h2>
+                    <p>Comece a gerenciar suas demandas</p>
+                    
+                    <div id="registerAlert" class="alert"></div>
+                    
+                    <div class="form-group">
+                        <label>Nome Completo</label>
+                        <input type="text" id="registerFullName" placeholder="Seu nome">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Usuário</label>
+                        <input type="text" id="registerUsername" placeholder="seu_usuario">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="email" id="registerEmail" placeholder="seu@email.com">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Senha</label>
+                        <input type="password" id="registerPassword" placeholder="••••••••">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Confirmar Senha</label>
+                        <input type="password" id="registerPasswordConfirm" placeholder="••••••••">
+                    </div>
+                    
+                    <button class="btn btn-primary" onclick="doRegister()">Criar Conta</button>
+                    
+                    <div class="toggle-auth">
+                        <p>Já tem conta?</p>
+                        <span class="toggle-link" onclick="toggleAuth()">Entrar aqui</span>
+                    </div>
+                </div>
+
+                <!-- FORMULÁRIO DE RESET -->
+                <div id="resetForm" class="auth-form form-hide">
+                    <h2>Recuperar Senha</h2>
+                    <p>Digite seu email para receber um link</p>
+                    
+                    <div id="resetAlert" class="alert"></div>
+                    
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="email" id="resetEmail" placeholder="seu@email.com">
+                    </div>
+                    
+                    <button class="btn btn-primary" onclick="doReset()">Enviar Link</button>
+                    
+                    <div class="toggle-auth">
+                        <span class="toggle-link" onclick="showLoginForm()">← Voltar ao login</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SEÇÃO DO APP PRINCIPAL -->
+    <div class="container app-container" id="appContainer">
+        <div class="header">
+            <div>
+                <h1>📊 Gestor de Demandas</h1>
+            </div>
+            <div class="user-info">
+                <p>Olá, <strong id="userName">Usuário</strong></p>
+                <button class="logout-btn" onclick="doLogout()">Sair</button>
+            </div>
+        </div>
+
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('demands')">📋 Demandas</button>
+            <button class="tab-btn" onclick="switchTab('groups')">👥 Grupos</button>
+            <button class="tab-btn" onclick="switchTab('settings')">⚙️ Configurações</button>
+        </div>
+
+        <!-- TAB: DEMANDAS -->
+        <div id="tab-demands" class="tab-content active">
+            <div class="grid">
+                <div class="card">
+                    <h3>➕ Nova Demanda</h3>
+                    <div class="form-group">
+                        <label>Grupo</label>
+                        <select id="newGroupId">
+                            <option value="">Selecione um grupo</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Local</label>
+                        <input type="text" id="newLocation" placeholder="Ex: São Paulo">
+                    </div>
+                    <div class="form-group">
+                        <label>Atividade</label>
+                        <input type="text" id="newActivity" placeholder="Descrição da atividade">
+                    </div>
+                    <div class="form-group">
+                        <label>Contexto (opcional)</label>
+                        <input type="text" id="newContext" placeholder="Detalhes adicionais">
+                    </div>
+                    <div class="form-group">
+                        <label>Prioridade</label>
+                        <select id="newPriority">
+                            <option value="baixa">Baixa</option>
+                            <option value="media" selected>Média</option>
+                            <option value="alta">Alta</option>
+                            <option value="urgente">Urgente</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary" onclick="createDemand()">Criar Demanda</button>
+                </div>
+
+                <div class="card">
+                    <h3>📊 Resumo</h3>
+                    <div id="demandSummary" style="font-size: 1.1rem; line-height: 2;">
+                        <div>Carregando...</div>
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-top: 2rem;">
+                <h3 style="margin-bottom: 1rem;">📋 Minhas Demandas</h3>
+                <div id="demandsList" class="demands-list">
+                    <div>Carregando...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB: GRUPOS -->
+        <div id="tab-groups" class="tab-content">
+            <div class="card">
+                <h3>➕ Novo Grupo</h3>
+                <div class="form-group">
+                    <label>Nome do Grupo</label>
+                    <input type="text" id="newGroupName" placeholder="Ex: BACKOFFICE">
+                </div>
+                <div class="form-group">
+                    <label>Emoji</label>
+                    <input type="text" id="newGroupEmoji" placeholder="Ex: 👨🏻‍💻" maxlength="2">
+                </div>
+                <div class="form-group">
+                    <label>Cor</label>
+                    <input type="color" id="newGroupColor" value="#3b82f6">
+                </div>
+                <div class="form-group">
+                    <label>Descrição (opcional)</label>
+                    <input type="text" id="newGroupDescription" placeholder="Descrição do grupo">
+                </div>
+                <button class="btn btn-primary" onclick="createGroup()">Criar Grupo</button>
+            </div>
+
+            <div style="margin-top: 2rem;">
+                <h3 style="margin-bottom: 1rem;">👥 Seus Grupos</h3>
+                <div id="groupsList" class="groups-list">
+                    <div>Carregando...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB: CONFIGURAÇÕES -->
+        <div id="tab-settings" class="tab-content">
+            <div class="card">
+                <h3>👤 Meus Dados</h3>
+                <p id="userEmail" style="margin-bottom: 1rem;"></p>
+                <button class="btn btn-secondary" onclick="downloadBackup()">📥 Fazer Backup</button>
+                <button class="btn btn-secondary" onclick="showUploadBackup()" style="margin-left: 0.5rem;">📤 Restaurar Backup</button>
+            </div>
+
+            <div class="card" style="margin-top: 1.5rem;">
+                <h3>🔐 Segurança</h3>
+                <button class="btn btn-secondary" onclick="changePassword()">Alterar Senha</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL PARA EDITAR GRUPO -->
+    <div id="editGroupModal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" onclick="closeEditGroup()">&times;</span>
+            <div class="modal-header">Editar Grupo</div>
+            <div class="form-group">
+                <label>Nome</label>
+                <input type="text" id="editGroupName">
+            </div>
+            <div class="form-group">
+                <label>Emoji</label>
+                <input type="text" id="editGroupEmoji" maxlength="2">
+            </div>
+            <div class="form-group">
+                <label>Cor</label>
+                <input type="color" id="editGroupColor">
+            </div>
+            <button class="btn btn-primary" onclick="saveGroupEdit()">Salvar</button>
+            <button class="btn btn-secondary" onclick="closeEditGroup()" style="margin-left: 0.5rem;">Cancelar</button>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = '/api';
+        let token = localStorage.getItem('token');
+        let currentUser = null;
+        let currentGroups = [];
+        let currentDemands = [];
+        let editingGroupId = null;
+
+        // ============= INICIALIZAÇÃO =============
+        document.addEventListener('DOMContentLoaded', () => {
+            if (token) {
+                showApp();
+            }
+        });
+
+        // ============= AUTENTICAÇÃO =============
+        function toggleAuth() {
+            document.getElementById('loginForm').classList.toggle('form-hide');
+            document.getElementById('registerForm').classList.toggle('form-hide');
+            document.getElementById('loginForm').classList.toggle('form-show');
+            document.getElementById('registerForm').classList.toggle('form-show');
+        }
+
+        function showResetForm() {
+            document.getElementById('loginForm').classList.remove('form-show');
+            document.getElementById('loginForm').classList.add('form-hide');
+            document.getElementById('resetForm').classList.remove('form-hide');
+            document.getElementById('resetForm').classList.add('form-show');
+        }
+
+        function showLoginForm() {
+            document.getElementById('resetForm').classList.remove('form-show');
+            document.getElementById('resetForm').classList.add('form-hide');
+            document.getElementById('loginForm').classList.remove('form-hide');
+            document.getElementById('loginForm').classList.add('form-show');
+        }
+
+        async function doLogin() {
+            const username = document.getElementById('loginUsername').value;
+            const password = document.getElementById('loginPassword').value;
+
+            if (!username || !password) {
+                showAlert('loginAlert', 'Preencha todos os campos', 'danger');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    token = data.access_token;
+                    currentUser = data.user;
+                    localStorage.setItem('token', token);
+                    showApp();
+                } else {
+                    showAlert('loginAlert', data.error || 'Erro ao fazer login', 'danger');
+                }
+            } catch (e) {
+                showAlert('loginAlert', 'Erro de conexão', 'danger');
+            }
+        }
+
+        async function doRegister() {
+            const fullName = document.getElementById('registerFullName').value;
+            const username = document.getElementById('registerUsername').value;
+            const email = document.getElementById('registerEmail').value;
+            const password = document.getElementById('registerPassword').value;
+            const passwordConfirm = document.getElementById('registerPasswordConfirm').value;
+
+            if (!fullName || !username || !email || !password || !passwordConfirm) {
+                showAlert('registerAlert', 'Preencha todos os campos', 'danger');
+                return;
+            }
+
+            if (password !== passwordConfirm) {
+                showAlert('registerAlert', 'As senhas não coincidem', 'danger');
+                return;
+            }
+
+            if (password.length < 6) {
+                showAlert('registerAlert', 'A senha deve ter pelo menos 6 caracteres', 'danger');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/auth/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, email, password, full_name: fullName })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    token = data.access_token;
+                    currentUser = data.user;
+                    localStorage.setItem('token', token);
+                    showApp();
+                } else {
+                    showAlert('registerAlert', data.error || 'Erro ao criar conta', 'danger');
+                }
+            } catch (e) {
+                showAlert('registerAlert', 'Erro de conexão', 'danger');
+            }
+        }
+
+        async function doReset() {
+            const email = document.getElementById('resetEmail').value;
+
+            if (!email) {
+                showAlert('resetAlert', 'Digite seu email', 'danger');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/auth/request-reset`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
+                });
+
+                const data = await response.json();
+                showAlert('resetAlert', data.message || 'Link enviado para seu email', response.ok ? 'success' : 'danger');
+                
+                if (response.ok) {
+                    setTimeout(() => showLoginForm(), 2000);
+                }
+            } catch (e) {
+                showAlert('resetAlert', 'Erro de conexão', 'danger');
+            }
+        }
+
+        function doLogout() {
+            token = null;
+            currentUser = null;
+            localStorage.removeItem('token');
+            document.getElementById('authContainer').style.display = 'flex';
+            document.getElementById('appContainer').classList.remove('show');
+            document.getElementById('loginUsername').value = '';
+            document.getElementById('loginPassword').value = '';
+        }
+
+        async function showApp() {
+            try {
+                const response = await fetch(`${API_URL}/auth/me`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (response.ok) {
+                    currentUser = await response.json();
+                    document.getElementById('userName').textContent = currentUser.full_name || currentUser.username;
+                    document.getElementById('userEmail').textContent = `Email: ${currentUser.email}`;
+                    
+                    document.getElementById('authContainer').style.display = 'none';
+                    document.getElementById('appContainer').classList.add('show');
+                    
+                    loadGroups();
+                    loadDemands();
+                } else {
+                    token = null;
+                    localStorage.removeItem('token');
+                }
+            } catch (e) {
+                console.error('Erro:', e);
+            }
+        }
+
+        // ============= GRUPOS =============
+        async function loadGroups() {
+            try {
+                const response = await fetch(`${API_URL}/work-groups`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                currentGroups = await response.json();
+                renderGroups();
+                updateGroupSelect();
+            } catch (e) {
+                console.error('Erro ao carregar grupos:', e);
+            }
+        }
+
+        function renderGroups() {
+            const container = document.getElementById('groupsList');
+            
+            if (currentGroups.length === 0) {
+                container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Nenhum grupo criado</div>';
+                return;
+            }
+
+            container.innerHTML = currentGroups.map(g => `
+                <div class="group-item">
+                    <div class="group-info">
+                        <div class="group-name">${g.emoji} ${g.name}</div>
+                        <div style="font-size: 0.85rem; color: var(--text-secondary);">${g.demandsCount} demandas ativas</div>
+                    </div>
+                    <div class="group-actions">
+                        <button class="btn-edit btn-sm" onclick="editGroup(${g.id}, '${g.name}', '${g.emoji}', '${g.color}')">Editar</button>
+                        <button class="btn-delete btn-sm" onclick="deleteGroup(${g.id})">Deletar</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function updateGroupSelect() {
+            const select = document.getElementById('newGroupId');
+            select.innerHTML = '<option value="">Selecione um grupo</option>' + 
+                currentGroups.map(g => `<option value="${g.id}">${g.emoji} ${g.name}</option>`).join('');
+        }
+
+        async function createGroup() {
+            const name = document.getElementById('newGroupName').value;
+            const emoji = document.getElementById('newGroupEmoji').value;
+            const color = document.getElementById('newGroupColor').value;
+            const description = document.getElementById('newGroupDescription').value;
+
+            if (!name) {
+                alert('Digite o nome do grupo');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/work-groups`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ name, emoji, color, description })
+                });
+
+                if (response.ok) {
+                    document.getElementById('newGroupName').value = '';
+                    document.getElementById('newGroupEmoji').value = '';
+                    document.getElementById('newGroupColor').value = '#3b82f6';
+                    document.getElementById('newGroupDescription').value = '';
+                    loadGroups();
+                }
+            } catch (e) {
+                console.error('Erro:', e);
+            }
+        }
+
+        function editGroup(id, name, emoji, color) {
+            editingGroupId = id;
+            document.getElementById('editGroupName').value = name;
+            document.getElementById('editGroupEmoji').value = emoji;
+            document.getElementById('editGroupColor').value = color;
+            document.getElementById('editGroupModal').classList.add('show');
+        }
+
+        async function saveGroupEdit() {
+            const name = document.getElementById('editGroupName').value;
+            const emoji = document.getElementById('editGroupEmoji').value;
+            const color = document.getElementById('editGroupColor').value;
+
+            try {
+                const response = await fetch(`${API_URL}/work-groups/${editingGroupId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ name, emoji, color })
+                });
+
+                if (response.ok) {
+                    closeEditGroup();
+                    loadGroups();
+                }
+            } catch (e) {
+                console.error('Erro:', e);
+            }
+        }
+
+        function closeEditGroup() {
+            document.getElementById('editGroupModal').classList.remove('show');
+            editingGroupId = null;
+        }
+
+        async function deleteGroup(id) {
+            if (confirm('Tem certeza que deseja deletar este grupo?')) {
+                try {
+                    await fetch(`${API_URL}/work-groups/${id}`, {
+                        method: 'DELETE',
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    loadGroups();
+                } catch (e) {
+                    console.error('Erro:', e);
+                }
+            }
+        }
+
+        // ============= DEMANDAS =============
+        async function loadDemands() {
+            try {
+                const response = await fetch(`${API_URL}/demands`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                currentDemands = await response.json();
+                renderDemands();
+                updateSummary();
+            } catch (e) {
+                console.error('Erro ao carregar demandas:', e);
+            }
+        }
+
+        function renderDemands() {
+            const container = document.getElementById('demandsList');
+            
+            if (currentDemands.length === 0) {
+                container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Nenhuma demanda pendente</div>';
+                return;
+            }
+
+            container.innerHTML = currentDemands.map(d => `
+                <div class="demand-card">
+                    <div class="demand-header">
+                        <div>
+                            <div class="demand-location">${d.workGroupName}</div>
+                            <div class="demand-title">${d.location} - ${d.activity}</div>
+                        </div>
+                        <span class="status-badge status-${d.status}">${getStatusEmoji(d.status)} ${d.status}</span>
+                    </div>
+                    ${d.context ? `<p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1rem;">📌 ${d.context}</p>` : ''}
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button class="btn btn-sm btn-secondary" onclick="completeDemand(${d.id})">✅ Concluir</button>
+                        <button class="btn btn-sm btn-secondary" onclick="editDemand(${d.id})">✏️ Editar</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function updateSummary() {
+            const summary = document.getElementById('demandSummary');
+            const total = currentDemands.length;
+            const byStatus = {};
+            
+            currentDemands.forEach(d => {
+                byStatus[d.status] = (byStatus[d.status] || 0) + 1;
+            });
+
+            summary.innerHTML = `
+                <div>📊 Total: <strong>${total}</strong> demandas</div>
+                ${byStatus['nao-iniciado'] ? `<div>⚪ Não iniciadas: ${byStatus['nao-iniciado']}</div>` : ''}
+                ${byStatus['andamento'] ? `<div>🟡 Em andamento: ${byStatus['andamento']}</div>` : ''}
+                ${byStatus['aguardando'] ? `<div>🔵 Aguardando: ${byStatus['aguardando']}</div>` : ''}
+                ${byStatus['aprovacao'] ? `<div>🟣 Aguardando aprovação: ${byStatus['aprovacao']}</div>` : ''}
+            `;
+        }
+
+        async function createDemand() {
+            const work_group_id = document.getElementById('newGroupId').value;
+            const location = document.getElementById('newLocation').value;
+            const activity = document.getElementById('newActivity').value;
+            const context = document.getElementById('newContext').value;
+            const priority = document.getElementById('newPriority').value;
+
+            if (!work_group_id || !location || !activity) {
+                alert('Preencha os campos obrigatórios');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/demands`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        work_group_id: parseInt(work_group_id),
+                        location,
+                        activity,
+                        context,
+                        priority,
+                        status: 'nao-iniciado'
+                    })
+                });
+
+                if (response.ok) {
+                    document.getElementById('newGroupId').value = '';
+                    document.getElementById('newLocation').value = '';
+                    document.getElementById('newActivity').value = '';
+                    document.getElementById('newContext').value = '';
+                    loadDemands();
+                }
+            } catch (e) {
+                console.error('Erro:', e);
+            }
+        }
+
+        async function completeDemand(id) {
+            try {
+                const response = await fetch(`${API_URL}/demands/${id}/status`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ status: 'concluido' })
+                });
+
+                if (response.ok) {
+                    loadDemands();
+                }
+            } catch (e) {
+                console.error('Erro:', e);
+            }
+        }
+
+        function getStatusEmoji(status) {
+            const map = {
+                'nao-iniciado': '⚪',
+                'andamento': '🟡',
+                'aguardando': '🔵',
+                'aprovacao': '🟣',
+                'concluido': '🟢'
+            };
+            return map[status] || '⚪';
+        }
+
+        // ============= UTILITÁRIOS =============
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+            document.getElementById('tab-' + tab).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        function showAlert(id, message, type) {
+            const alert = document.getElementById(id);
+            alert.textContent = message;
+            alert.className = `alert show alert-${type}`;
+            setTimeout(() => {
+                alert.classList.remove('show');
+            }, 4000);
+        }
+
+        async function downloadBackup() {
+            try {
+                const response = await fetch(`${API_URL}/export`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                const data = await response.json();
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `backup_${new Date().toISOString().split('T')[0]}.json`;
+                a.click();
+            } catch (e) {
+                console.error('Erro:', e);
+            }
+        }
+
+        function changePassword() {
+            alert('Implementar alteração de senha');
+        }
+    </script>
+</body>
+</html>
