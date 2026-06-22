@@ -368,6 +368,46 @@
 
         .status-concluido { background: rgba(61,220,132,0.12); color: var(--led-green); }
         .status-concluido::before { background: var(--led-green); box-shadow: 0 0 6px var(--led-green); }
+
+        .kanban-board {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+        }
+        @media (max-width: 1100px) { .kanban-board { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 600px) { .kanban-board { grid-template-columns: 1fr; } }
+
+        .kanban-column {
+            background: var(--panel-raised);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 0.85rem;
+            min-height: 100px;
+        }
+        .kanban-column-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 700;
+            color: var(--text-secondary);
+            padding-bottom: 0.6rem;
+            margin-bottom: 0.6rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .kanban-led-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .kanban-column-count {
+            margin-left: auto;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 0.1rem 0.5rem;
+            font-size: 0.7rem;
+            color: var(--text-primary);
+        }
+        .kanban-empty { text-align: center; color: var(--led-gray); font-size: 0.72rem; padding: 1rem 0; }
     </style>
 </head>
 <body>
@@ -508,6 +548,7 @@
         <div class="tabs">
             <button class="tab-btn active" onclick="switchTab('demands')">📋 Demandas</button>
             <button class="tab-btn" onclick="switchTab('groups')">👥 Grupos</button>
+            <button class="tab-btn" onclick="switchTab('history')">📅 Histórico</button>
             <button class="tab-btn" onclick="switchTab('settings')">⚙️ Configurações</button>
         </div>
 
@@ -593,6 +634,28 @@
                 <div id="groupsList" class="groups-list">
                     <div>Carregando...</div>
                 </div>
+            </div>
+        </div>
+
+        <!-- TAB: HISTÓRICO -->
+        <div id="tab-history" class="tab-content">
+            <div class="card" style="margin-bottom: 1.5rem;">
+                <h3>🔍 Filtrar Histórico</h3>
+                <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                    <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 180px;">
+                        <label>Local</label>
+                        <input type="text" id="historyFilterLocation" placeholder="Filtrar por local">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 180px;">
+                        <label>Atividade</label>
+                        <input type="text" id="historyFilterActivity" placeholder="Filtrar por atividade">
+                    </div>
+                </div>
+                <button class="btn btn-primary" style="margin-top: 1rem; width: auto;" onclick="loadHistory()">Buscar</button>
+            </div>
+
+            <div id="historyList">
+                <div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Carregando...</div>
             </div>
         </div>
 
@@ -1042,30 +1105,48 @@
             }
         }
 
+        const STATUS_COLUMNS = [
+            { key: 'nao-iniciado', label: 'Não Iniciado', color: 'var(--led-gray)' },
+            { key: 'andamento', label: 'Em Andamento', color: 'var(--amber)' },
+            { key: 'aguardando', label: 'Aguardando', color: 'var(--led-blue)' },
+            { key: 'aprovacao', label: 'Aprovação', color: 'var(--led-purple)' }
+        ];
+
         function renderDemands() {
             const container = document.getElementById('demandsList');
-            
+
             if (currentDemands.length === 0) {
                 container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Nenhuma demanda pendente</div>';
                 return;
             }
 
-            container.innerHTML = currentDemands.map(d => `
-                <div class="demand-card">
-                    <div class="demand-header">
-                        <div>
-                            <div class="demand-location">${d.workGroupName}</div>
-                            <div class="demand-title">${d.location} - ${d.activity}</div>
+            container.innerHTML = '<div class="kanban-board">' + STATUS_COLUMNS.map(col => {
+                const items = currentDemands.filter(d => d.status === col.key);
+                return `
+                    <div class="kanban-column">
+                        <div class="kanban-column-header">
+                            <span class="kanban-led-dot" style="background:${col.color}; box-shadow:0 0 6px ${col.color};"></span>
+                            <span>${col.label}</span>
+                            <span class="kanban-column-count">${items.length}</span>
                         </div>
-                        <span class="status-badge status-${d.status}">${getStatusEmoji(d.status)} ${d.status}</span>
+                        ${items.length === 0 ? '<div class="kanban-empty">Vazio</div>' : items.map(d => `
+                            <div class="demand-card" style="margin-bottom: 0.75rem; border-left-color: ${col.color};">
+                                <div class="demand-header">
+                                    <div>
+                                        <div class="demand-location">${d.workGroupName || ''}</div>
+                                        <div class="demand-title">${d.location} - ${d.activity}</div>
+                                    </div>
+                                </div>
+                                ${d.context ? `<p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem;">📌 ${d.context}</p>` : ''}
+                                <div style="display: flex; gap: 0.5rem;">
+                                    <button class="btn btn-sm btn-secondary" onclick="completeDemand(${d.id})">✅ Concluir</button>
+                                    <button class="btn btn-sm btn-secondary" onclick="editDemand(${d.id})">✏️ Editar</button>
+                                </div>
+                            </div>
+                        `).join('')}
                     </div>
-                    ${d.context ? `<p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1rem;">📌 ${d.context}</p>` : ''}
-                    <div style="display: flex; gap: 0.5rem;">
-                        <button class="btn btn-sm btn-secondary" onclick="completeDemand(${d.id})">✅ Concluir</button>
-                        <button class="btn btn-sm btn-secondary" onclick="editDemand(${d.id})">✏️ Editar</button>
-                    </div>
-                </div>
-            `).join('');
+                `;
+            }).join('') + '</div>';
         }
 
         function updateSummary() {
@@ -1225,12 +1306,91 @@
             return map[status] || '⚪';
         }
 
+        // ============= HISTÓRICO =============
+        async function loadHistory() {
+            const container = document.getElementById('historyList');
+            container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Carregando...</div>';
+
+            const location = document.getElementById('historyFilterLocation').value;
+            const activity = document.getElementById('historyFilterActivity').value;
+            const params = new URLSearchParams();
+            if (location) params.append('location', location);
+            if (activity) params.append('activity', activity);
+
+            try {
+                const response = await fetch(`${API_URL}/history?${params.toString()}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const history = await response.json();
+                renderHistory(history);
+            } catch (e) {
+                console.error('Erro:', e);
+                container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--led-red);">Erro ao carregar histórico</div>';
+            }
+        }
+
+        function renderHistory(history) {
+            const container = document.getElementById('historyList');
+
+            if (!history || history.length === 0) {
+                container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Nenhum registro encontrado</div>';
+                return;
+            }
+
+            const groups = {};
+            history.forEach(h => {
+                const day = h.statusChangeDate || 'sem-data';
+                if (!groups[day]) groups[day] = [];
+                groups[day].push(h);
+            });
+
+            const days = Object.keys(groups).sort((a, b) => b.localeCompare(a));
+
+            container.innerHTML = days.map(day => {
+                const items = groups[day];
+                return `
+                    <div class="card" style="margin-bottom: 1rem;">
+                        <h3>📅 ${formatDateBR(day)} <span style="color: var(--text-secondary); font-weight: 400; text-transform: none; letter-spacing: 0;">(${items.length})</span></h3>
+                        <div style="display: grid; gap: 0.75rem;">
+                            ${items.map(h => `
+                                <div class="demand-card" style="border-left-color: var(--led-green); margin-bottom: 0;">
+                                    <div class="demand-header">
+                                        <div>
+                                            <div class="demand-location">${getGroupLabel(h.workGroupId)}</div>
+                                            <div class="demand-title">${h.location} - ${h.activity}</div>
+                                        </div>
+                                        <span class="status-badge status-${h.status}">${getStatusEmoji(h.status)} ${h.status}</span>
+                                    </div>
+                                    ${h.context ? `<p style="font-size: 0.8rem; color: var(--text-secondary);">📌 ${h.context}</p>` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function formatDateBR(isoDate) {
+            if (!isoDate || isoDate === 'sem-data') return 'Sem data';
+            const [y, m, d] = isoDate.split('-');
+            return `${d}/${m}/${y}`;
+        }
+
+        function getGroupLabel(groupId) {
+            const group = currentGroups.find(g => g.id === groupId);
+            return group ? `${group.emoji || ''} ${group.name}`.trim() : 'Grupo';
+        }
+
         // ============= UTILITÁRIOS =============
         function switchTab(tab) {
             document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
             document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
             document.getElementById('tab-' + tab).classList.add('active');
             event.target.classList.add('active');
+
+            if (tab === 'history') {
+                loadHistory();
+            }
         }
 
         function showAlert(id, message, type) {
