@@ -6,8 +6,8 @@
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "theme_color": "#3b82f6",
-  "background_color": "#ffffff",
+  "theme_color": "#0b0d0f",
+  "background_color": "#0b0d0f",
   "icons": [
     {
       "src": "/static/icon-192.png",
@@ -22,24 +22,10 @@
       "purpose": "any"
     },
     {
-      "src": "/static/icon-192.png",
-      "sizes": "192x192",
+      "src": "/static/icon-512-maskable.png",
+      "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
-    }
-  ],
-  "screenshots": [
-    {
-      "src": "/static/screenshot-1.png",
-      "sizes": "540x720",
-      "type": "image/png",
-      "form_factor": "narrow"
-    },
-    {
-      "src": "/static/screenshot-2.png",
-      "sizes": "1280x720",
-      "type": "image/png",
-      "form_factor": "wide"
     }
   ],
   "categories": ["productivity"],
@@ -48,14 +34,7 @@
       "name": "Nova Demanda",
       "short_name": "Nova",
       "description": "Adicionar nova demanda",
-      "url": "/?tab=today",
-      "icons": [{ "src": "/static/icon-192.png", "sizes": "192x192" }]
-    },
-    {
-      "name": "Pendências",
-      "short_name": "Pendências",
-      "description": "Ver demandas pendentes",
-      "url": "/?tab=pending",
+      "url": "/?tab=demands",
       "icons": [{ "src": "/static/icon-192.png", "sizes": "192x192" }]
     }
   ],
