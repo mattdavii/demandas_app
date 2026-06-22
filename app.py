@@ -9,6 +9,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, date, timedelta
 from dotenv import load_dotenv
 from functools import wraps
+from sqlalchemy import text
 
 load_dotenv()
 
@@ -126,6 +127,8 @@ class Demand(db.Model):
     assigned_to = db.Column(db.String(100))
     created_date = db.Column(db.Date, default=date.today)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+    reminder_at = db.Column(db.DateTime, nullable=True)
+    reminder_sent = db.Column(db.Boolean, default=False)
     
     def to_dict(self):
         return {
@@ -139,7 +142,8 @@ class Demand(db.Model):
             'priority': self.priority,
             'dueDate': self.due_date.isoformat() if self.due_date else None,
             'assignedTo': self.assigned_to,
-            'createdDate': self.created_date.isoformat() if self.created_date else None
+            'createdDate': self.created_date.isoformat() if self.created_date else None,
+            'reminderAt': self.reminder_at.isoformat() if self.reminder_at else None
         }
 
 class DemandHistory(db.Model):
@@ -171,6 +175,15 @@ class DemandHistory(db.Model):
 # ============= CRIAR TABELAS NA INICIALIZAÇÃO =============
 with app.app_context():
     db.create_all()
+    # Migração leve para colunas novas em bancos já existentes
+    # (db.create_all() só cria tabelas que não existem, não altera as existentes)
+    try:
+        db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS reminder_at TIMESTAMP"))
+        db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN DEFAULT FALSE"))
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"Aviso: migração de colunas de lembrete não aplicada (provável SQLite local, ignorar): {e}")
 
 # ============= ROTAS DE PÁGINA =============
 @app.route('/')
@@ -472,7 +485,8 @@ def create_demand():
         status=data.get('status', 'nao-iniciado'),
         priority=data.get('priority', 'media'),
         due_date=datetime.strptime(data['due_date'], '%Y-%m-%d').date() if data.get('due_date') else None,
-        assigned_to=data.get('assigned_to', '')
+        assigned_to=data.get('assigned_to', ''),
+        reminder_at=datetime.strptime(data['reminder_at'], '%Y-%m-%dT%H:%M') if data.get('reminder_at') else None
     )
     
     db.session.add(demand)
@@ -506,6 +520,13 @@ def update_demand(demand_id):
         demand.due_date = datetime.strptime(data['due_date'], '%Y-%m-%d').date() if data['due_date'] else None
     if 'assigned_to' in data:
         demand.assigned_to = data['assigned_to']
+    if 'reminder_at' in data:
+        if data['reminder_at']:
+            demand.reminder_at = datetime.strptime(data['reminder_at'], '%Y-%m-%dT%H:%M')
+            demand.reminder_sent = False  # rearma o lembrete se a data/hora mudou
+        else:
+            demand.reminder_at = None
+            demand.reminder_sent = False
     
     db.session.commit()
     return jsonify(demand.to_dict()), 200
@@ -560,6 +581,54 @@ def update_demand_status(demand_id):
     
     db.session.commit()
     return jsonify({'message': 'Status atualizado'}), 200
+
+# ============= ROTAS DE LEMBRETE =============
+@app.route('/api/reminders/check', methods=['POST'])
+@jwt_required()
+def check_reminders():
+    """Verifica lembretes vencidos do usuário, envia email e marca como enviados.
+    Chamada pelo frontend ao abrir o app (verificação best-effort, sem cron)."""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+
+    if not user:
+        return jsonify({'error': 'Usuário não encontrado'}), 404
+
+    now = datetime.now()
+    due_demands = Demand.query.filter(
+        Demand.user_id == user_id,
+        Demand.reminder_at.isnot(None),
+        Demand.reminder_at <= now,
+        Demand.reminder_sent == False,
+        Demand.status != 'concluido'
+    ).all()
+
+    triggered = []
+    for demand in due_demands:
+        if app.config['MAIL_USERNAME']:
+            try:
+                msg = Message(
+                    f'Lembrete: {demand.activity}',
+                    recipients=[user.email],
+                    html=f'''
+                    <p>Olá {user.full_name or user.username},</p>
+                    <p>Lembrete da demanda:</p>
+                    <p><strong>{demand.location}:</strong> {demand.activity}</p>
+                    {f"<p>{demand.context}</p>" if demand.context else ""}
+                    <p>Status atual: {demand.status}</p>
+                    '''
+                )
+                mail.send(msg)
+            except Exception as e:
+                print(f'Erro ao enviar email de lembrete: {e}')
+
+        demand.reminder_sent = True
+        triggered.append(demand.to_dict())
+
+    if due_demands:
+        db.session.commit()
+
+    return jsonify({'triggered': triggered}), 200
 
 # ============= ROTAS DE HISTÓRICO =============
 @app.route('/api/history', methods=['GET'])
