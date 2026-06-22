@@ -87,9 +87,9 @@ class WorkGroup(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    name = db.Column(db.String(100), nullable=False)  # Ex: BACKOFFICE, ATENDIMENTOS
-    emoji = db.Column(db.String(10), nullable=True)  # Ex: 👨🏻‍💻
-    color = db.Column(db.String(7), default='#3b82f6')  # Cor em hex
+    name = db.Column(db.String(100), nullable=False)
+    emoji = db.Column(db.String(10), nullable=True)
+    color = db.Column(db.String(7), default='#3b82f6')
     description = db.Column(db.String(255))
     order = db.Column(db.Integer, default=0)
     is_active = db.Column(db.Boolean, default=True)
@@ -121,9 +121,9 @@ class Demand(db.Model):
     activity = db.Column(db.String(255), nullable=False)
     context = db.Column(db.Text, nullable=True)
     status = db.Column(db.String(20), default='nao-iniciado')
-    priority = db.Column(db.String(20), default='media')  # baixa, media, alta, urgente
+    priority = db.Column(db.String(20), default='media')
     due_date = db.Column(db.Date, nullable=True)
-    assigned_to = db.Column(db.String(100))  # Nome de quem será responsável
+    assigned_to = db.Column(db.String(100))
     created_date = db.Column(db.Date, default=date.today)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
     
@@ -167,6 +167,10 @@ class DemandHistory(db.Model):
             'statusChangeDate': self.status_change_date.isoformat() if self.status_change_date else None,
             'createdDate': self.created_date.isoformat() if self.created_date else None
         }
+
+# ============= CRIAR TABELAS NA INICIALIZAÇÃO =============
+with app.app_context():
+    db.create_all()
 
 # ============= ROTAS DE PÁGINA =============
 @app.route('/')
@@ -262,13 +266,11 @@ def request_reset():
     user = User.query.filter_by(email=data['email']).first()
     
     if not user:
-        # Por segurança, não confirmamos se o email existe
         return jsonify({'message': 'Se o email existe, você receberá um link de reset'}), 200
     
     reset_token = user.generate_reset_token()
     reset_url = f"{os.getenv('FRONTEND_URL', 'http://localhost:5000')}/reset/{reset_token}"
     
-    # Enviar email (se configurado)
     if app.config['MAIL_USERNAME']:
         try:
             msg = Message(
@@ -416,7 +418,6 @@ def create_demand():
     if not data or not data.get('work_group_id') or not data.get('location') or not data.get('activity'):
         return jsonify({'error': 'Dados incompletos'}), 400
     
-    # Verificar se o grupo pertence ao usuário
     group = WorkGroup.query.get(data['work_group_id'])
     if not group or group.user_id != user_id:
         return jsonify({'error': 'Grupo inválido'}), 403
@@ -499,7 +500,6 @@ def update_demand_status(demand_id):
     if not new_status:
         return jsonify({'error': 'Status não fornecido'}), 400
     
-    # Adicionar ao histórico
     history = DemandHistory(
         user_id=user_id,
         work_group_id=demand.work_group_id,
@@ -512,7 +512,6 @@ def update_demand_status(demand_id):
     )
     db.session.add(history)
     
-    # Se mudou para concluído, remove de demandas
     if new_status == 'concluido':
         db.session.delete(demand)
     else:
@@ -549,7 +548,6 @@ def get_whatsapp_text():
     today = date.today().strftime('%d/%m/%Y')
     output = f"_*{today}*_\n"
     
-    # Agrupar demandas por grupo de trabalho
     demands = Demand.query.filter(Demand.user_id == user_id, Demand.status != 'concluido').all()
     history = DemandHistory.query.filter(
         DemandHistory.user_id == user_id,
@@ -617,7 +615,6 @@ def import_data():
     data = request.get_json()
     
     try:
-        # Importar grupos de trabalho
         group_mapping = {}
         for group_data in data.get('workGroups', []):
             group = WorkGroup(
@@ -632,7 +629,6 @@ def import_data():
             db.session.flush()
             group_mapping[group_data['id']] = group.id
         
-        # Importar demandas
         for demand_data in data.get('demands', []):
             demand = Demand(
                 user_id=user_id,
@@ -647,7 +643,6 @@ def import_data():
             )
             db.session.add(demand)
         
-        # Importar histórico
         for history_data in data.get('history', []):
             history = DemandHistory(
                 user_id=user_id,
@@ -689,8 +684,5 @@ def unauthorized(error):
     return jsonify({'error': 'Autenticação necessária'}), 401
 
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
-    
     port = int(os.getenv('PORT', 5000))
     app.run(debug=os.getenv('FLASK_ENV') == 'development', host='0.0.0.0', port=port)
