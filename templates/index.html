@@ -1468,6 +1468,15 @@
             return due < today;
         }
 
+        // Converte um objeto Date para 'YYYY-MM-DD' usando o fuso LOCAL
+        // (toISOString() usa UTC e desloca a data perto da virada do dia)
+        function toLocalISODate(date) {
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        }
+
         // ============= DASHBOARD =============
         async function loadDashboardStats() {
             const container = document.getElementById('dashboardContent');
@@ -1518,7 +1527,7 @@
             for (let i = numDays - 1; i >= 0; i--) {
                 const d = new Date();
                 d.setDate(d.getDate() - i);
-                const iso = d.toISOString().split('T')[0];
+                const iso = toLocalISODate(d);
                 const count = (history || []).filter(h => h.status === 'concluido' && h.statusChangeDate === iso).length;
                 days.push({ iso, label: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), count });
             }
@@ -1531,9 +1540,10 @@
 
             const sevenDaysAgo = new Date();
             sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+            const sevenDaysAgoIso = toLocalISODate(sevenDaysAgo);
             const concludedLast7 = (history || []).filter(h => {
                 if (h.status !== 'concluido' || !h.statusChangeDate) return false;
-                return new Date(h.statusChangeDate) >= sevenDaysAgo;
+                return h.statusChangeDate >= sevenDaysAgoIso;
             }).length;
 
             const urgentCount = currentDemands.filter(d => d.priority === 'urgente').length;
@@ -1669,7 +1679,7 @@
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `backup_${new Date().toISOString().split('T')[0]}.json`;
+                a.download = `backup_${toLocalISODate(new Date())}.json`;
                 a.click();
             } catch (e) {
                 console.error('Erro:', e);
@@ -1848,7 +1858,7 @@
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `demandas_${new Date().toISOString().split('T')[0]}.html`;
+            a.download = `demandas_${toLocalISODate(new Date())}.html`;
             a.click();
         }
 
