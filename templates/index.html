@@ -647,6 +647,47 @@
         </div>
     </div>
 
+    <!-- MODAL EDITAR DEMANDA -->
+    <div id="editDemandModal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" onclick="closeEditDemand()">&times;</span>
+            <div class="modal-header">✏️ Editar Demanda</div>
+            <div class="form-group">
+                <label>Local</label>
+                <input type="text" id="editDemandLocation">
+            </div>
+            <div class="form-group">
+                <label>Atividade</label>
+                <input type="text" id="editDemandActivity">
+            </div>
+            <div class="form-group">
+                <label>Contexto</label>
+                <input type="text" id="editDemandContext">
+            </div>
+            <div class="form-group">
+                <label>Prioridade</label>
+                <select id="editDemandPriority">
+                    <option value="baixa">Baixa</option>
+                    <option value="media">Média</option>
+                    <option value="alta">Alta</option>
+                    <option value="urgente">Urgente</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Status</label>
+                <select id="editDemandStatus">
+                    <option value="nao-iniciado">⚪ Não Iniciado</option>
+                    <option value="andamento">🟡 Em Andamento</option>
+                    <option value="aguardando">🔵 Aguardando</option>
+                    <option value="aprovacao">🟣 Aprovação</option>
+                    <option value="concluido">🟢 Concluído</option>
+                </select>
+            </div>
+            <button class="btn btn-primary" onclick="saveDemandEdit()">Salvar</button>
+            <button class="btn btn-secondary" onclick="closeEditDemand()" style="margin-left: 0.5rem;">Cancelar</button>
+        </div>
+    </div>
+
     <script>
         const API_URL = '/api';
         let token = localStorage.getItem('token');
@@ -1102,6 +1143,74 @@
                 }
             } catch (e) {
                 console.error('Erro:', e);
+            }
+        }
+
+        // ============= EDITAR DEMANDA =============
+        let editingDemandId = null;
+        let editingDemandOriginalStatus = null;
+
+        function editDemand(id) {
+            const demand = currentDemands.find(d => d.id === id);
+            if (!demand) return;
+
+            editingDemandId = id;
+            editingDemandOriginalStatus = demand.status;
+
+            document.getElementById('editDemandLocation').value = demand.location;
+            document.getElementById('editDemandActivity').value = demand.activity;
+            document.getElementById('editDemandContext').value = demand.context || '';
+            document.getElementById('editDemandPriority').value = demand.priority;
+            document.getElementById('editDemandStatus').value = demand.status;
+
+            document.getElementById('editDemandModal').classList.add('show');
+        }
+
+        function closeEditDemand() {
+            document.getElementById('editDemandModal').classList.remove('show');
+            editingDemandId = null;
+            editingDemandOriginalStatus = null;
+        }
+
+        async function saveDemandEdit() {
+            if (!editingDemandId) return;
+            const id = editingDemandId;
+            const newStatus = document.getElementById('editDemandStatus').value;
+            const statusChanged = newStatus !== editingDemandOriginalStatus;
+
+            try {
+                await fetch(`${API_URL}/demands/${id}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        location: document.getElementById('editDemandLocation').value,
+                        activity: document.getElementById('editDemandActivity').value,
+                        context: document.getElementById('editDemandContext').value,
+                        priority: document.getElementById('editDemandPriority').value
+                    })
+                });
+
+                // Se o status mudou, usa a rota dedicada (mantém histórico e
+                // remove a demanda da lista se for concluída)
+                if (statusChanged) {
+                    await fetch(`${API_URL}/demands/${id}/status`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({ status: newStatus })
+                    });
+                }
+
+                closeEditDemand();
+                loadDemands();
+            } catch (e) {
+                console.error('Erro:', e);
+                alert('Erro ao salvar alterações');
             }
         }
 
