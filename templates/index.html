@@ -438,6 +438,21 @@
         .trend-bar { width: 100%; max-width: 28px; background: var(--led-green); border-radius: 3px 3px 0 0; box-shadow: 0 0 6px var(--led-green); min-height: 3px; }
         .trend-bar-count { font-size: 0.68rem; color: var(--text-primary); margin-bottom: 0.3rem; font-weight: 700; height: 1em; }
         .trend-bar-label { font-size: 0.6rem; color: var(--text-secondary); margin-top: 0.4rem; text-transform: uppercase; }
+
+        .reminder-banner {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            left: 1rem;
+            max-width: 380px;
+            margin-left: auto;
+            z-index: 2000;
+            background: var(--panel);
+            border: 1px solid var(--amber);
+            border-radius: var(--radius);
+            padding: 1rem;
+            box-shadow: 0 8px 28px rgba(0,0,0,0.55);
+        }
     </style>
 </head>
 <body>
@@ -619,6 +634,10 @@
                         <label>Vencimento (opcional)</label>
                         <input type="date" id="newDueDate">
                     </div>
+                    <div class="form-group">
+                        <label>🔔 Lembrete - data e hora (opcional)</label>
+                        <input type="datetime-local" id="newReminderAt">
+                    </div>
                     <button class="btn btn-primary" onclick="createDemand()">Criar Demanda</button>
                 </div>
 
@@ -798,6 +817,10 @@
             <div class="form-group">
                 <label>Vencimento (opcional)</label>
                 <input type="date" id="editDemandDueDate">
+            </div>
+            <div class="form-group">
+                <label>🔔 Lembrete - data e hora (opcional)</label>
+                <input type="datetime-local" id="editDemandReminderAt">
             </div>
             <button class="btn btn-primary" onclick="saveDemandEdit()">Salvar</button>
             <button class="btn btn-secondary" onclick="closeEditDemand()" style="margin-left: 0.5rem;">Cancelar</button>
@@ -991,6 +1014,7 @@
                     
                     loadGroups();
                     loadDemands();
+                    checkReminders();
                 } else {
                     token = null;
                     localStorage.removeItem('token');
@@ -1241,6 +1265,7 @@
                                     ${getPriorityBadge(d.priority)}
                                 </div>
                                 ${d.dueDate ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; font-weight: ${isOverdue(d.dueDate) ? '700' : '400'}; color: ${isOverdue(d.dueDate) ? 'var(--led-red)' : 'var(--text-secondary)'};">${isOverdue(d.dueDate) ? '⚠️ Atrasada — venceu em' : '📅 Vence em'} ${formatDateBR(d.dueDate)}</div>` : ''}
+                                ${d.reminderAt ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; color: ${new Date(d.reminderAt) <= new Date() ? 'var(--amber-bright)' : 'var(--text-secondary)'};">🔔 Lembrete: ${formatDateTimeBR(d.reminderAt)}</div>` : ''}
                                 ${d.context ? `<p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem;">📌 ${escapeHtml(d.context)}</p>` : ''}
                                 <div style="display: flex; gap: 0.5rem;">
                                     <button class="btn btn-sm btn-secondary" onclick="completeDemand(${d.id})">✅ Concluir</button>
@@ -1278,6 +1303,7 @@
             const context = document.getElementById('newContext').value;
             const priority = document.getElementById('newPriority').value;
             const due_date = document.getElementById('newDueDate').value;
+            const reminder_at = document.getElementById('newReminderAt').value;
 
             if (!work_group_id || !location || !activity) {
                 alert('Preencha os campos obrigatórios');
@@ -1300,6 +1326,7 @@
                         context,
                         priority,
                         due_date: due_date || null,
+                        reminder_at: reminder_at || null,
                         status: 'nao-iniciado'
                     })
                 });
@@ -1311,6 +1338,7 @@
                     document.getElementById('newContext').value = '';
                     document.getElementById('newPriority').value = 'media';
                     document.getElementById('newDueDate').value = '';
+                    document.getElementById('newReminderAt').value = '';
                     loadDemands();
                 } else {
                     const data = await response.json().catch(() => ({}));
@@ -1368,6 +1396,7 @@
             document.getElementById('editDemandPriority').value = demand.priority;
             document.getElementById('editDemandStatus').value = demand.status;
             document.getElementById('editDemandDueDate').value = demand.dueDate || '';
+            document.getElementById('editDemandReminderAt').value = demand.reminderAt ? demand.reminderAt.slice(0, 16) : '';
 
             document.getElementById('editDemandModal').classList.add('show');
         }
@@ -1384,6 +1413,7 @@
             const newStatus = document.getElementById('editDemandStatus').value;
             const statusChanged = newStatus !== editingDemandOriginalStatus;
             const dueDate = document.getElementById('editDemandDueDate').value;
+            const reminderAt = document.getElementById('editDemandReminderAt').value;
 
             const btn = event.target;
             btn.disabled = true;
@@ -1399,7 +1429,8 @@
                         activity: document.getElementById('editDemandActivity').value,
                         context: document.getElementById('editDemandContext').value,
                         priority: document.getElementById('editDemandPriority').value,
-                        due_date: dueDate || null
+                        due_date: dueDate || null,
+                        reminder_at: reminderAt || null
                     })
                 });
 
@@ -1525,6 +1556,16 @@
             today.setHours(0, 0, 0, 0);
             const due = new Date(dueDate + 'T00:00:00');
             return due < today;
+        }
+
+        function formatDateTimeBR(isoDateTime) {
+            if (!isoDateTime) return '';
+            const d = new Date(isoDateTime);
+            const day = String(d.getDate()).padStart(2, '0');
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const hours = String(d.getHours()).padStart(2, '0');
+            const minutes = String(d.getMinutes()).padStart(2, '0');
+            return `${day}/${month} ${hours}:${minutes}`;
         }
 
         // Converte um objeto Date para 'YYYY-MM-DD' usando o fuso LOCAL
@@ -1670,6 +1711,37 @@
                     ${groupCounts.length > 0 ? groupCounts.map(g => barRow(g.label, g.count, maxGroup, g.color)).join('') : '<div class="kanban-empty">Nenhuma demanda em grupo ativo</div>'}
                 </div>
             `;
+        }
+
+        // ============= LEMBRETES =============
+        async function checkReminders() {
+            try {
+                const response = await fetch(`${API_URL}/reminders/check`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!response.ok) return;
+
+                const data = await response.json();
+                if (data.triggered && data.triggered.length > 0) {
+                    showReminderBanner(data.triggered);
+                }
+            } catch (e) {
+                console.error('Erro ao checar lembretes:', e);
+            }
+        }
+
+        function showReminderBanner(demands) {
+            const banner = document.createElement('div');
+            banner.className = 'reminder-banner';
+            banner.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.6rem;">
+                    <strong style="color: var(--amber-bright); text-transform:uppercase; font-size:0.78rem; letter-spacing:0.04em;">🔔 ${demands.length} Lembrete${demands.length > 1 ? 's' : ''}</strong>
+                    <span style="cursor:pointer; color:var(--text-secondary); font-size:1.3rem; line-height:1;" onclick="this.closest('.reminder-banner').remove()">&times;</span>
+                </div>
+                ${demands.map(d => `<div style="font-size:0.85rem; margin-bottom:0.4rem; color:var(--text-primary);">📌 <strong>${escapeHtml(d.location)}:</strong> ${escapeHtml(d.activity)}</div>`).join('')}
+            `;
+            document.body.appendChild(banner);
         }
 
         function escapeHtml(str) {
