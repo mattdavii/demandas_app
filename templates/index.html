@@ -1133,7 +1133,7 @@
                             <div class="demand-card" style="margin-bottom: 0.75rem; border-left-color: ${col.color};">
                                 <div class="demand-header">
                                     <div>
-                                        <div class="demand-location">${d.workGroupName || ''}</div>
+                                        <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(d.workGroupId, d.workGroupName)}</div>
                                         <div class="demand-title">${d.location} - ${d.activity}</div>
                                     </div>
                                 </div>
@@ -1356,7 +1356,7 @@
                                 <div class="demand-card" style="border-left-color: var(--led-green); margin-bottom: 0;">
                                     <div class="demand-header">
                                         <div>
-                                            <div class="demand-location">${getGroupLabel(h.workGroupId)}</div>
+                                            <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(h.workGroupId)}</div>
                                             <div class="demand-title">${h.location} - ${h.activity}</div>
                                         </div>
                                         <span class="status-badge status-${h.status}">${getStatusEmoji(h.status)} ${h.status}</span>
@@ -1376,9 +1376,23 @@
             return `${d}/${m}/${y}`;
         }
 
-        function getGroupLabel(groupId) {
+        function hexToRgba(hex, alpha) {
+            if (!hex) return `rgba(245,166,35,${alpha})`;
+            const h = hex.replace('#', '');
+            const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
+            const bigint = parseInt(full, 16);
+            const r = (bigint >> 16) & 255;
+            const g = (bigint >> 8) & 255;
+            const b = bigint & 255;
+            return `rgba(${r},${g},${b},${alpha})`;
+        }
+
+        function getGroupBadge(groupId, fallbackName) {
             const group = currentGroups.find(g => g.id === groupId);
-            return group ? `${group.emoji || ''} ${group.name}`.trim() : 'Grupo';
+            const name = group ? group.name : (fallbackName || 'Grupo');
+            const emoji = group ? (group.emoji || '📌') : '📌';
+            const color = group ? (group.color || '#f5a623') : '#5b6168';
+            return `<span style="display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:4px; font-size:0.68rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; background:${hexToRgba(color, 0.15)}; color:${color}; border:1px solid ${hexToRgba(color, 0.45)};">${emoji} ${name}</span>`;
         }
 
         // ============= UTILITÁRIOS =============
