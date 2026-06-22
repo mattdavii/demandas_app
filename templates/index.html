@@ -1184,6 +1184,8 @@
             { key: 'aprovacao', label: 'Aprovação', color: 'var(--led-purple)' }
         ];
 
+        const PRIORITY_RANK = { 'urgente': 4, 'alta': 3, 'media': 2, 'baixa': 1 };
+
         function renderDemands() {
             const container = document.getElementById('demandsList');
 
@@ -1193,7 +1195,9 @@
             }
 
             container.innerHTML = '<div class="kanban-board">' + STATUS_COLUMNS.map(col => {
-                const items = currentDemands.filter(d => d.status === col.key);
+                const items = currentDemands
+                    .filter(d => d.status === col.key)
+                    .sort((a, b) => (PRIORITY_RANK[b.priority] || 0) - (PRIORITY_RANK[a.priority] || 0));
                 return `
                     <div class="kanban-column">
                         <div class="kanban-column-header">
@@ -1523,7 +1527,7 @@
 
         function renderDashboard(history) {
             const container = document.getElementById('dashboardContent');
-            const total = currentDemands.length;
+            const notStartedCount = currentDemands.filter(d => d.status === 'nao-iniciado').length;
 
             const sevenDaysAgo = new Date();
             sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -1560,7 +1564,7 @@
             container.innerHTML = `
                 <div class="stat-grid">
                     <div class="stat-card">
-                        <div class="stat-value">${total}</div>
+                        <div class="stat-value">${notStartedCount}</div>
                         <div class="stat-label">Pendentes</div>
                     </div>
                     <div class="stat-card" style="border-color: var(--led-red);">
@@ -1731,6 +1735,7 @@
                 ? '<p style="color:#868d95;">Nenhuma demanda pendente.</p>' : '';
 
             const total = currentDemands.length;
+            const notStartedCount = currentDemands.filter(d => d.status === 'nao-iniciado').length;
             const urgentCount = currentDemands.filter(d => d.priority === 'urgente').length;
             const inProgressCount = currentDemands.filter(d => d.status === 'andamento').length;
             const overdueCount = currentDemands.filter(d => isOverdue(d.dueDate)).length;
@@ -1745,7 +1750,7 @@
 
             const summaryHtml = total > 0 ? `
                 <div class="summary-grid">
-                    <div class="summary-card"><div class="summary-value">${total}</div><div class="summary-label">Pendentes</div></div>
+                    <div class="summary-card"><div class="summary-value">${notStartedCount}</div><div class="summary-label">Pendentes</div></div>
                     <div class="summary-card"><div class="summary-value" style="color:#ff5b5b;">${overdueCount}</div><div class="summary-label">Atrasadas</div></div>
                     <div class="summary-card"><div class="summary-value" style="color:#ffc35c;">${urgentCount}</div><div class="summary-label">Urgentes</div></div>
                     <div class="summary-card"><div class="summary-value" style="color:#4fc3f7;">${inProgressCount}</div><div class="summary-label">Em Andamento</div></div>
