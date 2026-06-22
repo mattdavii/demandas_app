@@ -967,6 +967,53 @@
         function changePassword() {
             alert('Implementar alteração de senha');
         }
+
+        function showUploadBackup() {
+            let fileInput = document.getElementById('backupFileInput');
+            if (!fileInput) {
+                fileInput = document.createElement('input');
+                fileInput.type = 'file';
+                fileInput.id = 'backupFileInput';
+                fileInput.accept = '.json,application/json';
+                fileInput.style.display = 'none';
+                fileInput.addEventListener('change', handleBackupFile);
+                document.body.appendChild(fileInput);
+            }
+            fileInput.value = '';
+            fileInput.click();
+        }
+
+        async function handleBackupFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            try {
+                const text = await file.text();
+                const data = JSON.parse(text);
+
+                const response = await fetch(`${API_URL}/import`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    alert(`Backup restaurado: ${result.demands_count} demandas, ${result.history_count} históricos, ${result.groups_count} grupos.`);
+                    loadDemands();
+                    loadGroups();
+                } else {
+                    alert(result.error || 'Erro ao restaurar backup');
+                }
+            } catch (e) {
+                console.error('Erro:', e);
+                alert('Arquivo inválido (precisa ser o .json exportado pelo Fazer Backup) ou erro de conexão');
+            }
+        }
     </script>
 </body>
 </html>
