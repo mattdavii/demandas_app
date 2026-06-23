@@ -530,22 +530,16 @@
 
         .history-days-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
             gap: 0.85rem;
         }
         .history-day-card {
-            background: var(--panel-raised);
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            padding: 1rem;
             cursor: pointer;
             transition: border-color 0.15s;
-            text-align: center;
         }
         .history-day-card:hover { border-color: var(--amber-dim); }
-        .history-day-date { font-size: 0.85rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.3rem; }
-        .history-day-count { font-size: 0.65rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.6rem; }
-        .history-day-dots { display: flex; justify-content: center; gap: 3px; flex-wrap: wrap; }
+        .history-day-card .stat-label { margin-top: 0.3rem; }
+        .history-day-dots { display: flex; justify-content: center; gap: 3px; flex-wrap: wrap; margin-top: 0.5rem; }
 
         .history-chain {
             font-size: 0.7rem;
@@ -611,6 +605,9 @@
 
         .stat-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
         @media (max-width: 480px) { .stat-grid.cols-3 { grid-template-columns: 1fr; } }
+
+        .stat-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+        @media (max-width: 700px) { .stat-grid.cols-4 { grid-template-columns: repeat(2, 1fr); } }
 
         /* ===== Ajustes finos para telas pequenas ===== */
         @media (max-width: 600px) {
@@ -887,18 +884,17 @@
         <!-- TAB: HISTÓRICO -->
         <div id="tab-history" class="tab-content">
             <div class="card" style="margin-bottom: 1.5rem;">
-                <h3>🔍 Filtrar Histórico</h3>
-                <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-                    <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 180px;">
+                <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-end;">
+                    <div class="form-group" style="margin-bottom:0; flex:1; min-width:160px;">
                         <label>Local</label>
                         <input type="text" id="historyFilterLocation" placeholder="Filtrar por local">
                     </div>
-                    <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 180px;">
+                    <div class="form-group" style="margin-bottom:0; flex:1; min-width:160px;">
                         <label>Atividade</label>
                         <input type="text" id="historyFilterActivity" placeholder="Filtrar por atividade">
                     </div>
+                    <button class="btn btn-sm" style="width:auto; background:transparent; color:var(--led-blue); border:1px solid var(--led-blue);" onclick="loadHistory()">🔍 Buscar</button>
                 </div>
-                <button class="btn btn-primary" style="margin-top: 1rem; width: auto;" onclick="loadHistory()">Buscar</button>
             </div>
 
             <div id="historyList">
@@ -2130,21 +2126,57 @@
             const days = Object.keys(groups).sort((a, b) => b.localeCompare(a));
             const maxDots = 6;
 
-            container.innerHTML = '<div class="history-days-grid">' + days.map(day => {
+            let totalItems = 0, concludedCount = 0, otherCount = 0;
+            const dayGroupedCache = {};
+            days.forEach(day => {
                 const grouped = groupHistoryItemsByDemand(groups[day]);
+                dayGroupedCache[day] = grouped;
+                totalItems += grouped.length;
+                grouped.forEach(entries => {
+                    const last = entries[entries.length - 1];
+                    if (last.status === 'concluido') concludedCount++;
+                    else otherCount++;
+                });
+            });
+
+            const statsHtml = `
+                <div class="stat-grid cols-4" style="margin-bottom: 1.5rem;">
+                    <div class="stat-card">
+                        <div class="stat-value">${totalItems}</div>
+                        <div class="stat-label">Itens no Período</div>
+                    </div>
+                    <div class="stat-card" style="border-color: var(--led-green);">
+                        <div class="stat-value" style="color: var(--led-green);">${concludedCount}</div>
+                        <div class="stat-label">Concluídas</div>
+                    </div>
+                    <div class="stat-card" style="border-color: var(--amber);">
+                        <div class="stat-value" style="color: var(--amber-bright);">${otherCount}</div>
+                        <div class="stat-label">Outras Mudanças</div>
+                    </div>
+                    <div class="stat-card" style="border-color: var(--led-blue);">
+                        <div class="stat-value" style="color: var(--led-blue);">${days.length}</div>
+                        <div class="stat-label">Dias com Registro</div>
+                    </div>
+                </div>
+            `;
+
+            const daysHtml = '<div class="history-days-grid">' + days.map(day => {
+                const grouped = dayGroupedCache[day];
                 const dots = grouped.slice(0, maxDots).map(entries => {
                     const last = entries[entries.length - 1];
                     return `<span class="calendar-dot" style="background:${getStatusColor(last.status)};"></span>`;
                 }).join('');
                 const extra = grouped.length > maxDots ? `<span class="calendar-more">+${grouped.length - maxDots}</span>` : '';
                 return `
-                    <div class="history-day-card" onclick="showHistoryDayModal('${day}')">
-                        <div class="history-day-date">📅 ${formatDateBR(day)}</div>
-                        <div class="history-day-count">${grouped.length} ${grouped.length === 1 ? 'item' : 'itens'}</div>
+                    <div class="stat-card history-day-card" onclick="showHistoryDayModal('${day}')">
+                        <div class="stat-value">${grouped.length}</div>
+                        <div class="stat-label">📅 ${formatDateBR(day)}</div>
                         <div class="history-day-dots">${dots}${extra}</div>
                     </div>
                 `;
             }).join('') + '</div>';
+
+            container.innerHTML = statsHtml + daysHtml;
         }
 
         function showHistoryDayModal(day) {
