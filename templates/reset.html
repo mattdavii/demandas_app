@@ -260,6 +260,8 @@
             setTimeout(() => {
                 window.location.href = '/';
             }, 2000);
+        } else {
+            showAlert('Defina sua nova senha abaixo', 'info');
         }
 
         function checkPasswordStrength() {
@@ -351,9 +353,6 @@
             alert.textContent = message;
             alert.className = `alert show alert-${type}`;
         }
-
-        // Mostrar alerta de loading inicial
-        showAlert('ℹ️ Carregando...', 'info');
     </script>
 </body>
 </html>
