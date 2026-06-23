@@ -519,6 +519,43 @@
             box-shadow: 0 8px 28px rgba(0,0,0,0.55);
         }
 
+        .sync-status-badge {
+            position: fixed;
+            bottom: 1rem;
+            right: 1rem;
+            z-index: 1500;
+            padding: 0.55rem 0.9rem;
+            border-radius: 20px;
+            font-size: 0.68rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            cursor: pointer;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.45);
+            display: none;
+            align-items: center;
+            gap: 0.4rem;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+        .sync-status-badge.online { border-color: var(--led-green); color: var(--led-green); }
+        .sync-status-badge.offline { border-color: var(--led-red); color: var(--led-red); }
+        .sync-status-badge.syncing { border-color: var(--amber); color: var(--amber-bright); }
+
+        .pending-sync-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.62rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--amber-bright);
+            margin-bottom: 0.4rem;
+        }
+        .demand-card.pending-sync { opacity: 0.75; }
+
         .stat-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
         @media (max-width: 480px) { .stat-grid.cols-3 { grid-template-columns: 1fr; } }
 
@@ -1011,9 +1048,166 @@
         let currentGroups = [];
         let currentDemands = [];
         let editingGroupId = null;
+        let isOnline = navigator.onLine;
+        let syncInProgress = false;
+
+        // ============= OFFLINE / SINCRONIZAÇÃO =============
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        // Tenta de novo com espera crescente (1s, 2s, 4s...) antes de desistir.
+        // Cobre o caso do Render "dormindo" (primeira requisição demora a acordar o serviço).
+        async function fetchWithRetry(url, options = {}, maxRetries = 2) {
+            let lastError;
+            for (let attempt = 0; attempt <= maxRetries; attempt++) {
+                try {
+                    const response = await fetch(url, options);
+                    if (response.status >= 500 && attempt < maxRetries) {
+                        await sleep(Math.pow(2, attempt) * 1000);
+                        continue;
+                    }
+                    return response;
+                } catch (e) {
+                    lastError = e;
+                    if (attempt < maxRetries) {
+                        await sleep(Math.pow(2, attempt) * 1000);
+                        continue;
+                    }
+                }
+            }
+            throw lastError || new Error('Falha após múltiplas tentativas');
+        }
+
+        function getSyncQueue() {
+            try {
+                return JSON.parse(localStorage.getItem('syncQueue') || '[]');
+            } catch (e) {
+                return [];
+            }
+        }
+
+        function setSyncQueue(queue) {
+            localStorage.setItem('syncQueue', JSON.stringify(queue));
+            updateSyncIndicator();
+        }
+
+        function addToSyncQueue(item) {
+            const queue = getSyncQueue();
+            queue.push({ id: 'sync_' + Date.now() + '_' + Math.random().toString(36).slice(2), timestamp: new Date().toISOString(), ...item });
+            setSyncQueue(queue);
+        }
+
+        function updateSyncIndicator() {
+            const queue = getSyncQueue();
+            let badge = document.getElementById('syncStatusBadge');
+            if (!badge) {
+                badge = document.createElement('div');
+                badge.id = 'syncStatusBadge';
+                badge.className = 'sync-status-badge';
+                badge.onclick = () => processSyncQueue(true);
+                document.body.appendChild(badge);
+            }
+
+            if (queue.length === 0 && isOnline) {
+                badge.style.display = 'none';
+                return;
+            }
+
+            badge.style.display = 'flex';
+            if (!isOnline) {
+                badge.className = 'sync-status-badge offline';
+                badge.innerHTML = `🔴 Offline${queue.length > 0 ? ` · ${queue.length} pendente${queue.length > 1 ? 's' : ''}` : ''}`;
+            } else {
+                badge.className = 'sync-status-badge syncing';
+                badge.innerHTML = `🟡 Sincronizando · ${queue.length} pendente${queue.length > 1 ? 's' : ''}`;
+            }
+        }
+
+        window.addEventListener('online', () => {
+            isOnline = true;
+            updateSyncIndicator();
+            processSyncQueue();
+        });
+        window.addEventListener('offline', () => {
+            isOnline = false;
+            updateSyncIndicator();
+        });
+
+        async function executeSyncItem(item) {
+            if (item.type === 'create') {
+                const response = await fetchWithRetry(`${API_URL}/demands`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify(item.payload)
+                }, 1);
+                if (!response.ok) throw new Error('Falha ao sincronizar criação');
+            } else if (item.type === 'edit') {
+                const putResponse = await fetchWithRetry(`${API_URL}/demands/${item.payload.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify(item.payload.fields)
+                }, 1);
+                if (!putResponse.ok) throw new Error('Falha ao sincronizar edição');
+                if (item.payload.statusChange) {
+                    const statusResponse = await fetchWithRetry(`${API_URL}/demands/${item.payload.id}/status`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ status: item.payload.statusChange })
+                    }, 1);
+                    if (!statusResponse.ok) throw new Error('Falha ao sincronizar status');
+                }
+            } else if (item.type === 'complete') {
+                const response = await fetchWithRetry(`${API_URL}/demands/${item.payload.id}/status`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ status: 'concluido' })
+                }, 1);
+                if (!response.ok) throw new Error('Falha ao sincronizar conclusão');
+            }
+        }
+
+        async function processSyncQueue(manual) {
+            if (syncInProgress) return;
+            let queue = getSyncQueue();
+            if (queue.length === 0) {
+                if (manual) { isOnline = true; updateSyncIndicator(); }
+                return;
+            }
+
+            syncInProgress = true;
+            updateSyncIndicator();
+
+            while (queue.length > 0) {
+                try {
+                    await executeSyncItem(queue[0]);
+                    queue = queue.slice(1);
+                    setSyncQueue(queue);
+                } catch (e) {
+                    console.error('Falha ao sincronizar, tentando novamente mais tarde:', e);
+                    isOnline = false;
+                    break;
+                }
+            }
+
+            syncInProgress = false;
+            if (queue.length === 0) {
+                isOnline = true;
+                await loadDemands();
+            }
+            updateSyncIndicator();
+        }
+
+        // Tentativa periódica de sincronizar, caso o evento 'online' do navegador não dispare
+        setInterval(() => {
+            if (getSyncQueue().length > 0 && !syncInProgress) {
+                processSyncQueue();
+            }
+        }, 30000);
 
         // ============= INICIALIZAÇÃO =============
         document.addEventListener('DOMContentLoaded', () => {
+            updateSyncIndicator();
             if (token) {
                 showApp();
             }
@@ -1153,49 +1347,75 @@
         }
 
         async function showApp() {
+            let userFromCache = false;
             try {
-                const response = await fetch(`${API_URL}/auth/me`, {
+                const response = await fetchWithRetry(`${API_URL}/auth/me`, {
                     headers: { 'Authorization': `Bearer ${token}` }
-                });
+                }, 2);
 
                 if (response.ok) {
                     currentUser = await response.json();
-                    document.getElementById('userName').textContent = currentUser.full_name || currentUser.username;
-                    document.getElementById('userEmail').textContent = `Email: ${currentUser.email}`;
-                    
-                    document.getElementById('authContainer').style.display = 'none';
-                    document.getElementById('appContainer').classList.add('show');
-                    
-                    await Promise.all([loadGroups(), loadDemands()]);
-                    checkReminders();
-                    loadTodayPage();
-                    document.getElementById('exportReportDate').value = toLocalISODate(new Date());
+                    localStorage.setItem('cache_user', JSON.stringify(currentUser));
+                    isOnline = true;
                 } else if (response.status === 401) {
                     // sessão de fato inválida/expirada
                     token = null;
                     localStorage.removeItem('token');
+                    return;
                 } else {
-                    // erro transitório (banco, rede, etc) — não é problema de autenticação,
-                    // então NÃO desloga o usuário. Mantém a tela como está e loga no console.
-                    console.error('Erro ao verificar sessão (mantendo login):', response.status);
+                    throw new Error('Resposta não-OK: ' + response.status);
                 }
             } catch (e) {
-                console.error('Erro:', e);
+                console.error('Erro ao verificar sessão, tentando modo offline:', e);
+                const cachedUser = localStorage.getItem('cache_user');
+                if (cachedUser) {
+                    currentUser = JSON.parse(cachedUser);
+                    userFromCache = true;
+                    isOnline = false;
+                } else {
+                    console.error('Sem cache local disponível — mantendo tela de login.');
+                    return;
+                }
             }
+
+            document.getElementById('userName').textContent = currentUser.full_name || currentUser.username;
+            document.getElementById('userEmail').textContent = `Email: ${currentUser.email}`;
+
+            document.getElementById('authContainer').style.display = 'none';
+            document.getElementById('appContainer').classList.add('show');
+
+            await Promise.all([loadGroups(), loadDemands()]);
+            if (isOnline) {
+                checkReminders();
+                processSyncQueue();
+            }
+            loadTodayPage();
+            document.getElementById('exportReportDate').value = toLocalISODate(new Date());
+            updateSyncIndicator();
         }
 
         // ============= GRUPOS =============
         async function loadGroups() {
             try {
-                const response = await fetch(`${API_URL}/work-groups`, {
+                const response = await fetchWithRetry(`${API_URL}/work-groups`, {
                     headers: { 'Authorization': `Bearer ${token}` }
-                });
+                }, 2);
 
+                if (!response.ok) throw new Error('Resposta não-OK: ' + response.status);
                 currentGroups = await response.json();
+                localStorage.setItem('cache_groups', JSON.stringify(currentGroups));
                 renderGroups();
                 updateGroupSelect();
             } catch (e) {
-                console.error('Erro ao carregar grupos:', e);
+                console.error('Erro ao carregar grupos, tentando cache local:', e);
+                const cached = localStorage.getItem('cache_groups');
+                if (cached) {
+                    currentGroups = JSON.parse(cached);
+                    renderGroups();
+                    updateGroupSelect();
+                }
+                isOnline = false;
+                updateSyncIndicator();
             }
         }
 
@@ -1375,15 +1595,25 @@
         // ============= DEMANDAS =============
         async function loadDemands() {
             try {
-                const response = await fetch(`${API_URL}/demands`, {
+                const response = await fetchWithRetry(`${API_URL}/demands`, {
                     headers: { 'Authorization': `Bearer ${token}` }
-                });
+                }, 2);
 
+                if (!response.ok) throw new Error('Resposta não-OK: ' + response.status);
                 currentDemands = await response.json();
+                localStorage.setItem('cache_demands', JSON.stringify(currentDemands));
                 renderDemands();
                 updateSummary();
             } catch (e) {
-                console.error('Erro ao carregar demandas:', e);
+                console.error('Erro ao carregar demandas, tentando cache local:', e);
+                const cached = localStorage.getItem('cache_demands');
+                if (cached) {
+                    currentDemands = JSON.parse(cached);
+                    renderDemands();
+                    updateSummary();
+                }
+                isOnline = false;
+                updateSyncIndicator();
             }
         }
 
@@ -1416,8 +1646,16 @@
                             <span class="kanban-column-count">${items.length}</span>
                         </div>
                         <div class="kanban-column-cards">
-                        ${items.length === 0 ? '<div class="kanban-empty">Vazio</div>' : items.map(d => `
-                            <div class="demand-card" style="margin-bottom: 0.75rem; border-left-color: ${isOverdue(d.dueDate) ? 'var(--led-red)' : col.color};">
+                        ${items.length === 0 ? '<div class="kanban-empty">Vazio</div>' : items.map(d => {
+                            const isPendingCreate = typeof d.id === 'string';
+                            const lockActions = isPendingCreate || d._pendingComplete;
+                            const pendingLabel = isPendingCreate
+                                ? 'Aguardando conexão p/ criar'
+                                : (d._pendingComplete ? 'Sincronizando conclusão' : 'Edição pendente de sincronização');
+                            const idArg = isPendingCreate ? `'${d.id}'` : d.id;
+                            return `
+                            <div class="demand-card${d._pendingSync ? ' pending-sync' : ''}" style="margin-bottom: 0.75rem; border-left-color: ${isOverdue(d.dueDate) ? 'var(--led-red)' : col.color};">
+                                ${d._pendingSync ? `<div class="pending-sync-tag">🔄 ${pendingLabel}</div>` : ''}
                                 <div class="demand-header">
                                     <div>
                                         <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(d.workGroupId, d.workGroupName)}</div>
@@ -1429,10 +1667,11 @@
                                 ${d.reminderAt ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; color: ${new Date(d.reminderAt) <= new Date() ? 'var(--amber-bright)' : 'var(--text-secondary)'};">🔔 Lembrete: ${formatDateTimeBR(d.reminderAt)}</div>` : ''}
                                 ${d.context ? `<p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem;">📌 ${escapeHtml(d.context)}</p>` : ''}
                                 <div style="display: flex; gap: 0.5rem;">
-                                    <button class="btn btn-sm btn-secondary" onclick="completeDemand(${d.id})">✅ Concluir</button>
-                                    <button class="btn btn-sm btn-secondary" onclick="editDemand(${d.id})">✏️ Editar</button>
+                                    <button class="btn btn-sm btn-secondary" onclick="completeDemand(${idArg})" ${lockActions ? 'disabled' : ''}>✅ Concluir</button>
+                                    <button class="btn btn-sm btn-secondary" onclick="editDemand(${idArg})" ${lockActions ? 'disabled' : ''}>✏️ Editar</button>
                                 </div>
                             </div>
+                        `;}).join('')}
                         `).join('')}
                         </div>
                     </div>
@@ -1516,8 +1755,37 @@
                     alert(data.error || 'Erro ao criar demanda');
                 }
             } catch (e) {
-                console.error('Erro:', e);
-                alert('Erro de conexão ao criar demanda');
+                console.error('Erro de conexão, salvando localmente para sincronizar depois:', e);
+
+                const groupIdInt = parseInt(work_group_id);
+                const tempId = 'temp_' + Date.now();
+                const optimisticPayload = {
+                    work_group_id: groupIdInt,
+                    location, activity, context, priority,
+                    due_date: due_date || null,
+                    reminder_at: reminder_at || null,
+                    status: 'nao-iniciado'
+                };
+                currentDemands.push({
+                    id: tempId,
+                    workGroupId: groupIdInt,
+                    workGroupName: (currentGroups.find(g => g.id === groupIdInt) || {}).name || '',
+                    location, activity, context, priority,
+                    status: 'nao-iniciado',
+                    dueDate: due_date || null,
+                    reminderAt: reminder_at || null,
+                    _pendingSync: true
+                });
+                localStorage.setItem('cache_demands', JSON.stringify(currentDemands));
+                renderDemands();
+                updateSummary();
+
+                addToSyncQueue({ type: 'create', payload: optimisticPayload });
+
+                closeNewDemandModal();
+                isOnline = false;
+                updateSyncIndicator();
+                alert('📡 Sem conexão — a demanda foi salva localmente e será sincronizada quando a internet voltar.');
             } finally {
                 btn.disabled = false;
             }
@@ -1544,9 +1812,20 @@
                     btn.disabled = false;
                 }
             } catch (e) {
-                console.error('Erro:', e);
-                alert('Erro de conexão ao concluir demanda');
-                btn.disabled = false;
+                console.error('Erro de conexão, marcando para sincronizar depois:', e);
+
+                const idx = currentDemands.findIndex(dm => dm.id === id);
+                if (idx !== -1) {
+                    currentDemands[idx]._pendingSync = true;
+                    currentDemands[idx]._pendingComplete = true;
+                }
+                localStorage.setItem('cache_demands', JSON.stringify(currentDemands));
+                renderDemands();
+
+                addToSyncQueue({ type: 'complete', payload: { id } });
+
+                isOnline = false;
+                updateSyncIndicator();
             }
         }
 
@@ -1633,8 +1912,41 @@
                 closeEditDemand();
                 loadDemands();
             } catch (e) {
-                console.error('Erro:', e);
-                alert('Erro de conexão ao salvar alterações');
+                console.error('Erro de conexão, salvando localmente para sincronizar depois:', e);
+
+                const fields = {
+                    location: document.getElementById('editDemandLocation').value,
+                    activity: document.getElementById('editDemandActivity').value,
+                    context: document.getElementById('editDemandContext').value,
+                    priority: document.getElementById('editDemandPriority').value,
+                    due_date: dueDate || null,
+                    reminder_at: reminderAt || null
+                };
+
+                const idx = currentDemands.findIndex(dm => dm.id === id);
+                if (idx !== -1) {
+                    currentDemands[idx].location = fields.location;
+                    currentDemands[idx].activity = fields.activity;
+                    currentDemands[idx].context = fields.context;
+                    currentDemands[idx].priority = fields.priority;
+                    currentDemands[idx].dueDate = fields.due_date;
+                    currentDemands[idx].reminderAt = fields.reminder_at;
+                    if (statusChanged) currentDemands[idx].status = newStatus;
+                    currentDemands[idx]._pendingSync = true;
+                }
+                localStorage.setItem('cache_demands', JSON.stringify(currentDemands));
+                renderDemands();
+                updateSummary();
+
+                addToSyncQueue({
+                    type: 'edit',
+                    payload: { id, fields, statusChange: statusChanged ? newStatus : null }
+                });
+
+                closeEditDemand();
+                isOnline = false;
+                updateSyncIndicator();
+                alert('📡 Sem conexão — a edição foi salva localmente e será sincronizada quando a internet voltar.');
             } finally {
                 btn.disabled = false;
             }
