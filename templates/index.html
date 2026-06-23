@@ -510,6 +510,63 @@
         .calendar-more { font-size: 0.55rem; color: var(--text-secondary); }
         .calendar-completed-badge { font-size: 0.58rem; color: var(--led-green); font-weight: 700; margin-top: 2px; }
 
+        .notes-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 1rem;
+        }
+        .note-card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.25rem;
+            display: flex;
+            flex-direction: column;
+        }
+        .note-card-subject {
+            font-weight: 700;
+            font-size: 0.95rem;
+            color: var(--text-primary);
+            margin-bottom: 0.5rem;
+        }
+        .note-card-description {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.75rem;
+            white-space: pre-wrap;
+        }
+        .note-checklist-progress {
+            font-size: 0.62rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-bottom: 0.5rem;
+        }
+        .note-checklist-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.8rem;
+            margin-bottom: 0.4rem;
+        }
+        .note-checklist-item.checked .note-checklist-text {
+            text-decoration: line-through;
+            color: var(--text-secondary);
+        }
+        .note-checklist-draft-row {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+            align-items: center;
+        }
+        .note-checklist-draft-remove {
+            cursor: pointer;
+            color: var(--led-red);
+            font-size: 1.2rem;
+            line-height: 1;
+            flex-shrink: 0;
+        }
+
         .calendar-legend {
             display: flex;
             flex-wrap: wrap;
@@ -773,6 +830,7 @@
             <button class="tab-btn" onclick="switchTab('calendar')">🗓️ Calendário</button>
             <button class="tab-btn" onclick="switchTab('history')">📅 Histórico</button>
             <button class="tab-btn" onclick="switchTab('dashboard')">📊 Dashboard</button>
+            <button class="tab-btn" onclick="switchTab('notes')">📝 Notas</button>
             <button class="tab-btn" onclick="switchTab('settings')">⚙️ Configurações</button>
         </div>
 
@@ -943,6 +1001,17 @@
         </div>
 
         <!-- TAB: CONFIGURAÇÕES -->
+        <!-- TAB: NOTAS -->
+        <div id="tab-notes" class="tab-content">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
+                <h3 style="margin-bottom: 0;">📝 Notas</h3>
+                <button class="btn btn-sm btn-primary" style="width: auto;" onclick="showNewNoteModal()">➕ Nova Nota</button>
+            </div>
+            <div id="notesList" class="notes-grid">
+                <div>Carregando...</div>
+            </div>
+        </div>
+
         <div id="tab-settings" class="tab-content">
             <div class="card">
                 <h3>👤 Meus Dados</h3>
@@ -1008,6 +1077,29 @@
 
     <!-- MODAL EDITAR DEMANDA -->
     <!-- MODAL NOVA DEMANDA -->
+    <!-- MODAL NOTA -->
+    <div id="noteModal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" onclick="closeNoteModal()">&times;</span>
+            <div class="modal-header" id="noteModalTitle">📝 Nova Nota</div>
+            <div class="form-group">
+                <label>Assunto</label>
+                <input type="text" id="noteSubject" placeholder="Assunto da nota">
+            </div>
+            <div class="form-group">
+                <label>Descrição (opcional)</label>
+                <textarea id="noteDescription" rows="3" placeholder="Detalhes..." style="width:100%; padding:0.75rem; background:var(--panel-raised); border:1px solid var(--border); border-radius:var(--radius); color:var(--text-primary); font-family:inherit; font-size:0.9rem; resize:vertical;"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Checklist (opcional)</label>
+                <div id="noteChecklistItems"></div>
+                <button class="btn btn-sm btn-secondary" style="width:auto; margin-top:0.5rem;" onclick="addChecklistItemField()">➕ Adicionar item</button>
+            </div>
+            <button class="btn btn-primary" onclick="saveNote()">Salvar</button>
+            <button class="btn btn-secondary" onclick="closeNoteModal()" style="margin-left: 0.5rem;">Cancelar</button>
+        </div>
+    </div>
+
     <div id="newDemandModal" class="modal">
         <div class="modal-content">
             <span class="close-modal" onclick="closeNewDemandModal()">&times;</span>
@@ -2259,6 +2351,191 @@
             return `${y}-${m}-${d}`;
         }
 
+        // ============= NOTAS =============
+        let currentNotes = [];
+        let editingNoteId = null;
+        let noteChecklistDraft = [];
+
+        async function loadNotes() {
+            const container = document.getElementById('notesList');
+            container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Carregando...</div>';
+
+            try {
+                const response = await fetchWithRetry(`${API_URL}/notes`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 2);
+                if (!response.ok) throw new Error('Resposta não-OK: ' + response.status);
+                currentNotes = await response.json();
+                renderNotes();
+            } catch (e) {
+                console.error('Erro ao carregar notas:', e);
+                container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Erro ao carregar notas</div>';
+            }
+        }
+
+        function renderNotes() {
+            const container = document.getElementById('notesList');
+
+            if (currentNotes.length === 0) {
+                container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Nenhuma nota ainda. Clique em "➕ Nova Nota" pra criar a primeira.</div>';
+                return;
+            }
+
+            container.innerHTML = currentNotes.map(note => {
+                const checklist = note.checklist || [];
+                const checkedCount = checklist.filter(i => i.checked).length;
+                return `
+                    <div class="note-card">
+                        <div class="note-card-subject">${escapeHtml(note.subject)}</div>
+                        ${note.description ? `<div class="note-card-description">${escapeHtml(note.description)}</div>` : ''}
+                        ${checklist.length > 0 ? `
+                            <div class="note-checklist-progress">${checkedCount}/${checklist.length} concluídos</div>
+                            <div style="margin-bottom: 0.75rem;">
+                                ${checklist.map((item, idx) => `
+                                    <div class="note-checklist-item ${item.checked ? 'checked' : ''}">
+                                        <input type="checkbox" ${item.checked ? 'checked' : ''} onchange="toggleNoteChecklistItem(${note.id}, ${idx})" style="width:auto; accent-color: var(--led-green); cursor:pointer;">
+                                        <span class="note-checklist-text">${escapeHtml(item.text)}</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : ''}
+                        <div style="display: flex; gap: 0.5rem; margin-top: auto;">
+                            <button class="btn-edit btn-sm" onclick="editNote(${note.id})">Editar</button>
+                            <button class="btn-delete btn-sm" onclick="deleteNote(${note.id})">Apagar</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderChecklistDraftEditor() {
+            const container = document.getElementById('noteChecklistItems');
+            container.innerHTML = noteChecklistDraft.map((item, idx) => `
+                <div class="note-checklist-draft-row">
+                    <input type="checkbox" ${item.checked ? 'checked' : ''} onchange="toggleChecklistDraftItem(${idx})" style="width:auto; accent-color: var(--led-green); cursor:pointer;">
+                    <input type="text" value="${escapeHtml(item.text)}" oninput="updateChecklistDraftText(${idx}, this.value)" placeholder="Item da checklist" style="flex:1;">
+                    <span class="note-checklist-draft-remove" onclick="removeChecklistDraftItem(${idx})">&times;</span>
+                </div>
+            `).join('');
+        }
+
+        function addChecklistItemField() {
+            noteChecklistDraft.push({ text: '', checked: false });
+            renderChecklistDraftEditor();
+        }
+
+        function removeChecklistDraftItem(idx) {
+            noteChecklistDraft.splice(idx, 1);
+            renderChecklistDraftEditor();
+        }
+
+        function updateChecklistDraftText(idx, value) {
+            noteChecklistDraft[idx].text = value;
+        }
+
+        function toggleChecklistDraftItem(idx) {
+            noteChecklistDraft[idx].checked = !noteChecklistDraft[idx].checked;
+        }
+
+        function showNewNoteModal() {
+            editingNoteId = null;
+            document.getElementById('noteModalTitle').textContent = '📝 Nova Nota';
+            document.getElementById('noteSubject').value = '';
+            document.getElementById('noteDescription').value = '';
+            noteChecklistDraft = [];
+            renderChecklistDraftEditor();
+            document.getElementById('noteModal').classList.add('show');
+        }
+
+        function editNote(id) {
+            const note = currentNotes.find(n => n.id === id);
+            if (!note) return;
+
+            editingNoteId = id;
+            document.getElementById('noteModalTitle').textContent = '✏️ Editar Nota';
+            document.getElementById('noteSubject').value = note.subject;
+            document.getElementById('noteDescription').value = note.description || '';
+            noteChecklistDraft = (note.checklist || []).map(item => ({ text: item.text, checked: !!item.checked }));
+            renderChecklistDraftEditor();
+            document.getElementById('noteModal').classList.add('show');
+        }
+
+        function closeNoteModal() {
+            document.getElementById('noteModal').classList.remove('show');
+            editingNoteId = null;
+        }
+
+        async function saveNote() {
+            const subject = document.getElementById('noteSubject').value.trim();
+            if (!subject) {
+                alert('Digite o assunto da nota');
+                return;
+            }
+
+            const description = document.getElementById('noteDescription').value;
+            const checklist = noteChecklistDraft.filter(item => item.text.trim() !== '');
+
+            const isEdit = editingNoteId !== null;
+            const url = isEdit ? `${API_URL}/notes/${editingNoteId}` : `${API_URL}/notes`;
+            const method = isEdit ? 'PUT' : 'POST';
+
+            try {
+                const response = await fetchWithRetry(url, {
+                    method,
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ subject, description, checklist })
+                }, 1);
+
+                if (response.ok) {
+                    closeNoteModal();
+                    loadNotes();
+                } else {
+                    const data = await response.json().catch(() => ({}));
+                    alert(data.error || 'Erro ao salvar nota');
+                }
+            } catch (e) {
+                console.error('Erro:', e);
+                alert('Erro de conexão ao salvar nota');
+            }
+        }
+
+        async function toggleNoteChecklistItem(noteId, itemIdx) {
+            const note = currentNotes.find(n => n.id === noteId);
+            if (!note || !note.checklist || !note.checklist[itemIdx]) return;
+
+            note.checklist[itemIdx].checked = !note.checklist[itemIdx].checked;
+            renderNotes();
+
+            try {
+                await fetchWithRetry(`${API_URL}/notes/${noteId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ checklist: note.checklist })
+                }, 1);
+            } catch (e) {
+                console.error('Erro ao salvar checklist:', e);
+            }
+        }
+
+        async function deleteNote(id) {
+            if (!confirm('Tem certeza que deseja apagar esta nota?')) return;
+
+            try {
+                const response = await fetchWithRetry(`${API_URL}/notes/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (response.ok) {
+                    loadNotes();
+                } else {
+                    alert('Erro ao apagar nota');
+                }
+            } catch (e) {
+                console.error('Erro:', e);
+                alert('Erro de conexão ao apagar nota');
+            }
+        }
+
         // ============= PÁGINA HOJE =============
         async function loadTodayPage() {
             const container = document.getElementById('todayContent');
@@ -3082,6 +3359,9 @@
             }
             if (tab === 'dashboard') {
                 loadDashboardStats();
+            }
+            if (tab === 'notes') {
+                loadNotes();
             }
             if (tab === 'calendar') {
                 initCalendar();
