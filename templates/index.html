@@ -27,6 +27,7 @@
             --led-red: #ff5b5b;
             --led-blue: #4fc3f7;
             --led-purple: #b388ff;
+            --led-orange: #ff9f43;
             --led-gray: #5b6168;
 
             /* mantidos por compatibilidade com nomes antigos */
@@ -375,6 +376,9 @@
         .status-nao-iniciado { background: rgba(91,97,104,0.15); color: #9aa0a7; }
         .status-nao-iniciado::before { background: var(--led-gray); box-shadow: 0 0 4px var(--led-gray); }
 
+        .status-agendado { background: rgba(255,159,67,0.12); color: var(--led-orange); }
+        .status-agendado::before { background: var(--led-orange); box-shadow: 0 0 6px var(--led-orange); }
+
         .status-andamento { background: rgba(245,166,35,0.12); color: var(--amber-bright); }
         .status-andamento::before { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
 
@@ -389,9 +393,10 @@
 
         .kanban-board {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
+            grid-template-columns: repeat(5, 1fr);
             gap: 1rem;
         }
+        @media (max-width: 1300px) { .kanban-board { grid-template-columns: repeat(3, 1fr); } }
         @media (max-width: 1100px) { .kanban-board { grid-template-columns: repeat(2, 1fr); } }
         @media (max-width: 600px) { .kanban-board { grid-template-columns: 1fr; } }
 
@@ -503,6 +508,25 @@
         .calendar-day-dots { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 0.35rem; }
         .calendar-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
         .calendar-more { font-size: 0.55rem; color: var(--text-secondary); }
+
+        .calendar-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.9rem;
+            margin-bottom: 1rem;
+            padding-bottom: 0.85rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .calendar-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.66rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+        .calendar-legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 
         .reminder-banner {
             position: fixed;
@@ -799,7 +823,29 @@
                     <h3 id="calendarMonthLabel" style="margin:0; border-bottom:none; padding-bottom:0;"></h3>
                     <button class="btn btn-sm btn-secondary" style="width:auto;" onclick="changeCalendarMonth(1)">Próximo ›</button>
                 </div>
-                <button class="btn btn-sm" style="width:auto; background:transparent; color:var(--amber); border:1px solid var(--amber); margin-bottom:1rem;" onclick="goToCurrentMonth()">📍 Hoje</button>
+
+                <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-end; margin-bottom:1rem;">
+                    <button class="btn btn-sm" style="width:auto; background:transparent; color:var(--amber); border:1px solid var(--amber);" onclick="goToCurrentMonth()">📍 Hoje</button>
+                    <div class="form-group" style="margin-bottom:0; flex:1; min-width:160px;">
+                        <label>Status</label>
+                        <select id="calendarStatusFilter" onchange="renderCalendar()">
+                            <option value="">Todos os status</option>
+                            <option value="agendado">🟠 Agendado</option>
+                            <option value="nao-iniciado">⚪ Não Iniciado</option>
+                            <option value="andamento">🟡 Em Andamento</option>
+                            <option value="aguardando">🔵 Aguardando</option>
+                            <option value="aprovacao">🟣 Aprovação</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0; flex:1; min-width:160px;">
+                        <label>Grupo</label>
+                        <select id="calendarGroupFilter" onchange="renderCalendar()">
+                            <option value="">Todos os grupos</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="calendarLegend" class="calendar-legend"></div>
                 <div id="calendarGrid" class="calendar-grid"></div>
             </div>
 
@@ -958,6 +1004,16 @@
                 </select>
             </div>
             <div class="form-group">
+                <label>Status</label>
+                <select id="newStatus">
+                    <option value="nao-iniciado" selected>⚪ Não Iniciado</option>
+                    <option value="agendado">🟠 Agendado</option>
+                    <option value="andamento">🟡 Em Andamento</option>
+                    <option value="aguardando">🔵 Aguardando</option>
+                    <option value="aprovacao">🟣 Aprovação</option>
+                </select>
+            </div>
+            <div class="form-group">
                 <label>Vencimento (opcional)</label>
                 <input type="date" id="newDueDate">
             </div>
@@ -998,6 +1054,7 @@
             <div class="form-group">
                 <label>Status</label>
                 <select id="editDemandStatus">
+                    <option value="agendado">🟠 Agendado</option>
                     <option value="nao-iniciado">⚪ Não Iniciado</option>
                     <option value="andamento">🟡 Em Andamento</option>
                     <option value="aguardando">🔵 Aguardando</option>
@@ -1618,6 +1675,7 @@
         }
 
         const STATUS_COLUMNS = [
+            { key: 'agendado', label: 'Agendado', color: 'var(--led-orange)' },
             { key: 'nao-iniciado', label: 'Não Iniciado', color: 'var(--led-gray)' },
             { key: 'andamento', label: 'Em Andamento', color: 'var(--amber)' },
             { key: 'aguardando', label: 'Aguardando', color: 'var(--led-blue)' },
@@ -1689,6 +1747,7 @@
 
             summary.innerHTML = `
                 <div>📊 Total: <strong>${total}</strong> demandas</div>
+                ${byStatus['agendado'] ? `<div>🟠 Agendadas: ${byStatus['agendado']}</div>` : ''}
                 ${byStatus['nao-iniciado'] ? `<div>⚪ Não iniciadas: ${byStatus['nao-iniciado']}</div>` : ''}
                 ${byStatus['andamento'] ? `<div>🟡 Em andamento: ${byStatus['andamento']}</div>` : ''}
                 ${byStatus['aguardando'] ? `<div>🔵 Aguardando: ${byStatus['aguardando']}</div>` : ''}
@@ -1702,6 +1761,7 @@
             document.getElementById('newActivity').value = '';
             document.getElementById('newContext').value = '';
             document.getElementById('newPriority').value = 'media';
+            document.getElementById('newStatus').value = 'nao-iniciado';
             document.getElementById('newDueDate').value = '';
             document.getElementById('newReminderAt').value = '';
             document.getElementById('newDemandModal').classList.add('show');
@@ -1717,6 +1777,7 @@
             const activity = document.getElementById('newActivity').value;
             const context = document.getElementById('newContext').value;
             const priority = document.getElementById('newPriority').value;
+            const status = document.getElementById('newStatus').value;
             const due_date = document.getElementById('newDueDate').value;
             const reminder_at = document.getElementById('newReminderAt').value;
 
@@ -1742,7 +1803,7 @@
                         priority,
                         due_date: due_date || null,
                         reminder_at: reminder_at || null,
-                        status: 'nao-iniciado'
+                        status
                     })
                 });
 
@@ -1763,14 +1824,14 @@
                     location, activity, context, priority,
                     due_date: due_date || null,
                     reminder_at: reminder_at || null,
-                    status: 'nao-iniciado'
+                    status
                 };
                 currentDemands.push({
                     id: tempId,
                     workGroupId: groupIdInt,
                     workGroupName: (currentGroups.find(g => g.id === groupIdInt) || {}).name || '',
                     location, activity, context, priority,
-                    status: 'nao-iniciado',
+                    status,
                     dueDate: due_date || null,
                     reminderAt: reminder_at || null,
                     _pendingSync: true
@@ -1953,6 +2014,7 @@
 
         function getStatusEmoji(status) {
             const map = {
+                'agendado': '🟠',
                 'nao-iniciado': '⚪',
                 'andamento': '🟡',
                 'aguardando': '🔵',
@@ -2176,7 +2238,32 @@
                 calendarViewDate = new Date();
                 selectedCalendarDay = toLocalISODate(new Date());
             }
+            populateCalendarGroupFilter();
             renderCalendar();
+        }
+
+        function populateCalendarGroupFilter() {
+            const select = document.getElementById('calendarGroupFilter');
+            const currentValue = select.value;
+            select.innerHTML = '<option value="">Todos os grupos</option>' +
+                currentGroups.map(g => `<option value="${g.id}">${escapeHtml(g.emoji || '')} ${escapeHtml(g.name)}</option>`).join('');
+            if (currentGroups.some(g => String(g.id) === currentValue)) {
+                select.value = currentValue;
+            }
+        }
+
+        function getStatusColor(status) {
+            const col = STATUS_COLUMNS.find(c => c.key === status);
+            return col ? col.color : 'var(--led-gray)';
+        }
+
+        function renderCalendarLegend() {
+            return STATUS_COLUMNS.map(col => `
+                <div class="calendar-legend-item">
+                    <span class="calendar-legend-dot" style="background:${col.color}; box-shadow:0 0 4px ${col.color};"></span>
+                    <span>${col.label}</span>
+                </div>
+            `).join('');
         }
 
         function changeCalendarMonth(delta) {
@@ -2196,8 +2283,15 @@
         }
 
         function buildCalendarIndex() {
+            const statusFilter = document.getElementById('calendarStatusFilter').value;
+            const groupFilter = document.getElementById('calendarGroupFilter').value;
+
+            let demands = currentDemands;
+            if (statusFilter) demands = demands.filter(d => d.status === statusFilter);
+            if (groupFilter) demands = demands.filter(d => String(d.workGroupId) === groupFilter);
+
             const index = {};
-            currentDemands.forEach(d => {
+            demands.forEach(d => {
                 const dates = new Set();
                 if (d.dueDate) dates.add(d.dueDate);
                 if (d.reminderAt) dates.add(d.reminderAt.slice(0, 10));
@@ -2220,8 +2314,8 @@
 
             const maxDots = 4;
             const dots = demandsForDay.slice(0, maxDots).map(item => {
-                const style = PRIORITY_STYLES[item.priority] || PRIORITY_STYLES['media'];
-                return `<span class="calendar-dot" style="background:${style.color};" title="${escapeHtml(item.activity)}"></span>`;
+                const color = getStatusColor(item.status);
+                return `<span class="calendar-dot" style="background:${color};" title="${escapeHtml(item.activity)}"></span>`;
             }).join('');
             const extra = demandsForDay.length > maxDots
                 ? `<span class="calendar-more">+${demandsForDay.length - maxDots}</span>` : '';
@@ -2239,6 +2333,7 @@
             const month = calendarViewDate.getMonth();
 
             document.getElementById('calendarMonthLabel').textContent = `${MONTH_NAMES_PT[month]} ${year}`;
+            document.getElementById('calendarLegend').innerHTML = renderCalendarLegend();
 
             const firstOfMonth = new Date(year, month, 1);
             const startDay = new Date(firstOfMonth);
@@ -2283,13 +2378,16 @@
             }
 
             list.innerHTML = demands.map(d => `
-                <div class="demand-card" style="margin-bottom: 0.75rem;">
+                <div class="demand-card" style="margin-bottom: 0.75rem; border-left-color: ${getStatusColor(d.status)};">
                     <div class="demand-header">
                         <div>
                             <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(d.workGroupId, d.workGroupName)}</div>
                             <div class="demand-title">${escapeHtml(d.location)} - ${escapeHtml(d.activity)}</div>
                         </div>
-                        ${getPriorityBadge(d.priority)}
+                        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.3rem;">
+                            <span class="status-badge status-${d.status}">${getStatusEmoji(d.status)} ${d.status}</span>
+                            ${getPriorityBadge(d.priority)}
+                        </div>
                     </div>
                     ${d.dueDate ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; font-weight: ${isOverdue(d.dueDate) ? '700' : '400'}; color: ${isOverdue(d.dueDate) ? 'var(--led-red)' : 'var(--text-secondary)'};">${isOverdue(d.dueDate) ? '⚠️ Atrasada — venceu em' : '📅 Vence em'} ${formatDateBR(d.dueDate)}</div>` : ''}
                     ${d.reminderAt ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; color: ${new Date(d.reminderAt) <= new Date() ? 'var(--amber-bright)' : 'var(--text-secondary)'};">🔔 Lembrete: ${formatDateTimeBR(d.reminderAt)}</div>` : ''}
@@ -2407,6 +2505,7 @@
             }
 
             const statusOrder = [
+                { key: 'agendado', label: 'Agendado', color: 'var(--led-orange)' },
                 { key: 'nao-iniciado', label: 'Não Iniciado', color: 'var(--led-gray)' },
                 { key: 'andamento', label: 'Em Andamento', color: 'var(--amber)' },
                 { key: 'aguardando', label: 'Aguardando', color: 'var(--led-blue)' },
@@ -2863,6 +2962,7 @@
             const concludedOnDate = (history || []).filter(h => h.status === 'concluido' && h.statusChangeDate === filterDateIso);
 
             const STATUS_SECTIONS = [
+                { key: 'agendado', label: 'Agendado', color: '#ff9f43', emoji: '🟠' },
                 { key: 'nao-iniciado', label: 'Não Iniciado', color: '#9aa0a7', emoji: '⚪' },
                 { key: 'andamento', label: 'Em Andamento', color: '#ffc35c', emoji: '🟡' },
                 { key: 'aguardando', label: 'Aguardando', color: '#4fc3f7', emoji: '🔵' },
