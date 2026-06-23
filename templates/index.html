@@ -508,6 +508,7 @@
         .calendar-day-dots { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 0.35rem; }
         .calendar-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
         .calendar-more { font-size: 0.55rem; color: var(--text-secondary); }
+        .calendar-completed-badge { font-size: 0.58rem; color: var(--led-green); font-weight: 700; margin-top: 2px; }
 
         .calendar-legend {
             display: flex;
@@ -865,6 +866,10 @@
                         <select id="calendarGroupFilter" onchange="renderCalendar()">
                             <option value="">Todos os grupos</option>
                         </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0; display:flex; align-items:center; gap:0.5rem; padding-bottom: 0.6rem;">
+                        <input type="checkbox" id="calendarShowCompleted" checked onchange="renderCalendar()" style="width:auto; accent-color: var(--led-green); cursor:pointer;">
+                        <label style="margin-bottom:0; cursor:pointer;" onclick="document.getElementById('calendarShowCompleted').click()">✅ Mostrar concluídas</label>
                     </div>
                 </div>
 
@@ -2365,14 +2370,46 @@
         const MONTH_NAMES_PT = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
                                  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 
-        function initCalendar() {
+        let calendarHistoryCache = [];
+
+        async function initCalendar() {
             if (!calendarInitialized) {
                 calendarInitialized = true;
                 calendarViewDate = new Date();
                 selectedCalendarDay = toLocalISODate(new Date());
             }
             populateCalendarGroupFilter();
+            await loadCalendarHistory();
             renderCalendar();
+        }
+
+        async function loadCalendarHistory() {
+            try {
+                const response = await fetchWithRetry(`${API_URL}/history`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (response.ok) {
+                    const history = await response.json();
+                    calendarHistoryCache = history.filter(h => h.status === 'concluido');
+                }
+            } catch (e) {
+                console.error('Erro ao carregar concluídas para o calendário:', e);
+            }
+        }
+
+        function buildCompletedIndex() {
+            const groupFilter = document.getElementById('calendarGroupFilter').value;
+            let items = calendarHistoryCache;
+            if (groupFilter) items = items.filter(h => String(h.workGroupId) === groupFilter);
+
+            const index = {};
+            items.forEach(h => {
+                const iso = h.statusChangeDate;
+                if (!iso) return;
+                if (!index[iso]) index[iso] = [];
+                index[iso].push(h);
+            });
+            return index;
         }
 
         function populateCalendarGroupFilter() {
@@ -2392,12 +2429,18 @@
         }
 
         function renderCalendarLegend() {
-            return STATUS_COLUMNS.map(col => `
+            const statusItems = STATUS_COLUMNS.map(col => `
                 <div class="calendar-legend-item">
                     <span class="calendar-legend-dot" style="background:${col.color}; box-shadow:0 0 4px ${col.color};"></span>
                     <span>${col.label}</span>
                 </div>
             `).join('');
+            return statusItems + `
+                <div class="calendar-legend-item">
+                    <span style="color: var(--led-green); font-weight: 700; font-size: 0.7rem;">✓N</span>
+                    <span>Concluídas no dia</span>
+                </div>
+            `;
         }
 
         function changeCalendarMonth(delta) {
@@ -2437,7 +2480,7 @@
             return index;
         }
 
-        function renderCalendarDay(dateObj, isCurrentMonth, demandsForDay) {
+        function renderCalendarDay(dateObj, isCurrentMonth, demandsForDay, completedForDay) {
             const iso = toLocalISODate(dateObj);
             const isToday = iso === toLocalISODate(new Date());
             const isSelected = iso === selectedCalendarDay;
@@ -2454,10 +2497,15 @@
             const extra = demandsForDay.length > maxDots
                 ? `<span class="calendar-more">+${demandsForDay.length - maxDots}</span>` : '';
 
+            const showCompleted = document.getElementById('calendarShowCompleted').checked;
+            const completedBadge = (showCompleted && completedForDay.length > 0)
+                ? `<div class="calendar-completed-badge">✓ ${completedForDay.length}</div>` : '';
+
             return `
                 <div class="${classes.join(' ')}" onclick="selectCalendarDay('${iso}')">
                     <div class="calendar-day-number">${dateObj.getDate()}</div>
                     <div class="calendar-day-dots">${dots}${extra}</div>
+                    ${completedBadge}
                 </div>
             `;
         }
@@ -2478,6 +2526,7 @@
             endDay.setDate(endDay.getDate() + (6 - endDay.getDay()));
 
             const index = buildCalendarIndex();
+            const completedIndex = buildCompletedIndex();
 
             const weekdayHeaders = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB']
                 .map(w => `<div class="calendar-weekday-header">${w}</div>`).join('');
@@ -2487,18 +2536,18 @@
             while (cursor <= endDay) {
                 const iso = toLocalISODate(cursor);
                 const isCurrentMonth = cursor.getMonth() === month;
-                cells += renderCalendarDay(new Date(cursor), isCurrentMonth, index[iso] || []);
+                cells += renderCalendarDay(new Date(cursor), isCurrentMonth, index[iso] || [], completedIndex[iso] || []);
                 cursor.setDate(cursor.getDate() + 1);
             }
 
             document.getElementById('calendarGrid').innerHTML = weekdayHeaders + cells;
 
             if (selectedCalendarDay) {
-                renderCalendarDayDetail(selectedCalendarDay, index[selectedCalendarDay] || []);
+                renderCalendarDayDetail(selectedCalendarDay, index[selectedCalendarDay] || [], completedIndex[selectedCalendarDay] || []);
             }
         }
 
-        function renderCalendarDayDetail(iso, demands) {
+        function renderCalendarDayDetail(iso, demands, completed) {
             const title = document.getElementById('calendarDayDetailTitle');
             const list = document.getElementById('calendarDayDetailList');
 
@@ -2506,32 +2555,52 @@
             const isTodaySelected = iso === toLocalISODate(new Date());
             title.textContent = `${isTodaySelected ? '📍 Hoje — ' : '📌 '}${day}/${m}/${y} (${demands.length} ${demands.length === 1 ? 'item' : 'itens'})`;
 
+            const showCompleted = document.getElementById('calendarShowCompleted').checked;
+
+            let html = '';
+
             if (demands.length === 0) {
-                list.innerHTML = '<div class="kanban-empty">Nada planejado para este dia</div>';
-                return;
+                html += '<div class="kanban-empty">Nada planejado para este dia</div>';
+            } else {
+                html += demands.map(d => `
+                    <div class="demand-card" style="margin-bottom: 0.75rem; border-left-color: ${getStatusColor(d.status)};">
+                        <div class="demand-header">
+                            <div>
+                                <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(d.workGroupId, d.workGroupName)}</div>
+                                <div class="demand-title">${escapeHtml(d.location)} - ${escapeHtml(d.activity)}</div>
+                            </div>
+                            <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.3rem;">
+                                <span class="status-badge status-${d.status}">${getStatusEmoji(d.status)} ${d.status}</span>
+                                ${getPriorityBadge(d.priority)}
+                            </div>
+                        </div>
+                        ${d.dueDate ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; font-weight: ${isOverdue(d.dueDate) ? '700' : '400'}; color: ${isOverdue(d.dueDate) ? 'var(--led-red)' : 'var(--text-secondary)'};">${isOverdue(d.dueDate) ? '⚠️ Atrasada — venceu em' : '📅 Vence em'} ${formatDateBR(d.dueDate)}</div>` : ''}
+                        ${d.reminderAt ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; color: ${new Date(d.reminderAt) <= new Date() ? 'var(--amber-bright)' : 'var(--text-secondary)'};">🔔 Lembrete: ${formatDateTimeBR(d.reminderAt)}</div>` : ''}
+                        ${d.context ? `<p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem;">📌 ${escapeHtml(d.context)}</p>` : ''}
+                        <div style="display: flex; gap: 0.5rem;">
+                            <button class="btn btn-sm btn-secondary" onclick="completeDemand(${d.id})">✅ Concluir</button>
+                            <button class="btn btn-sm btn-secondary" onclick="editDemand(${d.id})">✏️ Editar</button>
+                        </div>
+                    </div>
+                `).join('');
             }
 
-            list.innerHTML = demands.map(d => `
-                <div class="demand-card" style="margin-bottom: 0.75rem; border-left-color: ${getStatusColor(d.status)};">
-                    <div class="demand-header">
-                        <div>
-                            <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(d.workGroupId, d.workGroupName)}</div>
-                            <div class="demand-title">${escapeHtml(d.location)} - ${escapeHtml(d.activity)}</div>
-                        </div>
-                        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.3rem;">
-                            <span class="status-badge status-${d.status}">${getStatusEmoji(d.status)} ${d.status}</span>
-                            ${getPriorityBadge(d.priority)}
-                        </div>
+            if (showCompleted && completed.length > 0) {
+                html += `
+                    <h3 style="margin-top: 1.5rem; border-left: 3px solid var(--led-green); padding-left: 0.6rem; border-bottom: none; padding-bottom: 0;">✅ Concluídas neste dia (${completed.length})</h3>
+                    <div style="margin-top: 1rem; display: grid; gap: 0.75rem;">
+                        ${completed.map(h => `
+                            <div class="demand-card" style="border-left-color: var(--led-green);">
+                                <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(h.workGroupId)}</div>
+                                <div class="demand-title">${escapeHtml(h.location)} - ${escapeHtml(h.activity)}</div>
+                                ${h.context ? `<p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.4rem;">📌 ${escapeHtml(h.context)}</p>` : ''}
+                            </div>
+                        `).join('')}
                     </div>
-                    ${d.dueDate ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; font-weight: ${isOverdue(d.dueDate) ? '700' : '400'}; color: ${isOverdue(d.dueDate) ? 'var(--led-red)' : 'var(--text-secondary)'};">${isOverdue(d.dueDate) ? '⚠️ Atrasada — venceu em' : '📅 Vence em'} ${formatDateBR(d.dueDate)}</div>` : ''}
-                    ${d.reminderAt ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; color: ${new Date(d.reminderAt) <= new Date() ? 'var(--amber-bright)' : 'var(--text-secondary)'};">🔔 Lembrete: ${formatDateTimeBR(d.reminderAt)}</div>` : ''}
-                    ${d.context ? `<p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem;">📌 ${escapeHtml(d.context)}</p>` : ''}
-                    <div style="display: flex; gap: 0.5rem;">
-                        <button class="btn btn-sm btn-secondary" onclick="completeDemand(${d.id})">✅ Concluir</button>
-                        <button class="btn btn-sm btn-secondary" onclick="editDemand(${d.id})">✏️ Editar</button>
-                    </div>
-                </div>
-            `).join('');
+                `;
+            }
+
+            list.innerHTML = html;
         }
 
         // ============= DASHBOARD =============
