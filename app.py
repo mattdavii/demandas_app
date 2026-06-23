@@ -176,6 +176,27 @@ class DemandHistory(db.Model):
             'createdDate': self.created_date.isoformat() if self.created_date else None
         }
 
+class Note(db.Model):
+    __tablename__ = 'notes'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    subject = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    checklist = db.Column(db.JSON, default=list)  # [{"text": "...", "checked": false}, ...]
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'subject': self.subject,
+            'description': self.description,
+            'checklist': self.checklist or [],
+            'createdAt': self.created_at.isoformat() if self.created_at else None,
+            'updatedAt': self.updated_at.isoformat() if self.updated_at else None
+        }
+
 # ============= CRIAR TABELAS NA INICIALIZAÇÃO =============
 with app.app_context():
     db.create_all()
@@ -585,6 +606,77 @@ def update_demand_status(demand_id):
     
     db.session.commit()
     return jsonify({'message': 'Status atualizado'}), 200
+
+# ============= ROTAS DE NOTAS =============
+@app.route('/api/notes', methods=['GET'])
+@jwt_required()
+def get_notes():
+    """Listar notas do usuário (mais recentes primeiro)"""
+    user_id = int(get_jwt_identity())
+    notes = Note.query.filter_by(user_id=user_id).order_by(Note.updated_at.desc()).all()
+    return jsonify([n.to_dict() for n in notes]), 200
+
+@app.route('/api/notes', methods=['POST'])
+@jwt_required()
+def create_note():
+    """Criar nova nota"""
+    user_id = int(get_jwt_identity())
+    data = request.get_json()
+
+    if not data or not data.get('subject'):
+        return jsonify({'error': 'Assunto é obrigatório'}), 400
+
+    note = Note(
+        user_id=user_id,
+        subject=data['subject'],
+        description=data.get('description', ''),
+        checklist=data.get('checklist', [])
+    )
+    db.session.add(note)
+    db.session.commit()
+
+    return jsonify(note.to_dict()), 201
+
+@app.route('/api/notes/<int:note_id>', methods=['PUT'])
+@jwt_required()
+def update_note(note_id):
+    """Atualizar nota (assunto, descrição e/ou checklist)"""
+    user_id = int(get_jwt_identity())
+    note = Note.query.get_or_404(note_id)
+
+    if note.user_id != user_id:
+        return jsonify({'error': 'Acesso negado'}), 403
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Dados não fornecidos'}), 400
+
+    if 'subject' in data:
+        if not data['subject']:
+            return jsonify({'error': 'Assunto é obrigatório'}), 400
+        note.subject = data['subject']
+    if 'description' in data:
+        note.description = data['description']
+    if 'checklist' in data:
+        note.checklist = data['checklist']
+
+    db.session.commit()
+    return jsonify(note.to_dict()), 200
+
+@app.route('/api/notes/<int:note_id>', methods=['DELETE'])
+@jwt_required()
+def delete_note(note_id):
+    """Deletar nota"""
+    user_id = int(get_jwt_identity())
+    note = Note.query.get_or_404(note_id)
+
+    if note.user_id != user_id:
+        return jsonify({'error': 'Acesso negado'}), 403
+
+    db.session.delete(note)
+    db.session.commit()
+
+    return jsonify({'message': 'Nota deletada'}), 200
 
 # ============= ROTAS DE LEMBRETE =============
 @app.route('/api/reminders/check', methods=['POST'])
