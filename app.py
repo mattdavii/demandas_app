@@ -676,7 +676,8 @@ def get_whatsapp_text():
         'andamento': '🟡',
         'nao-iniciado': '⚪',
         'aguardando': '🔵',
-        'aprovacao': '🟣'
+        'aprovacao': '🟣',
+        'agendado': '🟠'
     }
     
     for group in groups:
