@@ -55,6 +55,8 @@ class User(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     reset_token = db.Column(db.String(255), unique=True, nullable=True)
     reset_token_expires = db.Column(db.DateTime, nullable=True)
+    access_verified = db.Column(db.Boolean, default=True)
+    is_admin = db.Column(db.Boolean, default=False)
     
     # Relacionamentos
     demands = db.relationship('Demand', backref='user', lazy=True, cascade='all, delete-orphan')
@@ -84,7 +86,9 @@ class User(db.Model):
             'username': self.username,
             'email': self.email,
             'full_name': self.full_name,
-            'createdAt': self.created_at.isoformat() if self.created_at else None
+            'createdAt': self.created_at.isoformat() if self.created_at else None,
+            'accessVerified': self.access_verified,
+            'isAdmin': self.is_admin
         }
 
 class WorkGroup(db.Model):
@@ -197,6 +201,34 @@ class Note(db.Model):
             'updatedAt': self.updated_at.isoformat() if self.updated_at else None
         }
 
+class AccessKey(db.Model):
+    __tablename__ = 'access_keys'
+
+    id = db.Column(db.Integer, primary_key=True)
+    key_value = db.Column(db.String(64), unique=True, nullable=False)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    used_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    used_at = db.Column(db.DateTime, nullable=True)
+    is_active = db.Column(db.Boolean, default=True)
+
+    def to_dict(self):
+        used_by_user = User.query.get(self.used_by) if self.used_by else None
+        if self.used_by:
+            status = 'used'
+        elif not self.is_active:
+            status = 'revoked'
+        else:
+            status = 'available'
+        return {
+            'id': self.id,
+            'key': self.key_value,
+            'createdAt': self.created_at.isoformat() if self.created_at else None,
+            'usedBy': used_by_user.username if used_by_user else None,
+            'usedAt': self.used_at.isoformat() if self.used_at else None,
+            'status': status
+        }
+
 # ============= CRIAR TABELAS NA INICIALIZAÇÃO =============
 with app.app_context():
     db.create_all()
@@ -205,10 +237,25 @@ with app.app_context():
     try:
         db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS reminder_at TIMESTAMP"))
         db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN DEFAULT FALSE"))
+        db.session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS access_verified BOOLEAN DEFAULT TRUE"))
+        db.session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE"))
         db.session.commit()
     except Exception as e:
         db.session.rollback()
         print(f"Aviso: migração de colunas de lembrete não aplicada (provável SQLite local, ignorar): {e}")
+
+    # Promove automaticamente a conta mais antiga a administrador, caso ainda não haja nenhum
+    # (garante que o sistema de chaves tenha um admin de partida, sem passo manual)
+    try:
+        if User.query.filter_by(is_admin=True).first() is None:
+            first_user = User.query.order_by(User.id.asc()).first()
+            if first_user:
+                first_user.is_admin = True
+                first_user.access_verified = True
+                db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"Aviso: não foi possível definir admin automático: {e}")
 
 # ============= ROTAS DE PÁGINA =============
 @app.route('/')
@@ -254,7 +301,8 @@ def register():
     user = User(
         username=data['username'],
         email=data['email'],
-        full_name=data.get('full_name', '')
+        full_name=data.get('full_name', ''),
+        access_verified=False
     )
     user.set_password(data['password'])
     
@@ -374,6 +422,90 @@ def get_current_user():
         return jsonify({'error': 'Usuário não encontrado'}), 404
     
     return jsonify(user.to_dict()), 200
+
+@app.route('/api/auth/verify-key', methods=['POST'])
+@jwt_required()
+def verify_access_key():
+    """Libera o acesso da conta usando uma chave de convite válida (uso único)"""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+
+    if not user:
+        return jsonify({'error': 'Usuário não encontrado'}), 404
+
+    if user.access_verified:
+        return jsonify({'message': 'Acesso já liberado', 'user': user.to_dict()}), 200
+
+    data = request.get_json()
+    key_value = (data or {}).get('key', '').strip()
+
+    if not key_value:
+        return jsonify({'error': 'Chave não fornecida'}), 400
+
+    access_key = AccessKey.query.filter_by(key_value=key_value).first()
+
+    if not access_key:
+        return jsonify({'error': 'Chave inválida'}), 404
+    if not access_key.is_active:
+        return jsonify({'error': 'Chave revogada'}), 403
+    if access_key.used_by is not None:
+        return jsonify({'error': 'Chave já utilizada'}), 409
+
+    access_key.used_by = user.id
+    access_key.used_at = datetime.now()
+    user.access_verified = True
+    db.session.commit()
+
+    return jsonify({'message': 'Acesso liberado com sucesso', 'user': user.to_dict()}), 200
+
+def admin_required(user_id):
+    user = User.query.get(user_id)
+    return user is not None and user.is_admin
+
+@app.route('/api/admin/keys', methods=['GET'])
+@jwt_required()
+def list_access_keys():
+    """Listar todas as chaves de acesso (somente admin)"""
+    user_id = int(get_jwt_identity())
+    if not admin_required(user_id):
+        return jsonify({'error': 'Acesso negado'}), 403
+
+    keys = AccessKey.query.order_by(AccessKey.created_at.desc()).all()
+    return jsonify([k.to_dict() for k in keys]), 200
+
+@app.route('/api/admin/keys', methods=['POST'])
+@jwt_required()
+def create_access_key():
+    """Gerar nova chave de acesso de uso único (somente admin)"""
+    user_id = int(get_jwt_identity())
+    if not admin_required(user_id):
+        return jsonify({'error': 'Acesso negado'}), 403
+
+    new_key = AccessKey(
+        key_value=secrets.token_hex(6),
+        created_by=user_id
+    )
+    db.session.add(new_key)
+    db.session.commit()
+
+    return jsonify(new_key.to_dict()), 201
+
+@app.route('/api/admin/keys/<int:key_id>', methods=['DELETE'])
+@jwt_required()
+def revoke_access_key(key_id):
+    """Revogar uma chave ainda não utilizada (somente admin)"""
+    user_id = int(get_jwt_identity())
+    if not admin_required(user_id):
+        return jsonify({'error': 'Acesso negado'}), 403
+
+    key = AccessKey.query.get_or_404(key_id)
+    if key.used_by is not None:
+        return jsonify({'error': 'Não é possível revogar uma chave já utilizada'}), 400
+
+    db.session.delete(key)
+    db.session.commit()
+
+    return jsonify({'message': 'Chave revogada'}), 200
 
 @app.route('/api/auth/change-password', methods=['POST'])
 @jwt_required()
