@@ -528,6 +528,25 @@
         }
         .calendar-legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 
+        .history-days-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 0.85rem;
+        }
+        .history-day-card {
+            background: var(--panel-raised);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1rem;
+            cursor: pointer;
+            transition: border-color 0.15s;
+            text-align: center;
+        }
+        .history-day-card:hover { border-color: var(--amber-dim); }
+        .history-day-date { font-size: 0.85rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.3rem; }
+        .history-day-count { font-size: 0.65rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.6rem; }
+        .history-day-dots { display: flex; justify-content: center; gap: 3px; flex-wrap: wrap; }
+
         .reminder-banner {
             position: fixed;
             top: 1rem;
@@ -958,6 +977,15 @@
     </div>
 
     <!-- MODAL TEXTO WHATSAPP -->
+    <!-- MODAL HISTÓRICO DO DIA -->
+    <div id="historyDayModal" class="modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <span class="close-modal" onclick="closeHistoryDayModal()">&times;</span>
+            <div class="modal-header" id="historyDayModalTitle"></div>
+            <div id="historyDayModalList" style="max-height: 60vh; overflow-y: auto; padding-right: 4px;"></div>
+        </div>
+    </div>
+
     <div id="whatsappModal" class="modal">
         <div class="modal-content" style="max-width: 600px;">
             <span class="close-modal" onclick="closeWhatsAppModal()">&times;</span>
@@ -2047,10 +2075,13 @@
             }
         }
 
+        let historyGroupsCache = {};
+
         function renderHistory(history) {
             const container = document.getElementById('historyList');
 
             if (!history || history.length === 0) {
+                historyGroupsCache = {};
                 container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Nenhum registro encontrado</div>';
                 return;
             }
@@ -2061,31 +2092,48 @@
                 if (!groups[day]) groups[day] = [];
                 groups[day].push(h);
             });
+            historyGroupsCache = groups;
 
             const days = Object.keys(groups).sort((a, b) => b.localeCompare(a));
+            const maxDots = 6;
 
-            container.innerHTML = days.map(day => {
+            container.innerHTML = '<div class="history-days-grid">' + days.map(day => {
                 const items = groups[day];
+                const dots = items.slice(0, maxDots).map(h => `<span class="calendar-dot" style="background:${getStatusColor(h.status)};"></span>`).join('');
+                const extra = items.length > maxDots ? `<span class="calendar-more">+${items.length - maxDots}</span>` : '';
                 return `
-                    <div class="card" style="margin-bottom: 1rem;">
-                        <h3>📅 ${formatDateBR(day)} <span style="color: var(--text-secondary); font-weight: 400; text-transform: none; letter-spacing: 0;">(${items.length})</span></h3>
-                        <div style="display: grid; gap: 0.75rem;">
-                            ${items.map(h => `
-                                <div class="demand-card" style="border-left-color: var(--led-green); margin-bottom: 0;">
-                                    <div class="demand-header">
-                                        <div>
-                                            <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(h.workGroupId)}</div>
-                                            <div class="demand-title">${escapeHtml(h.location)} - ${escapeHtml(h.activity)}</div>
-                                        </div>
-                                        <span class="status-badge status-${h.status}">${getStatusEmoji(h.status)} ${h.status}</span>
-                                    </div>
-                                    ${h.context ? `<p style="font-size: 0.8rem; color: var(--text-secondary);">📌 ${escapeHtml(h.context)}</p>` : ''}
-                                </div>
-                            `).join('')}
-                        </div>
+                    <div class="history-day-card" onclick="showHistoryDayModal('${day}')">
+                        <div class="history-day-date">📅 ${formatDateBR(day)}</div>
+                        <div class="history-day-count">${items.length} ${items.length === 1 ? 'item' : 'itens'}</div>
+                        <div class="history-day-dots">${dots}${extra}</div>
                     </div>
                 `;
-            }).join('');
+            }).join('') + '</div>';
+        }
+
+        function showHistoryDayModal(day) {
+            const items = historyGroupsCache[day] || [];
+            document.getElementById('historyDayModalTitle').textContent =
+                `📅 ${formatDateBR(day)} (${items.length} ${items.length === 1 ? 'item' : 'itens'})`;
+
+            document.getElementById('historyDayModalList').innerHTML = items.map(h => `
+                <div class="demand-card" style="border-left-color: ${getStatusColor(h.status)}; margin-bottom: 0.75rem;">
+                    <div class="demand-header">
+                        <div>
+                            <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(h.workGroupId)}</div>
+                            <div class="demand-title">${escapeHtml(h.location)} - ${escapeHtml(h.activity)}</div>
+                        </div>
+                        <span class="status-badge status-${h.status}">${getStatusEmoji(h.status)} ${h.status}</span>
+                    </div>
+                    ${h.context ? `<p style="font-size: 0.8rem; color: var(--text-secondary);">📌 ${escapeHtml(h.context)}</p>` : ''}
+                </div>
+            `).join('');
+
+            document.getElementById('historyDayModal').classList.add('show');
+        }
+
+        function closeHistoryDayModal() {
+            document.getElementById('historyDayModal').classList.remove('show');
         }
 
         function formatDateBR(isoDate) {
@@ -2253,6 +2301,7 @@
         }
 
         function getStatusColor(status) {
+            if (status === 'concluido') return 'var(--led-green)';
             const col = STATUS_COLUMNS.find(c => c.key === status);
             return col ? col.color : 'var(--led-gray)';
         }
