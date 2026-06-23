@@ -811,6 +811,21 @@
         </div>
     </div>
 
+    <!-- TELA DE CHAVE DE ACESSO -->
+    <div id="accessKeyContainer" style="display:none; max-width: 420px; width: 100%; background: var(--panel); border: 1px solid var(--panel-border); border-radius: var(--radius); padding: 2.5rem; box-shadow: 0 20px 60px rgba(0,0,0,0.5);">
+        <div class="auth-form">
+            <h2>🔒 Acesso Restrito</h2>
+            <p>Sua conta foi criada, mas o acesso à plataforma precisa ser liberado com uma chave fornecida pelo administrador.</p>
+        </div>
+        <div class="alert" id="accessKeyAlert"></div>
+        <div class="form-group">
+            <label>Chave de Acesso</label>
+            <input type="text" id="accessKeyInput" placeholder="Cole sua chave aqui">
+        </div>
+        <button class="btn btn-primary" onclick="submitAccessKey()">Liberar Acesso</button>
+        <button class="btn btn-secondary" style="margin-top: 0.75rem;" onclick="doLogout()">Sair</button>
+    </div>
+
     <!-- SEÇÃO DO APP PRINCIPAL -->
     <div class="container app-container" id="appContainer">
         <div class="header">
@@ -831,6 +846,7 @@
             <button class="tab-btn" onclick="switchTab('history')">📅 Histórico</button>
             <button class="tab-btn" onclick="switchTab('dashboard')">📊 Dashboard</button>
             <button class="tab-btn" onclick="switchTab('notes')">📝 Notas</button>
+            <button class="tab-btn" id="adminKeysTabBtn" style="display:none;" onclick="switchTab('adminkeys')">🔑 Chaves</button>
             <button class="tab-btn" onclick="switchTab('settings')">⚙️ Configurações</button>
         </div>
 
@@ -1008,6 +1024,18 @@
                 <button class="btn btn-sm btn-primary" style="width: auto;" onclick="showNewNoteModal()">➕ Nova Nota</button>
             </div>
             <div id="notesList" class="notes-grid">
+                <div>Carregando...</div>
+            </div>
+        </div>
+
+        <!-- TAB: CHAVES DE ACESSO (ADMIN) -->
+        <div id="tab-adminkeys" class="tab-content">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
+                <h3 style="margin-bottom: 0;">🔑 Chaves de Acesso</h3>
+                <button class="btn btn-sm btn-primary" style="width: auto;" onclick="createAccessKey()">➕ Gerar Nova Chave</button>
+            </div>
+            <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 1.5rem;">Cada chave libera o acesso de uma única conta nova, uma vez só. Compartilhe apenas com quem você confia.</p>
+            <div id="adminKeysList">
                 <div>Carregando...</div>
             </div>
         </div>
@@ -1525,8 +1553,11 @@
             token = null;
             currentUser = null;
             localStorage.removeItem('token');
+            localStorage.removeItem('cache_user');
             document.getElementById('authContainer').style.display = 'flex';
             document.getElementById('appContainer').classList.remove('show');
+            document.getElementById('accessKeyContainer').style.display = 'none';
+            document.getElementById('adminKeysTabBtn').style.display = 'none';
             document.getElementById('loginUsername').value = '';
             document.getElementById('loginPassword').value = '';
         }
@@ -1563,11 +1594,60 @@
                 }
             }
 
+            if (!currentUser.accessVerified) {
+                showAccessKeyGate();
+                return;
+            }
+
+            await enterApp();
+        }
+
+        function showAccessKeyGate() {
+            document.getElementById('authContainer').style.display = 'none';
+            document.getElementById('appContainer').classList.remove('show');
+            document.getElementById('accessKeyContainer').style.display = 'block';
+        }
+
+        async function submitAccessKey() {
+            const key = document.getElementById('accessKeyInput').value.trim();
+            if (!key) {
+                showAlert('accessKeyAlert', 'Digite a chave de acesso', 'danger');
+                return;
+            }
+
+            try {
+                const response = await fetchWithRetry(`${API_URL}/auth/verify-key`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ key })
+                }, 1);
+                const data = await response.json();
+
+                if (response.ok) {
+                    currentUser.accessVerified = true;
+                    localStorage.setItem('cache_user', JSON.stringify(currentUser));
+                    document.getElementById('accessKeyContainer').style.display = 'none';
+                    await enterApp();
+                } else {
+                    showAlert('accessKeyAlert', data.error || 'Chave inválida', 'danger');
+                }
+            } catch (e) {
+                console.error('Erro:', e);
+                showAlert('accessKeyAlert', 'Erro de conexão', 'danger');
+            }
+        }
+
+        async function enterApp() {
             document.getElementById('userName').textContent = currentUser.full_name || currentUser.username;
             document.getElementById('userEmail').textContent = `Email: ${currentUser.email}`;
 
             document.getElementById('authContainer').style.display = 'none';
+            document.getElementById('accessKeyContainer').style.display = 'none';
             document.getElementById('appContainer').classList.add('show');
+
+            if (currentUser.isAdmin) {
+                document.getElementById('adminKeysTabBtn').style.display = '';
+            }
 
             await Promise.all([loadGroups(), loadDemands()]);
             if (isOnline) {
@@ -3363,6 +3443,9 @@
             if (tab === 'notes') {
                 loadNotes();
             }
+            if (tab === 'adminkeys') {
+                loadAccessKeys();
+            }
             if (tab === 'calendar') {
                 initCalendar();
             }
@@ -3637,6 +3720,100 @@
             a.href = url;
             a.download = `demandas_${filterDateIso}.html`;
             a.click();
+        }
+
+        // ============= CHAVES DE ACESSO (ADMIN) =============
+        async function loadAccessKeys() {
+            const container = document.getElementById('adminKeysList');
+            container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Carregando...</div>';
+
+            try {
+                const response = await fetchWithRetry(`${API_URL}/admin/keys`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (!response.ok) throw new Error('Resposta não-OK');
+                const keys = await response.json();
+                renderAccessKeys(keys);
+            } catch (e) {
+                console.error('Erro ao carregar chaves:', e);
+                container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Erro ao carregar chaves</div>';
+            }
+        }
+
+        function renderAccessKeys(keys) {
+            const container = document.getElementById('adminKeysList');
+
+            if (keys.length === 0) {
+                container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Nenhuma chave gerada ainda.</div>';
+                return;
+            }
+
+            container.innerHTML = '<div style="display:grid; gap:0.75rem;">' + keys.map(k => {
+                const info = k.status === 'used'
+                    ? { label: `Usada por ${escapeHtml(k.usedBy || '?')}`, color: 'var(--led-gray)' }
+                    : k.status === 'revoked'
+                        ? { label: 'Revogada', color: 'var(--led-red)' }
+                        : { label: 'Disponível', color: 'var(--led-green)' };
+                return `
+                    <div class="demand-card" style="border-left-color: ${info.color};">
+                        <div class="demand-header">
+                            <div>
+                                <div class="demand-title" style="font-family: monospace; font-size: 1rem; letter-spacing: 0.04em;">${escapeHtml(k.key)}</div>
+                                <div style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 0.3rem;">Gerada em ${k.createdAt ? formatDateBR(k.createdAt.slice(0, 10)) : '—'}</div>
+                            </div>
+                            <span style="display:inline-flex; align-items:center; padding:2px 10px; border-radius:4px; font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; border:1px solid ${info.color}; color:${info.color}; white-space:nowrap;">${info.label}</span>
+                        </div>
+                        <div style="display:flex; gap:0.5rem; margin-top: 0.75rem;">
+                            <button class="btn btn-sm btn-secondary" onclick="copyAccessKey('${k.key}')">📋 Copiar</button>
+                            ${k.status === 'available' ? `<button class="btn-delete btn-sm" onclick="revokeAccessKey(${k.id})">Revogar</button>` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('') + '</div>';
+        }
+
+        async function createAccessKey() {
+            try {
+                const response = await fetchWithRetry(`${API_URL}/admin/keys`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (response.ok) {
+                    loadAccessKeys();
+                } else {
+                    alert('Erro ao gerar chave');
+                }
+            } catch (e) {
+                console.error('Erro:', e);
+                alert('Erro de conexão ao gerar chave');
+            }
+        }
+
+        async function revokeAccessKey(id) {
+            if (!confirm('Revogar esta chave? Ela não poderá mais ser usada.')) return;
+            try {
+                const response = await fetchWithRetry(`${API_URL}/admin/keys/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (response.ok) {
+                    loadAccessKeys();
+                } else {
+                    const data = await response.json().catch(() => ({}));
+                    alert(data.error || 'Erro ao revogar chave');
+                }
+            } catch (e) {
+                console.error('Erro:', e);
+                alert('Erro de conexão ao revogar chave');
+            }
+        }
+
+        function copyAccessKey(key) {
+            navigator.clipboard.writeText(key).then(() => {
+                alert('Chave copiada!');
+            }).catch(() => {
+                alert('Não foi possível copiar automaticamente. Chave: ' + key);
+            });
         }
 
         function showChangePasswordModal() {
