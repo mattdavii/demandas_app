@@ -437,7 +437,7 @@
         .kanban-column-cards::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
         .kanban-column-cards::-webkit-scrollbar-thumb:hover { background: var(--amber-dim); }
 
-        .stat-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1rem; }
+        .stat-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1rem; }
         @media (max-width: 900px) { .stat-grid { grid-template-columns: repeat(3, 1fr); } }
         @media (max-width: 600px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } }
         .stat-card {
@@ -796,6 +796,26 @@
 
         <!-- TAB: DASHBOARD -->
         <div id="tab-dashboard" class="tab-content">
+            <div class="card" style="margin-bottom: 1.5rem;">
+                <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-end;">
+                    <div class="form-group" style="margin-bottom:0; flex:1; min-width:160px;">
+                        <label>Período</label>
+                        <select id="dashboardPeriod" onchange="loadDashboardStats()">
+                            <option value="7">Últimos 7 dias</option>
+                            <option value="14">Últimos 14 dias</option>
+                            <option value="30">Últimos 30 dias</option>
+                            <option value="90">Últimos 90 dias</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0; flex:1; min-width:160px;">
+                        <label>Grupo</label>
+                        <select id="dashboardGroupFilter" onchange="loadDashboardStats()">
+                            <option value="">Todos os grupos</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-sm" style="width:auto; background:transparent; color:var(--led-blue); border:1px solid var(--led-blue);" onclick="downloadDashboardHtml()">📊 Exportar Dashboard (HTML)</button>
+                </div>
+            </div>
             <div id="dashboardContent">
                 <div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Carregando...</div>
             </div>
@@ -1961,9 +1981,27 @@
         }
 
         // ============= DASHBOARD =============
+        function populateDashboardGroupFilter() {
+            const select = document.getElementById('dashboardGroupFilter');
+            const currentValue = select.value;
+            select.innerHTML = '<option value="">Todos os grupos</option>' +
+                currentGroups.map(g => `<option value="${g.id}">${escapeHtml(g.emoji || '')} ${escapeHtml(g.name)}</option>`).join('');
+            if (currentGroups.some(g => String(g.id) === currentValue)) {
+                select.value = currentValue;
+            }
+        }
+
+        function getDashboardFilters() {
+            const periodDays = parseInt(document.getElementById('dashboardPeriod').value) || 7;
+            const groupFilterId = document.getElementById('dashboardGroupFilter').value;
+            return { periodDays, groupFilterId };
+        }
+
         async function loadDashboardStats() {
             const container = document.getElementById('dashboardContent');
             container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Carregando...</div>';
+
+            populateDashboardGroupFilter();
 
             try {
                 const response = await fetch(`${API_URL}/history`, {
@@ -1977,6 +2015,80 @@
             }
         }
 
+        // Calcula todos os números/gráficos do dashboard a partir do histórico e dos filtros atuais.
+        // Usado tanto pela tela viva quanto pelo exportador de HTML (mesma fonte de verdade).
+        function computeDashboardData(history, periodDays, groupFilterId) {
+            const filteredDemands = groupFilterId
+                ? currentDemands.filter(d => String(d.workGroupId) === groupFilterId)
+                : currentDemands;
+
+            const periodStart = new Date();
+            periodStart.setDate(periodStart.getDate() - periodDays);
+            const periodStartIso = toLocalISODate(periodStart);
+
+            let periodHistory = (history || []).filter(h => h.statusChangeDate && h.statusChangeDate >= periodStartIso);
+            if (groupFilterId) {
+                periodHistory = periodHistory.filter(h => String(h.workGroupId) === groupFilterId);
+            }
+
+            const notStartedCount = filteredDemands.filter(d => d.status === 'nao-iniciado').length;
+            const urgentCount = filteredDemands.filter(d => d.priority === 'urgente').length;
+            const inProgressCount = filteredDemands.filter(d => d.status === 'andamento').length;
+            const overdueCount = filteredDemands.filter(d => isOverdue(d.dueDate)).length;
+            const concludedInPeriod = periodHistory.filter(h => h.status === 'concluido').length;
+
+            const concludedWithDuration = periodHistory.filter(h => h.status === 'concluido' && h.createdDate && h.statusChangeDate);
+            let avgDays = null;
+            if (concludedWithDuration.length > 0) {
+                const totalDays = concludedWithDuration.reduce((sum, h) => {
+                    const created = new Date(h.createdDate + 'T00:00:00');
+                    const concluded = new Date(h.statusChangeDate + 'T00:00:00');
+                    return sum + Math.max(0, Math.round((concluded - created) / 86400000));
+                }, 0);
+                avgDays = (totalDays / concludedWithDuration.length).toFixed(1);
+            }
+
+            const statusOrder = [
+                { key: 'nao-iniciado', label: 'Não Iniciado', color: 'var(--led-gray)' },
+                { key: 'andamento', label: 'Em Andamento', color: 'var(--amber)' },
+                { key: 'aguardando', label: 'Aguardando', color: 'var(--led-blue)' },
+                { key: 'aprovacao', label: 'Aprovação', color: 'var(--led-purple)' }
+            ];
+            const statusCounts = statusOrder.map(s => ({
+                label: s.label, color: s.color,
+                count: filteredDemands.filter(d => d.status === s.key).length
+            }));
+
+            const priorityOrder = [
+                { key: 'urgente', label: 'Urgente', color: 'var(--led-red)' },
+                { key: 'alta', label: 'Alta', color: 'var(--amber)' },
+                { key: 'media', label: 'Média', color: 'var(--led-blue)' },
+                { key: 'baixa', label: 'Baixa', color: 'var(--led-gray)' }
+            ];
+            const priorityCounts = priorityOrder.map(p => ({
+                label: p.label, color: p.color,
+                count: filteredDemands.filter(d => d.priority === p.key).length
+            }));
+
+            const groupsToShow = groupFilterId ? currentGroups.filter(g => String(g.id) === groupFilterId) : currentGroups;
+            const groupCounts = groupsToShow.map(g => ({
+                label: escapeHtml(`${g.emoji || ''} ${g.name}`.trim()),
+                color: g.color || '#f5a623',
+                count: currentDemands.filter(d => d.workGroupId === g.id).length
+            })).filter(g => g.count > 0);
+
+            const trendBuckets = buildTrendBuckets(periodHistory, periodDays);
+
+            return {
+                periodDays, groupFilterId,
+                notStartedCount, urgentCount, inProgressCount, overdueCount, concludedInPeriod, avgDays,
+                statusCounts, priorityCounts, groupCounts, trendBuckets,
+                maxStatus: Math.max(1, ...statusCounts.map(s => s.count)),
+                maxPriority: Math.max(1, ...priorityCounts.map(p => p.count)),
+                maxGroup: Math.max(1, ...groupCounts.map(g => g.count))
+            };
+        }
+
         function barRow(label, count, max, color) {
             const pct = Math.max(2, Math.round((count / max) * 100));
             return `
@@ -1987,17 +2099,17 @@
             `;
         }
 
-        function renderTrendChart(days) {
-            const maxCount = Math.max(1, ...days.map(d => d.count));
+        function renderTrendChart(buckets) {
+            const maxCount = Math.max(1, ...buckets.map(b => b.count));
             return `
                 <div class="trend-chart">
-                    ${days.map(d => {
-                        const heightPct = Math.max(4, Math.round((d.count / maxCount) * 100));
+                    ${buckets.map(b => {
+                        const heightPct = Math.max(4, Math.round((b.count / maxCount) * 100));
                         return `
                             <div class="trend-bar-wrap">
-                                <div class="trend-bar-count">${d.count > 0 ? d.count : ''}</div>
+                                <div class="trend-bar-count">${b.count > 0 ? b.count : ''}</div>
                                 <div class="trend-bar" style="height:${heightPct}%;"></div>
-                                <div class="trend-bar-label">${d.label}</div>
+                                <div class="trend-bar-label">${b.label}</div>
                             </div>
                         `;
                     }).join('')}
@@ -2005,95 +2117,216 @@
             `;
         }
 
-        function buildTrendDays(history, numDays) {
-            const days = [];
-            for (let i = numDays - 1; i >= 0; i--) {
-                const d = new Date();
-                d.setDate(d.getDate() - i);
-                const iso = toLocalISODate(d);
-                const count = (history || []).filter(h => h.status === 'concluido' && h.statusChangeDate === iso).length;
-                days.push({ iso, label: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), count });
+        // Granularidade adaptativa: diária até 30 dias, semanal acima disso
+        // (90 barras diárias ficariam ilegíveis num gráfico desse tamanho).
+        function buildTrendBuckets(history, periodDays) {
+            if (periodDays <= 30) {
+                const days = [];
+                for (let i = periodDays - 1; i >= 0; i--) {
+                    const d = new Date();
+                    d.setDate(d.getDate() - i);
+                    const iso = toLocalISODate(d);
+                    const count = (history || []).filter(h => h.status === 'concluido' && h.statusChangeDate === iso).length;
+                    days.push({ label: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), count });
+                }
+                return days;
             }
-            return days;
+
+            const buckets = [];
+            const numWeeks = Math.ceil(periodDays / 7);
+            for (let w = numWeeks - 1; w >= 0; w--) {
+                const end = new Date();
+                end.setDate(end.getDate() - (w * 7));
+                const start = new Date(end);
+                start.setDate(start.getDate() - 6);
+                const startIso = toLocalISODate(start);
+                const endIso = toLocalISODate(end);
+                const count = (history || []).filter(h => h.status === 'concluido' && h.statusChangeDate >= startIso && h.statusChangeDate <= endIso).length;
+                buckets.push({ label: `${String(start.getDate()).padStart(2,'0')}/${String(start.getMonth() + 1).padStart(2,'0')}`, count });
+            }
+            return buckets;
         }
 
         function renderDashboard(history) {
             const container = document.getElementById('dashboardContent');
-            const notStartedCount = currentDemands.filter(d => d.status === 'nao-iniciado').length;
-
-            const sevenDaysAgo = new Date();
-            sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-            const sevenDaysAgoIso = toLocalISODate(sevenDaysAgo);
-            const concludedLast7 = (history || []).filter(h => {
-                if (h.status !== 'concluido' || !h.statusChangeDate) return false;
-                return h.statusChangeDate >= sevenDaysAgoIso;
-            }).length;
-
-            const urgentCount = currentDemands.filter(d => d.priority === 'urgente').length;
-            const inProgressCount = currentDemands.filter(d => d.status === 'andamento').length;
-            const overdueCount = currentDemands.filter(d => isOverdue(d.dueDate)).length;
-
-            const priorityOrder = [
-                { key: 'urgente', label: 'Urgente', color: 'var(--led-red)' },
-                { key: 'alta', label: 'Alta', color: 'var(--amber)' },
-                { key: 'media', label: 'Média', color: 'var(--led-blue)' },
-                { key: 'baixa', label: 'Baixa', color: 'var(--led-gray)' }
-            ];
-            const priorityCounts = priorityOrder.map(p => ({
-                label: p.label, color: p.color,
-                count: currentDemands.filter(d => d.priority === p.key).length
-            }));
-
-            const groupCounts = currentGroups.map(g => ({
-                label: escapeHtml(`${g.emoji || ''} ${g.name}`.trim()),
-                color: g.color || '#f5a623',
-                count: currentDemands.filter(d => d.workGroupId === g.id).length
-            })).filter(g => g.count > 0);
-
-            const maxPriority = Math.max(1, ...priorityCounts.map(p => p.count));
-            const maxGroup = Math.max(1, ...groupCounts.map(g => g.count));
-            const trendDays = buildTrendDays(history, 7);
+            const { periodDays, groupFilterId } = getDashboardFilters();
+            const d = computeDashboardData(history, periodDays, groupFilterId);
+            const trendLabel = periodDays <= 30 ? 'por Dia' : 'por Semana';
 
             container.innerHTML = `
                 <div class="stat-grid">
                     <div class="stat-card">
-                        <div class="stat-value">${notStartedCount}</div>
+                        <div class="stat-value">${d.notStartedCount}</div>
                         <div class="stat-label">Pendentes</div>
                     </div>
                     <div class="stat-card" style="border-color: var(--led-red);">
-                        <div class="stat-value" style="color: var(--led-red);">${overdueCount}</div>
+                        <div class="stat-value" style="color: var(--led-red);">${d.overdueCount}</div>
                         <div class="stat-label">Atrasadas</div>
                     </div>
                     <div class="stat-card" style="border-color: var(--amber);">
-                        <div class="stat-value" style="color: var(--amber-bright);">${urgentCount}</div>
+                        <div class="stat-value" style="color: var(--amber-bright);">${d.urgentCount}</div>
                         <div class="stat-label">Urgentes</div>
                     </div>
                     <div class="stat-card" style="border-color: var(--led-blue);">
-                        <div class="stat-value" style="color: var(--led-blue);">${inProgressCount}</div>
+                        <div class="stat-value" style="color: var(--led-blue);">${d.inProgressCount}</div>
                         <div class="stat-label">Em Andamento</div>
                     </div>
                     <div class="stat-card" style="border-color: var(--led-green);">
-                        <div class="stat-value" style="color: var(--led-green);">${concludedLast7}</div>
-                        <div class="stat-label">Concluídas (7 dias)</div>
+                        <div class="stat-value" style="color: var(--led-green);">${d.concludedInPeriod}</div>
+                        <div class="stat-label">Concluídas (${periodDays}d)</div>
+                    </div>
+                    <div class="stat-card" style="border-color: var(--led-purple);">
+                        <div class="stat-value" style="color: var(--led-purple);">${d.avgDays !== null ? d.avgDays : '—'}</div>
+                        <div class="stat-label">Dias p/ Concluir (méd.)</div>
                     </div>
                 </div>
 
                 <div class="grid" style="margin-top: 1.5rem;">
                     <div class="card">
-                        <h3>📈 Tendência — Concluídas por Dia</h3>
-                        ${renderTrendChart(trendDays)}
+                        <h3>📈 Tendência — Concluídas ${trendLabel}</h3>
+                        ${renderTrendChart(d.trendBuckets)}
                     </div>
                     <div class="card">
-                        <h3>Por Prioridade</h3>
-                        ${priorityCounts.map(p => barRow(p.label, p.count, maxPriority, p.color)).join('')}
+                        <h3>Por Status</h3>
+                        ${d.statusCounts.map(s => barRow(s.label, s.count, d.maxStatus, s.color)).join('')}
                     </div>
                 </div>
 
-                <div class="card" style="margin-top: 1.5rem;">
-                    <h3>Por Grupo</h3>
-                    ${groupCounts.length > 0 ? groupCounts.map(g => barRow(g.label, g.count, maxGroup, g.color)).join('') : '<div class="kanban-empty">Nenhuma demanda em grupo ativo</div>'}
+                <div class="grid" style="margin-top: 1.5rem;">
+                    <div class="card">
+                        <h3>Por Prioridade</h3>
+                        ${d.priorityCounts.map(p => barRow(p.label, p.count, d.maxPriority, p.color)).join('')}
+                    </div>
+                    <div class="card">
+                        <h3>Por Grupo</h3>
+                        ${d.groupCounts.length > 0 ? d.groupCounts.map(g => barRow(g.label, g.count, d.maxGroup, g.color)).join('') : '<div class="kanban-empty">Nenhuma demanda em grupo ativo</div>'}
+                    </div>
                 </div>
             `;
+        }
+
+        async function downloadDashboardHtml() {
+            let history = [];
+            try {
+                const response = await fetch(`${API_URL}/history`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (response.ok) history = await response.json();
+            } catch (e) {
+                console.error('Erro ao buscar histórico para o dashboard exportado:', e);
+            }
+
+            const { periodDays, groupFilterId } = getDashboardFilters();
+            const d = computeDashboardData(history, periodDays, groupFilterId);
+            const trendLabel = periodDays <= 30 ? 'por Dia' : 'por Semana';
+            const selectedGroup = groupFilterId ? currentGroups.find(g => String(g.id) === groupFilterId) : null;
+            const groupLabel = selectedGroup ? selectedGroup.name : 'Todos os grupos';
+            const generatedAt = new Date().toLocaleDateString('pt-BR');
+
+            const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Dashboard de Demandas - ${generatedAt}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap');
+  :root {
+    --bg-deep: #0b0d0f; --panel: #16191d; --panel-raised: #1e2227; --border: #2a2f35;
+    --amber: #f5a623; --amber-bright: #ffc35c;
+    --led-green: #3ddc84; --led-red: #ff5b5b; --led-blue: #4fc3f7; --led-purple: #b388ff; --led-gray: #5b6168;
+    --text-primary: #e9e6df; --text-secondary: #868d95;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: radial-gradient(circle at 50% 0%, #1a1d21 0%, var(--bg-deep) 65%);
+    color: var(--text-primary); margin: 0; padding: 2rem;
+  }
+  .report-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 1rem; }
+  .report-header h1 { font-size: 1.3rem; margin: 0; text-transform: uppercase; letter-spacing: 0.04em; color: var(--amber-bright); }
+  .report-header .meta { color: var(--text-secondary); font-size: 0.8rem; margin-top: 0.4rem; }
+  .print-btn { background: var(--amber); color: #1a1305; border: none; padding: 0.6rem 1.1rem; border-radius: 6px; font-weight: 700; font-family: inherit; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; cursor: pointer; }
+  .stat-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+  .stat-card { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; text-align: center; }
+  .stat-value { font-size: 1.6rem; font-weight: 800; color: var(--text-primary); }
+  .stat-label { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); margin-top: 0.3rem; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 1.25rem; }
+  .card h3 { margin: 0 0 1rem 0; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border); padding-bottom: 0.6rem; color: var(--text-primary); }
+  .bar-row { margin-bottom: 0.7rem; }
+  .bar-label { display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--text-secondary); margin-bottom: 0.3rem; text-transform: uppercase; letter-spacing: 0.03em; }
+  .bar-count { color: var(--text-primary); font-weight: 700; }
+  .bar-track { background: var(--panel-raised); border: 1px solid var(--border); border-radius: 4px; height: 7px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 4px; }
+  .trend-chart { display: flex; align-items: flex-end; gap: 0.4rem; height: 110px; padding-top: 0.5rem; }
+  .trend-bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+  .trend-bar { width: 100%; max-width: 24px; background: var(--led-green); border-radius: 3px 3px 0 0; box-shadow: 0 0 6px var(--led-green); min-height: 3px; }
+  .trend-bar-count { font-size: 0.62rem; color: var(--text-primary); margin-bottom: 0.25rem; font-weight: 700; height: 1em; }
+  .trend-bar-label { font-size: 0.55rem; color: var(--text-secondary); margin-top: 0.35rem; text-transform: uppercase; }
+  .kanban-empty { text-align: center; color: var(--text-secondary); font-size: 0.75rem; padding: 1rem 0; }
+  @media print {
+    .print-btn { display: none; }
+    body { background: #ffffff; color: #1f2329; padding: 0.5rem; }
+    .report-header { border-bottom-color: #e2e4e8; }
+    .report-header h1 { color: #1f2329; }
+    .report-header .meta { color: #6b7280; }
+    .card, .stat-card { background: #ffffff; border-color: #e2e4e8; }
+    .card h3 { color: #1f2329; }
+  }
+  @media (max-width: 700px) {
+    .stat-grid { grid-template-columns: repeat(3, 1fr); }
+    .grid-2 { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+  <div class="report-header">
+    <div>
+      <h1>📊 Dashboard de Demandas</h1>
+      <div class="meta">Gerado em ${generatedAt} · Período: últimos ${periodDays} dias · Grupo: ${escapeHtml(groupLabel)}</div>
+    </div>
+    <button class="print-btn" onclick="window.print()">🖨️ Imprimir</button>
+  </div>
+
+  <div class="stat-grid">
+    <div class="stat-card"><div class="stat-value">${d.notStartedCount}</div><div class="stat-label">Pendentes</div></div>
+    <div class="stat-card"><div class="stat-value" style="color:var(--led-red);">${d.overdueCount}</div><div class="stat-label">Atrasadas</div></div>
+    <div class="stat-card"><div class="stat-value" style="color:var(--amber-bright);">${d.urgentCount}</div><div class="stat-label">Urgentes</div></div>
+    <div class="stat-card"><div class="stat-value" style="color:var(--led-blue);">${d.inProgressCount}</div><div class="stat-label">Em Andamento</div></div>
+    <div class="stat-card"><div class="stat-value" style="color:var(--led-green);">${d.concludedInPeriod}</div><div class="stat-label">Concluídas (${periodDays}d)</div></div>
+    <div class="stat-card"><div class="stat-value" style="color:var(--led-purple);">${d.avgDays !== null ? d.avgDays : '—'}</div><div class="stat-label">Dias p/ Concluir</div></div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3>📈 Tendência — Concluídas ${trendLabel}</h3>
+      ${renderTrendChart(d.trendBuckets)}
+    </div>
+    <div class="card">
+      <h3>Por Status</h3>
+      ${d.statusCounts.map(s => barRow(s.label, s.count, d.maxStatus, s.color)).join('')}
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3>Por Prioridade</h3>
+      ${d.priorityCounts.map(p => barRow(p.label, p.count, d.maxPriority, p.color)).join('')}
+    </div>
+    <div class="card">
+      <h3>Por Grupo</h3>
+      ${d.groupCounts.length > 0 ? d.groupCounts.map(g => barRow(g.label, g.count, d.maxGroup, g.color)).join('') : '<div class="kanban-empty">Nenhuma demanda em grupo ativo</div>'}
+    </div>
+  </div>
+</body>
+</html>`;
+
+            const blob = new Blob([html], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `dashboard_${toLocalISODate(new Date())}.html`;
+            a.click();
         }
 
         // ============= LEMBRETES =============
