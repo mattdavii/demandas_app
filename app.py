@@ -301,7 +301,7 @@ def request_reset():
         return jsonify({'message': 'Se o email existe, você receberá um link de reset'}), 200
     
     reset_token = user.generate_reset_token()
-    reset_url = f"{os.getenv('FRONTEND_URL', 'http://localhost:5000')}/reset/{reset_token}"
+    reset_url = f"{os.getenv('FRONTEND_URL', 'http://localhost:5000')}/reset?token={reset_token}"
     
     if app.config['MAIL_USERNAME']:
         try:
