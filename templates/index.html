@@ -798,11 +798,8 @@
                 </div>
             </div>
 
-            <div class="card" style="margin-bottom: 1.5rem;">
-                <h3>📊 Resumo</h3>
-                <div id="demandSummary" style="font-size: 1.1rem; line-height: 2;">
-                    <div>Carregando...</div>
-                </div>
+            <div id="demandSummary" style="margin-bottom: 1.5rem;">
+                <div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Carregando...</div>
             </div>
 
             <div id="demandsList" class="demands-list">
@@ -1774,18 +1771,26 @@
             const summary = document.getElementById('demandSummary');
             const total = currentDemands.length;
             const byStatus = {};
-            
+
             currentDemands.forEach(d => {
                 byStatus[d.status] = (byStatus[d.status] || 0) + 1;
             });
 
+            const statusCardsHtml = STATUS_COLUMNS.map(col => `
+                <div class="stat-card" style="border-color: ${col.color};">
+                    <div class="stat-value" style="color: ${col.color};">${byStatus[col.key] || 0}</div>
+                    <div class="stat-label">${col.label}</div>
+                </div>
+            `).join('');
+
             summary.innerHTML = `
-                <div>📊 Total: <strong>${total}</strong> demandas</div>
-                ${byStatus['agendado'] ? `<div>🟠 Agendadas: ${byStatus['agendado']}</div>` : ''}
-                ${byStatus['nao-iniciado'] ? `<div>⚪ Não iniciadas: ${byStatus['nao-iniciado']}</div>` : ''}
-                ${byStatus['andamento'] ? `<div>🟡 Em andamento: ${byStatus['andamento']}</div>` : ''}
-                ${byStatus['aguardando'] ? `<div>🔵 Aguardando: ${byStatus['aguardando']}</div>` : ''}
-                ${byStatus['aprovacao'] ? `<div>🟣 Aguardando aprovação: ${byStatus['aprovacao']}</div>` : ''}
+                <div class="stat-grid">
+                    <div class="stat-card">
+                        <div class="stat-value">${total}</div>
+                        <div class="stat-label">Total</div>
+                    </div>
+                    ${statusCardsHtml}
+                </div>
             `;
         }
 
