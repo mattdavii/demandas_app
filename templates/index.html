@@ -703,9 +703,10 @@
         <div id="tab-demands" class="tab-content">
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
                 <h3 style="margin-bottom: 0;">📋 Minhas Demandas</h3>
-                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
                     <button class="btn btn-sm btn-primary" style="width: auto;" onclick="showNewDemandModal()">➕ Nova Demanda</button>
                     <button class="btn btn-sm" style="width: auto; background: transparent; color: var(--led-green); border: 1px solid var(--led-green);" onclick="showWhatsAppText()">💬 Gerar Texto WhatsApp</button>
+                    <input type="date" id="exportReportDate" style="width: auto; padding: 0.4rem 0.6rem; font-size: 0.75rem;">
                     <button class="btn btn-sm" style="width: auto; background: transparent; color: var(--led-blue); border: 1px solid var(--led-blue);" onclick="downloadDemandsHtml()">📄 Exportar HTML</button>
                 </div>
             </div>
@@ -1137,6 +1138,7 @@
                     await Promise.all([loadGroups(), loadDemands()]);
                     checkReminders();
                     loadTodayPage();
+                    document.getElementById('exportReportDate').value = toLocalISODate(new Date());
                 } else if (response.status === 401) {
                     // sessão de fato inválida/expirada
                     token = null;
@@ -2253,11 +2255,15 @@
             `;
         }
 
-        function generateDemandsHtml(history) {
+        function generateDemandsHtml(history, filterDateIso) {
             const today = new Date().toLocaleDateString('pt-BR');
             const todayIso = toLocalISODate(new Date());
+            filterDateIso = filterDateIso || todayIso;
+            const isFilterToday = filterDateIso === todayIso;
+            const [fy, fm, fd] = filterDateIso.split('-');
+            const filterDateLabel = `${fd}/${fm}/${fy}`;
 
-            const concludedToday = (history || []).filter(h => h.status === 'concluido' && h.statusChangeDate === todayIso);
+            const concludedOnDate = (history || []).filter(h => h.status === 'concluido' && h.statusChangeDate === filterDateIso);
 
             const STATUS_SECTIONS = [
                 { key: 'nao-iniciado', label: 'Não Iniciado', color: '#9aa0a7', emoji: '⚪' },
@@ -2268,11 +2274,11 @@
 
             const concludedSectionHtml = `
                 <section class="group-section">
-                    <h2 style="border-left-color: #3ddc84;">🟢 Concluídas Hoje — ${today}</h2>
+                    <h2 style="border-left-color: #3ddc84;">🟢 ${isFilterToday ? 'Concluídas Hoje' : 'Concluídas em'} — ${filterDateLabel}</h2>
                     <div class="cards-grid">
-                        ${concludedToday.length > 0
-                            ? concludedToday.map(renderReportHistoryCard).join('')
-                            : '<p style="color:#868d95; font-size:0.85rem;">Nenhuma demanda concluída hoje.</p>'}
+                        ${concludedOnDate.length > 0
+                            ? concludedOnDate.map(renderReportHistoryCard).join('')
+                            : `<p style="color:#868d95; font-size:0.85rem;">Nenhuma demanda concluída ${isFilterToday ? 'hoje' : `em ${filterDateLabel}`}.</p>`}
                     </div>
                 </section>
             `;
@@ -2395,12 +2401,14 @@
                 console.error('Erro ao buscar histórico para o relatório:', e);
             }
 
-            const html = generateDemandsHtml(history);
+            const filterDateIso = document.getElementById('exportReportDate').value || toLocalISODate(new Date());
+
+            const html = generateDemandsHtml(history, filterDateIso);
             const blob = new Blob([html], { type: 'text/html' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `demandas_${toLocalISODate(new Date())}.html`;
+            a.download = `demandas_${filterDateIso}.html`;
             a.click();
         }
 
