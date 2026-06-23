@@ -409,6 +409,16 @@
         }
         .kanban-empty { text-align: center; color: var(--led-gray); font-size: 0.72rem; padding: 1rem 0; }
 
+        .kanban-column-cards {
+            max-height: 60vh;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+        .kanban-column-cards::-webkit-scrollbar { width: 6px; }
+        .kanban-column-cards::-webkit-scrollbar-track { background: transparent; }
+        .kanban-column-cards::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        .kanban-column-cards::-webkit-scrollbar-thumb:hover { background: var(--amber-dim); }
+
         .stat-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1rem; }
         @media (max-width: 900px) { .stat-grid { grid-template-columns: repeat(3, 1fr); } }
         @media (max-width: 600px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } }
@@ -628,7 +638,8 @@
         </div>
 
         <div class="tabs">
-            <button class="tab-btn active" onclick="switchTab('demands')">📋 Demandas</button>
+            <button class="tab-btn active" onclick="switchTab('today')">🌅 Hoje</button>
+            <button class="tab-btn" onclick="switchTab('demands')">📋 Demandas</button>
             <button class="tab-btn" onclick="switchTab('groups')">👥 Grupos</button>
             <button class="tab-btn" onclick="switchTab('calendar')">🗓️ Calendário</button>
             <button class="tab-btn" onclick="switchTab('history')">📅 Histórico</button>
@@ -637,67 +648,36 @@
         </div>
 
         <!-- TAB: DEMANDAS -->
-        <div id="tab-demands" class="tab-content active">
-            <div class="grid">
-                <div class="card">
-                    <h3>➕ Nova Demanda</h3>
-                    <div class="form-group">
-                        <label>Grupo</label>
-                        <select id="newGroupId">
-                            <option value="">Selecione um grupo</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Local</label>
-                        <input type="text" id="newLocation" placeholder="Ex: São Paulo">
-                    </div>
-                    <div class="form-group">
-                        <label>Atividade</label>
-                        <input type="text" id="newActivity" placeholder="Descrição da atividade">
-                    </div>
-                    <div class="form-group">
-                        <label>Contexto (opcional)</label>
-                        <input type="text" id="newContext" placeholder="Detalhes adicionais">
-                    </div>
-                    <div class="form-group">
-                        <label>Prioridade</label>
-                        <select id="newPriority">
-                            <option value="baixa">Baixa</option>
-                            <option value="media" selected>Média</option>
-                            <option value="alta">Alta</option>
-                            <option value="urgente">Urgente</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Vencimento (opcional)</label>
-                        <input type="date" id="newDueDate">
-                    </div>
-                    <div class="form-group">
-                        <label>🔔 Lembrete - data e hora (opcional)</label>
-                        <input type="datetime-local" id="newReminderAt">
-                    </div>
-                    <button class="btn btn-primary" onclick="createDemand()">Criar Demanda</button>
-                </div>
-
-                <div class="card">
-                    <h3>📊 Resumo</h3>
-                    <div id="demandSummary" style="font-size: 1.1rem; line-height: 2;">
-                        <div>Carregando...</div>
-                    </div>
-                </div>
+        <!-- TAB: HOJE -->
+        <div id="tab-today" class="tab-content active">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
+                <h3 id="todayDateLabel" style="margin-bottom: 0;">🌅 Hoje</h3>
+                <button class="btn btn-sm btn-primary" style="width: auto;" onclick="showNewDemandModal()">➕ Nova Demanda</button>
             </div>
+            <div id="todayContent">
+                <div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Carregando...</div>
+            </div>
+        </div>
 
-            <div style="margin-top: 2rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+        <div id="tab-demands" class="tab-content">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
                 <h3 style="margin-bottom: 0;">📋 Minhas Demandas</h3>
                 <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                    <button class="btn btn-sm btn-primary" style="width: auto;" onclick="showNewDemandModal()">➕ Nova Demanda</button>
                     <button class="btn btn-sm" style="width: auto; background: transparent; color: var(--led-green); border: 1px solid var(--led-green);" onclick="showWhatsAppText()">💬 Gerar Texto WhatsApp</button>
                     <button class="btn btn-sm" style="width: auto; background: transparent; color: var(--led-blue); border: 1px solid var(--led-blue);" onclick="downloadDemandsHtml()">📄 Exportar HTML</button>
                 </div>
             </div>
-            <div style="margin-top: 1rem;">
-                <div id="demandsList" class="demands-list">
+
+            <div class="card" style="margin-bottom: 1.5rem;">
+                <h3>📊 Resumo</h3>
+                <div id="demandSummary" style="font-size: 1.1rem; line-height: 2;">
                     <div>Carregando...</div>
                 </div>
+            </div>
+
+            <div id="demandsList" class="demands-list">
+                <div>Carregando...</div>
             </div>
         </div>
 
@@ -835,6 +815,51 @@
     </div>
 
     <!-- MODAL EDITAR DEMANDA -->
+    <!-- MODAL NOVA DEMANDA -->
+    <div id="newDemandModal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" onclick="closeNewDemandModal()">&times;</span>
+            <div class="modal-header">➕ Nova Demanda</div>
+            <div class="form-group">
+                <label>Grupo</label>
+                <select id="newGroupId">
+                    <option value="">Selecione um grupo</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Local</label>
+                <input type="text" id="newLocation" placeholder="Ex: São Paulo">
+            </div>
+            <div class="form-group">
+                <label>Atividade</label>
+                <input type="text" id="newActivity" placeholder="Descrição da atividade">
+            </div>
+            <div class="form-group">
+                <label>Contexto (opcional)</label>
+                <input type="text" id="newContext" placeholder="Detalhes adicionais">
+            </div>
+            <div class="form-group">
+                <label>Prioridade</label>
+                <select id="newPriority">
+                    <option value="baixa">Baixa</option>
+                    <option value="media" selected>Média</option>
+                    <option value="alta">Alta</option>
+                    <option value="urgente">Urgente</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Vencimento (opcional)</label>
+                <input type="date" id="newDueDate">
+            </div>
+            <div class="form-group">
+                <label>🔔 Lembrete - data e hora (opcional)</label>
+                <input type="datetime-local" id="newReminderAt">
+            </div>
+            <button class="btn btn-primary" onclick="createDemand()">Criar Demanda</button>
+            <button class="btn btn-secondary" onclick="closeNewDemandModal()" style="margin-left: 0.5rem;">Cancelar</button>
+        </div>
+    </div>
+
     <div id="editDemandModal" class="modal">
         <div class="modal-content">
             <span class="close-modal" onclick="closeEditDemand()">&times;</span>
@@ -1068,9 +1093,9 @@
                     document.getElementById('authContainer').style.display = 'none';
                     document.getElementById('appContainer').classList.add('show');
                     
-                    loadGroups();
-                    loadDemands();
+                    await Promise.all([loadGroups(), loadDemands()]);
                     checkReminders();
+                    loadTodayPage();
                 } else if (response.status === 401) {
                     // sessão de fato inválida/expirada
                     token = null;
@@ -1316,6 +1341,7 @@
                             <span>${col.label}</span>
                             <span class="kanban-column-count">${items.length}</span>
                         </div>
+                        <div class="kanban-column-cards">
                         ${items.length === 0 ? '<div class="kanban-empty">Vazio</div>' : items.map(d => `
                             <div class="demand-card" style="margin-bottom: 0.75rem; border-left-color: ${isOverdue(d.dueDate) ? 'var(--led-red)' : col.color};">
                                 <div class="demand-header">
@@ -1334,6 +1360,7 @@
                                 </div>
                             </div>
                         `).join('')}
+                        </div>
                     </div>
                 `;
             }).join('') + '</div>';
@@ -1355,6 +1382,21 @@
                 ${byStatus['aguardando'] ? `<div>🔵 Aguardando: ${byStatus['aguardando']}</div>` : ''}
                 ${byStatus['aprovacao'] ? `<div>🟣 Aguardando aprovação: ${byStatus['aprovacao']}</div>` : ''}
             `;
+        }
+
+        function showNewDemandModal() {
+            document.getElementById('newGroupId').value = '';
+            document.getElementById('newLocation').value = '';
+            document.getElementById('newActivity').value = '';
+            document.getElementById('newContext').value = '';
+            document.getElementById('newPriority').value = 'media';
+            document.getElementById('newDueDate').value = '';
+            document.getElementById('newReminderAt').value = '';
+            document.getElementById('newDemandModal').classList.add('show');
+        }
+
+        function closeNewDemandModal() {
+            document.getElementById('newDemandModal').classList.remove('show');
         }
 
         async function createDemand() {
@@ -1393,13 +1435,7 @@
                 });
 
                 if (response.ok) {
-                    document.getElementById('newGroupId').value = '';
-                    document.getElementById('newLocation').value = '';
-                    document.getElementById('newActivity').value = '';
-                    document.getElementById('newContext').value = '';
-                    document.getElementById('newPriority').value = 'media';
-                    document.getElementById('newDueDate').value = '';
-                    document.getElementById('newReminderAt').value = '';
+                    closeNewDemandModal();
                     loadDemands();
                 } else {
                     const data = await response.json().catch(() => ({}));
@@ -1636,6 +1672,109 @@
             const m = String(date.getMonth() + 1).padStart(2, '0');
             const d = String(date.getDate()).padStart(2, '0');
             return `${y}-${m}-${d}`;
+        }
+
+        // ============= PÁGINA HOJE =============
+        async function loadTodayPage() {
+            const container = document.getElementById('todayContent');
+            const dateLabel = document.getElementById('todayDateLabel');
+
+            const now = new Date();
+            const weekdays = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+            const todayIso = toLocalISODate(now);
+            dateLabel.textContent = `🌅 ${weekdays[now.getDay()]}, ${formatDateBR(todayIso)}`;
+
+            const overdueItems = currentDemands
+                .filter(d => isOverdue(d.dueDate))
+                .sort((a, b) => (PRIORITY_RANK[b.priority] || 0) - (PRIORITY_RANK[a.priority] || 0));
+
+            const calendarIndex = buildCalendarIndex();
+            const todayItems = (calendarIndex[todayIso] || [])
+                .filter(d => !isOverdue(d.dueDate))
+                .sort((a, b) => (PRIORITY_RANK[b.priority] || 0) - (PRIORITY_RANK[a.priority] || 0));
+
+            let concludedToday = [];
+            try {
+                const response = await fetch(`${API_URL}/history`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (response.ok) {
+                    const history = await response.json();
+                    concludedToday = history.filter(h => h.status === 'concluido' && h.statusChangeDate === todayIso);
+                }
+            } catch (e) {
+                console.error('Erro ao buscar concluídas de hoje:', e);
+            }
+
+            const allClear = overdueItems.length === 0 && todayItems.length === 0;
+
+            container.innerHTML = `
+                <div class="stat-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 1.5rem;">
+                    <div class="stat-card" style="border-color: var(--led-red);">
+                        <div class="stat-value" style="color: var(--led-red);">${overdueItems.length}</div>
+                        <div class="stat-label">Atrasadas</div>
+                    </div>
+                    <div class="stat-card" style="border-color: var(--amber);">
+                        <div class="stat-value" style="color: var(--amber-bright);">${todayItems.length}</div>
+                        <div class="stat-label">Para Hoje</div>
+                    </div>
+                    <div class="stat-card" style="border-color: var(--led-green);">
+                        <div class="stat-value" style="color: var(--led-green);">${concludedToday.length}</div>
+                        <div class="stat-label">Concluídas</div>
+                    </div>
+                </div>
+
+                ${allClear ? '<div class="card" style="text-align:center; padding:2rem; margin-bottom:1.5rem; color:var(--text-secondary);">🎉 Nada atrasado ou previsto para hoje.</div>' : ''}
+                ${renderTodaySection('⚠️ Atrasadas', overdueItems, 'var(--led-red)')}
+                ${renderTodaySection('📌 Para Hoje', todayItems, 'var(--amber)')}
+                ${renderTodayConcludedSection(concludedToday)}
+            `;
+        }
+
+        function renderTodaySection(title, items, color) {
+            if (items.length === 0) return '';
+            return `
+                <div class="card" style="margin-bottom: 1.5rem;">
+                    <h3 style="border-left: 3px solid ${color}; padding-left: 0.6rem; border-bottom: none; padding-bottom: 0;">${title}</h3>
+                    <div style="margin-top: 1rem; display: grid; gap: 0.75rem;">
+                        ${items.map(d => `
+                            <div class="demand-card" style="border-left-color: ${color};">
+                                <div class="demand-header">
+                                    <div>
+                                        <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(d.workGroupId, d.workGroupName)}</div>
+                                        <div class="demand-title">${escapeHtml(d.location)} - ${escapeHtml(d.activity)}</div>
+                                    </div>
+                                    ${getPriorityBadge(d.priority)}
+                                </div>
+                                ${d.dueDate ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; font-weight: ${isOverdue(d.dueDate) ? '700' : '400'}; color: ${isOverdue(d.dueDate) ? 'var(--led-red)' : 'var(--text-secondary)'};">${isOverdue(d.dueDate) ? '⚠️ Atrasada — venceu em' : '📅 Vence em'} ${formatDateBR(d.dueDate)}</div>` : ''}
+                                ${d.reminderAt ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; color: ${new Date(d.reminderAt) <= new Date() ? 'var(--amber-bright)' : 'var(--text-secondary)'};">🔔 Lembrete: ${formatDateTimeBR(d.reminderAt)}</div>` : ''}
+                                ${d.context ? `<p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem;">📌 ${escapeHtml(d.context)}</p>` : ''}
+                                <div style="display: flex; gap: 0.5rem;">
+                                    <button class="btn btn-sm btn-secondary" onclick="completeDemand(${d.id})">✅ Concluir</button>
+                                    <button class="btn btn-sm btn-secondary" onclick="editDemand(${d.id})">✏️ Editar</button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderTodayConcludedSection(items) {
+            return `
+                <div class="card">
+                    <h3 style="border-left: 3px solid var(--led-green); padding-left: 0.6rem; border-bottom: none; padding-bottom: 0;">✅ Concluídas Hoje</h3>
+                    <div style="margin-top: 1rem; display: grid; gap: 0.75rem;">
+                        ${items.length > 0 ? items.map(h => `
+                            <div class="demand-card" style="border-left-color: var(--led-green);">
+                                <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(h.workGroupId, null)}</div>
+                                <div class="demand-title">${escapeHtml(h.location)} - ${escapeHtml(h.activity)}</div>
+                                ${h.context ? `<p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.5rem;">📌 ${escapeHtml(h.context)}</p>` : ''}
+                            </div>
+                        `).join('') : '<div class="kanban-empty">Nada concluído ainda hoje</div>'}
+                    </div>
+                </div>
+            `;
         }
 
         // ============= CALENDÁRIO =============
@@ -1993,6 +2132,9 @@
             document.getElementById('tab-' + tab).classList.add('active');
             event.target.classList.add('active');
 
+            if (tab === 'today') {
+                loadTodayPage();
+            }
             if (tab === 'history') {
                 loadHistory();
             }
@@ -2166,4 +2308,172 @@
   .demand-card .ctx { font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem; }
   .badges { display: flex; gap: 0.4rem; flex-wrap: wrap; }
   .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid currentColor; }
-  .report-card-group { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 
+  .report-card-group { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid currentColor; margin-bottom: 0.6rem; }
+
+  .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem; }
+  .summary-card { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; text-align: center; }
+  .summary-value { font-size: 1.6rem; font-weight: 800; }
+  .summary-label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); margin-top: 0.3rem; }
+
+  /* Impressão: força tema claro, fundo escuro gasta tinta e fica ilegível no papel */
+  @media print {
+    .print-btn { display: none; }
+    body { background: #ffffff; color: #1f2329; padding: 0.5rem; }
+    .report-header { border-bottom-color: #e2e4e8; }
+    .report-header h1, .group-section h2 { color: #1f2329; }
+    .report-header .meta, .demand-card .ctx { color: #6b7280; }
+    .demand-card, .summary-card { background: #ffffff; border-color: #e2e4e8; }
+  }
+</style>
+</head>
+<body>
+  <div class="report-header">
+    <div>
+      <h1>📋 Relatório de Demandas</h1>
+      <div class="meta">Gerado em ${today}</div>
+    </div>
+    <button class="print-btn" onclick="window.print()">🖨️ Imprimir</button>
+  </div>
+  ${summaryHtml}
+  ${concludedSectionHtml}
+  ${statusSectionsHtml}
+</body>
+</html>`;
+        }
+
+        async function downloadDemandsHtml() {
+            let history = [];
+            try {
+                const response = await fetch(`${API_URL}/history`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (response.ok) {
+                    history = await response.json();
+                }
+            } catch (e) {
+                console.error('Erro ao buscar histórico para o relatório:', e);
+            }
+
+            const html = generateDemandsHtml(history);
+            const blob = new Blob([html], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `demandas_${toLocalISODate(new Date())}.html`;
+            a.click();
+        }
+
+        function showChangePasswordModal() {
+            document.getElementById('currentPassword').value = '';
+            document.getElementById('newPasswordField').value = '';
+            document.getElementById('newPasswordConfirm').value = '';
+            document.getElementById('changePasswordAlert').classList.remove('show');
+            document.getElementById('changePasswordModal').classList.add('show');
+        }
+
+        function closeChangePasswordModal() {
+            document.getElementById('changePasswordModal').classList.remove('show');
+        }
+
+        async function submitChangePassword() {
+            const current_password = document.getElementById('currentPassword').value;
+            const new_password = document.getElementById('newPasswordField').value;
+            const confirm = document.getElementById('newPasswordConfirm').value;
+
+            if (!current_password || !new_password) {
+                showAlert('changePasswordAlert', 'Preencha todos os campos', 'danger');
+                return;
+            }
+            if (new_password !== confirm) {
+                showAlert('changePasswordAlert', 'As senhas não coincidem', 'danger');
+                return;
+            }
+            if (new_password.length < 6) {
+                showAlert('changePasswordAlert', 'A nova senha deve ter pelo menos 6 caracteres', 'danger');
+                return;
+            }
+
+            const btn = event.target;
+            btn.disabled = true;
+            try {
+                const response = await fetch(`${API_URL}/auth/change-password`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ current_password, new_password })
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    showAlert('changePasswordAlert', 'Senha alterada com sucesso!', 'success');
+                    setTimeout(closeChangePasswordModal, 1500);
+                } else {
+                    showAlert('changePasswordAlert', data.error || 'Erro ao alterar senha', 'danger');
+                }
+            } catch (e) {
+                console.error('Erro:', e);
+                showAlert('changePasswordAlert', 'Erro de conexão', 'danger');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        function showUploadBackup() {
+            let fileInput = document.getElementById('backupFileInput');
+            if (!fileInput) {
+                fileInput = document.createElement('input');
+                fileInput.type = 'file';
+                fileInput.id = 'backupFileInput';
+                fileInput.accept = '.json,application/json';
+                fileInput.style.display = 'none';
+                fileInput.addEventListener('change', handleBackupFile);
+                document.body.appendChild(fileInput);
+            }
+            fileInput.value = '';
+            fileInput.click();
+        }
+
+        async function handleBackupFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            try {
+                const text = await file.text();
+                const data = JSON.parse(text);
+
+                const response = await fetch(`${API_URL}/import`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    alert(`Backup restaurado: ${result.demands_count} demandas, ${result.history_count} históricos, ${result.groups_count} grupos.`);
+                    loadDemands();
+                    loadGroups();
+                } else {
+                    alert(result.error || 'Erro ao restaurar backup');
+                }
+            } catch (e) {
+                console.error('Erro:', e);
+                alert('Arquivo inválido (precisa ser o .json exportado pelo Fazer Backup) ou erro de conexão');
+            }
+        }
+
+        // ============= PWA: REGISTRO DO SERVICE WORKER =============
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .catch((err) => console.error('Falha ao registrar Service Worker:', err));
+            });
+        }
+    </script>
+</body>
+</html>
