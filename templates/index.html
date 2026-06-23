@@ -547,6 +547,16 @@
         .history-day-count { font-size: 0.65rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.6rem; }
         .history-day-dots { display: flex; justify-content: center; gap: 3px; flex-wrap: wrap; }
 
+        .history-chain {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.6rem;
+            padding: 0.4rem 0.6rem;
+            background: var(--panel-raised);
+            border-radius: 4px;
+            border-left: 2px solid var(--border);
+        }
+
         .reminder-banner {
             position: fixed;
             top: 1rem;
@@ -2077,6 +2087,29 @@
 
         let historyGroupsCache = {};
 
+        function getStatusLabel(status) {
+            if (status === 'concluido') return 'Concluído';
+            const col = STATUS_COLUMNS.find(c => c.key === status);
+            return col ? col.label : status;
+        }
+
+        // Agrupa os registros de um mesmo dia por item (local+atividade+grupo),
+        // assumindo que é a mesma demanda. O histórico não guarda o ID original
+        // da demanda, então essa é uma inferência por coincidência de texto —
+        // funciona bem na prática, mas não é uma garantia absoluta.
+        function groupHistoryItemsByDemand(items) {
+            const groups = {};
+            items.forEach(h => {
+                const key = `${h.workGroupId}|${h.location}|${h.activity}`;
+                if (!groups[key]) groups[key] = [];
+                groups[key].push(h);
+            });
+            return Object.values(groups).map(entries => {
+                entries.sort((a, b) => a.id - b.id);
+                return entries;
+            });
+        }
+
         function renderHistory(history) {
             const container = document.getElementById('historyList');
 
@@ -2098,13 +2131,16 @@
             const maxDots = 6;
 
             container.innerHTML = '<div class="history-days-grid">' + days.map(day => {
-                const items = groups[day];
-                const dots = items.slice(0, maxDots).map(h => `<span class="calendar-dot" style="background:${getStatusColor(h.status)};"></span>`).join('');
-                const extra = items.length > maxDots ? `<span class="calendar-more">+${items.length - maxDots}</span>` : '';
+                const grouped = groupHistoryItemsByDemand(groups[day]);
+                const dots = grouped.slice(0, maxDots).map(entries => {
+                    const last = entries[entries.length - 1];
+                    return `<span class="calendar-dot" style="background:${getStatusColor(last.status)};"></span>`;
+                }).join('');
+                const extra = grouped.length > maxDots ? `<span class="calendar-more">+${grouped.length - maxDots}</span>` : '';
                 return `
                     <div class="history-day-card" onclick="showHistoryDayModal('${day}')">
                         <div class="history-day-date">📅 ${formatDateBR(day)}</div>
-                        <div class="history-day-count">${items.length} ${items.length === 1 ? 'item' : 'itens'}</div>
+                        <div class="history-day-count">${grouped.length} ${grouped.length === 1 ? 'item' : 'itens'}</div>
                         <div class="history-day-dots">${dots}${extra}</div>
                     </div>
                 `;
@@ -2113,21 +2149,33 @@
 
         function showHistoryDayModal(day) {
             const items = historyGroupsCache[day] || [];
-            document.getElementById('historyDayModalTitle').textContent =
-                `📅 ${formatDateBR(day)} (${items.length} ${items.length === 1 ? 'item' : 'itens'})`;
+            const grouped = groupHistoryItemsByDemand(items);
 
-            document.getElementById('historyDayModalList').innerHTML = items.map(h => `
-                <div class="demand-card" style="border-left-color: ${getStatusColor(h.status)}; margin-bottom: 0.75rem;">
-                    <div class="demand-header">
-                        <div>
-                            <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(h.workGroupId)}</div>
-                            <div class="demand-title">${escapeHtml(h.location)} - ${escapeHtml(h.activity)}</div>
+            document.getElementById('historyDayModalTitle').textContent =
+                `📅 ${formatDateBR(day)} (${grouped.length} ${grouped.length === 1 ? 'item' : 'itens'})`;
+
+            document.getElementById('historyDayModalList').innerHTML = grouped.map(entries => {
+                const last = entries[entries.length - 1];
+                const createdToday = last.createdDate === day;
+                const chain = [
+                    ...(createdToday ? ['Criada'] : []),
+                    ...entries.map(e => getStatusLabel(e.status))
+                ];
+
+                return `
+                    <div class="demand-card" style="border-left-color: ${getStatusColor(last.status)}; margin-bottom: 0.75rem;">
+                        <div class="demand-header">
+                            <div>
+                                <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(last.workGroupId)}</div>
+                                <div class="demand-title">${escapeHtml(last.location)} - ${escapeHtml(last.activity)}</div>
+                            </div>
+                            <span class="status-badge status-${last.status}">${getStatusEmoji(last.status)} ${last.status}</span>
                         </div>
-                        <span class="status-badge status-${h.status}">${getStatusEmoji(h.status)} ${h.status}</span>
+                        ${chain.length > 1 ? `<div class="history-chain">${chain.join(' → ')}</div>` : ''}
+                        ${last.context ? `<p style="font-size: 0.8rem; color: var(--text-secondary);">📌 ${escapeHtml(last.context)}</p>` : ''}
                     </div>
-                    ${h.context ? `<p style="font-size: 0.8rem; color: var(--text-secondary);">📌 ${escapeHtml(h.context)}</p>` : ''}
-                </div>
-            `).join('');
+                `;
+            }).join('');
 
             document.getElementById('historyDayModal').classList.add('show');
         }
