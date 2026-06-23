@@ -439,6 +439,43 @@
         .trend-bar-count { font-size: 0.68rem; color: var(--text-primary); margin-bottom: 0.3rem; font-weight: 700; height: 1em; }
         .trend-bar-label { font-size: 0.6rem; color: var(--text-secondary); margin-top: 0.4rem; text-transform: uppercase; }
 
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 4px;
+        }
+        .calendar-weekday-header {
+            text-align: center;
+            font-size: 0.62rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+            padding-bottom: 0.5rem;
+            font-weight: 700;
+        }
+        .calendar-day {
+            background: var(--panel-raised);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            min-height: 60px;
+            padding: 0.35rem;
+            cursor: pointer;
+            transition: border-color 0.15s;
+        }
+        .calendar-day:hover { border-color: var(--amber-dim); }
+        .calendar-day.other-month { opacity: 0.35; }
+        .calendar-day.today { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber) inset; }
+        .calendar-day.selected { border-color: var(--amber-bright); background: var(--panel); }
+        .calendar-day-number {
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: var(--text-secondary);
+        }
+        .calendar-day.today .calendar-day-number { color: var(--amber-bright); }
+        .calendar-day-dots { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 0.35rem; }
+        .calendar-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+        .calendar-more { font-size: 0.55rem; color: var(--text-secondary); }
+
         .reminder-banner {
             position: fixed;
             top: 1rem;
@@ -593,6 +630,7 @@
         <div class="tabs">
             <button class="tab-btn active" onclick="switchTab('demands')">📋 Demandas</button>
             <button class="tab-btn" onclick="switchTab('groups')">👥 Grupos</button>
+            <button class="tab-btn" onclick="switchTab('calendar')">🗓️ Calendário</button>
             <button class="tab-btn" onclick="switchTab('history')">📅 Histórico</button>
             <button class="tab-btn" onclick="switchTab('dashboard')">📊 Dashboard</button>
             <button class="tab-btn" onclick="switchTab('settings')">⚙️ Configurações</button>
@@ -691,6 +729,24 @@
                 <div id="groupsList" class="groups-list">
                     <div>Carregando...</div>
                 </div>
+            </div>
+        </div>
+
+        <!-- TAB: CALENDÁRIO -->
+        <div id="tab-calendar" class="tab-content">
+            <div class="card" style="margin-bottom: 1.5rem;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+                    <button class="btn btn-sm btn-secondary" style="width:auto;" onclick="changeCalendarMonth(-1)">‹ Anterior</button>
+                    <h3 id="calendarMonthLabel" style="margin:0; border-bottom:none; padding-bottom:0;"></h3>
+                    <button class="btn btn-sm btn-secondary" style="width:auto;" onclick="changeCalendarMonth(1)">Próximo ›</button>
+                </div>
+                <button class="btn btn-sm" style="width:auto; background:transparent; color:var(--amber); border:1px solid var(--amber); margin-bottom:1rem;" onclick="goToCurrentMonth()">📍 Hoje</button>
+                <div id="calendarGrid" class="calendar-grid"></div>
+            </div>
+
+            <div class="card">
+                <h3 id="calendarDayDetailTitle">Carregando...</h3>
+                <div id="calendarDayDetailList"></div>
             </div>
         </div>
 
@@ -1582,6 +1638,146 @@
             return `${y}-${m}-${d}`;
         }
 
+        // ============= CALENDÁRIO =============
+        let calendarViewDate = new Date();
+        let selectedCalendarDay = null;
+        let calendarInitialized = false;
+
+        const MONTH_NAMES_PT = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+                                 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+
+        function initCalendar() {
+            if (!calendarInitialized) {
+                calendarInitialized = true;
+                calendarViewDate = new Date();
+                selectedCalendarDay = toLocalISODate(new Date());
+            }
+            renderCalendar();
+        }
+
+        function changeCalendarMonth(delta) {
+            calendarViewDate.setMonth(calendarViewDate.getMonth() + delta);
+            renderCalendar();
+        }
+
+        function goToCurrentMonth() {
+            calendarViewDate = new Date();
+            selectedCalendarDay = toLocalISODate(new Date());
+            renderCalendar();
+        }
+
+        function selectCalendarDay(iso) {
+            selectedCalendarDay = iso;
+            renderCalendar();
+        }
+
+        function buildCalendarIndex() {
+            const index = {};
+            currentDemands.forEach(d => {
+                const dates = new Set();
+                if (d.dueDate) dates.add(d.dueDate);
+                if (d.reminderAt) dates.add(d.reminderAt.slice(0, 10));
+                dates.forEach(iso => {
+                    if (!index[iso]) index[iso] = [];
+                    index[iso].push(d);
+                });
+            });
+            return index;
+        }
+
+        function renderCalendarDay(dateObj, isCurrentMonth, demandsForDay) {
+            const iso = toLocalISODate(dateObj);
+            const isToday = iso === toLocalISODate(new Date());
+            const isSelected = iso === selectedCalendarDay;
+            const classes = ['calendar-day'];
+            if (!isCurrentMonth) classes.push('other-month');
+            if (isToday) classes.push('today');
+            if (isSelected) classes.push('selected');
+
+            const maxDots = 4;
+            const dots = demandsForDay.slice(0, maxDots).map(item => {
+                const style = PRIORITY_STYLES[item.priority] || PRIORITY_STYLES['media'];
+                return `<span class="calendar-dot" style="background:${style.color};" title="${escapeHtml(item.activity)}"></span>`;
+            }).join('');
+            const extra = demandsForDay.length > maxDots
+                ? `<span class="calendar-more">+${demandsForDay.length - maxDots}</span>` : '';
+
+            return `
+                <div class="${classes.join(' ')}" onclick="selectCalendarDay('${iso}')">
+                    <div class="calendar-day-number">${dateObj.getDate()}</div>
+                    <div class="calendar-day-dots">${dots}${extra}</div>
+                </div>
+            `;
+        }
+
+        function renderCalendar() {
+            const year = calendarViewDate.getFullYear();
+            const month = calendarViewDate.getMonth();
+
+            document.getElementById('calendarMonthLabel').textContent = `${MONTH_NAMES_PT[month]} ${year}`;
+
+            const firstOfMonth = new Date(year, month, 1);
+            const startDay = new Date(firstOfMonth);
+            startDay.setDate(startDay.getDate() - startDay.getDay());
+
+            const lastOfMonth = new Date(year, month + 1, 0);
+            const endDay = new Date(lastOfMonth);
+            endDay.setDate(endDay.getDate() + (6 - endDay.getDay()));
+
+            const index = buildCalendarIndex();
+
+            const weekdayHeaders = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB']
+                .map(w => `<div class="calendar-weekday-header">${w}</div>`).join('');
+
+            let cells = '';
+            let cursor = new Date(startDay);
+            while (cursor <= endDay) {
+                const iso = toLocalISODate(cursor);
+                const isCurrentMonth = cursor.getMonth() === month;
+                cells += renderCalendarDay(new Date(cursor), isCurrentMonth, index[iso] || []);
+                cursor.setDate(cursor.getDate() + 1);
+            }
+
+            document.getElementById('calendarGrid').innerHTML = weekdayHeaders + cells;
+
+            if (selectedCalendarDay) {
+                renderCalendarDayDetail(selectedCalendarDay, index[selectedCalendarDay] || []);
+            }
+        }
+
+        function renderCalendarDayDetail(iso, demands) {
+            const title = document.getElementById('calendarDayDetailTitle');
+            const list = document.getElementById('calendarDayDetailList');
+
+            const [y, m, day] = iso.split('-');
+            const isTodaySelected = iso === toLocalISODate(new Date());
+            title.textContent = `${isTodaySelected ? '📍 Hoje — ' : '📌 '}${day}/${m}/${y} (${demands.length} ${demands.length === 1 ? 'item' : 'itens'})`;
+
+            if (demands.length === 0) {
+                list.innerHTML = '<div class="kanban-empty">Nada planejado para este dia</div>';
+                return;
+            }
+
+            list.innerHTML = demands.map(d => `
+                <div class="demand-card" style="margin-bottom: 0.75rem;">
+                    <div class="demand-header">
+                        <div>
+                            <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(d.workGroupId, d.workGroupName)}</div>
+                            <div class="demand-title">${escapeHtml(d.location)} - ${escapeHtml(d.activity)}</div>
+                        </div>
+                        ${getPriorityBadge(d.priority)}
+                    </div>
+                    ${d.dueDate ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; font-weight: ${isOverdue(d.dueDate) ? '700' : '400'}; color: ${isOverdue(d.dueDate) ? 'var(--led-red)' : 'var(--text-secondary)'};">${isOverdue(d.dueDate) ? '⚠️ Atrasada — venceu em' : '📅 Vence em'} ${formatDateBR(d.dueDate)}</div>` : ''}
+                    ${d.reminderAt ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; color: ${new Date(d.reminderAt) <= new Date() ? 'var(--amber-bright)' : 'var(--text-secondary)'};">🔔 Lembrete: ${formatDateTimeBR(d.reminderAt)}</div>` : ''}
+                    ${d.context ? `<p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem;">📌 ${escapeHtml(d.context)}</p>` : ''}
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button class="btn btn-sm btn-secondary" onclick="completeDemand(${d.id})">✅ Concluir</button>
+                        <button class="btn btn-sm btn-secondary" onclick="editDemand(${d.id})">✏️ Editar</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
         // ============= DASHBOARD =============
         async function loadDashboardStats() {
             const container = document.getElementById('dashboardContent');
@@ -1803,6 +1999,9 @@
             if (tab === 'dashboard') {
                 loadDashboardStats();
             }
+            if (tab === 'calendar') {
+                initCalendar();
+            }
         }
 
         function showAlert(id, message, type) {
@@ -1967,172 +2166,4 @@
   .demand-card .ctx { font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem; }
   .badges { display: flex; gap: 0.4rem; flex-wrap: wrap; }
   .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid currentColor; }
-  .report-card-group { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid currentColor; margin-bottom: 0.6rem; }
-
-  .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem; }
-  .summary-card { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; text-align: center; }
-  .summary-value { font-size: 1.6rem; font-weight: 800; }
-  .summary-label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); margin-top: 0.3rem; }
-
-  /* Impressão: força tema claro, fundo escuro gasta tinta e fica ilegível no papel */
-  @media print {
-    .print-btn { display: none; }
-    body { background: #ffffff; color: #1f2329; padding: 0.5rem; }
-    .report-header { border-bottom-color: #e2e4e8; }
-    .report-header h1, .group-section h2 { color: #1f2329; }
-    .report-header .meta, .demand-card .ctx { color: #6b7280; }
-    .demand-card, .summary-card { background: #ffffff; border-color: #e2e4e8; }
-  }
-</style>
-</head>
-<body>
-  <div class="report-header">
-    <div>
-      <h1>📋 Relatório de Demandas</h1>
-      <div class="meta">Gerado em ${today}</div>
-    </div>
-    <button class="print-btn" onclick="window.print()">🖨️ Imprimir</button>
-  </div>
-  ${summaryHtml}
-  ${concludedSectionHtml}
-  ${statusSectionsHtml}
-</body>
-</html>`;
-        }
-
-        async function downloadDemandsHtml() {
-            let history = [];
-            try {
-                const response = await fetch(`${API_URL}/history`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                if (response.ok) {
-                    history = await response.json();
-                }
-            } catch (e) {
-                console.error('Erro ao buscar histórico para o relatório:', e);
-            }
-
-            const html = generateDemandsHtml(history);
-            const blob = new Blob([html], { type: 'text/html' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `demandas_${toLocalISODate(new Date())}.html`;
-            a.click();
-        }
-
-        function showChangePasswordModal() {
-            document.getElementById('currentPassword').value = '';
-            document.getElementById('newPasswordField').value = '';
-            document.getElementById('newPasswordConfirm').value = '';
-            document.getElementById('changePasswordAlert').classList.remove('show');
-            document.getElementById('changePasswordModal').classList.add('show');
-        }
-
-        function closeChangePasswordModal() {
-            document.getElementById('changePasswordModal').classList.remove('show');
-        }
-
-        async function submitChangePassword() {
-            const current_password = document.getElementById('currentPassword').value;
-            const new_password = document.getElementById('newPasswordField').value;
-            const confirm = document.getElementById('newPasswordConfirm').value;
-
-            if (!current_password || !new_password) {
-                showAlert('changePasswordAlert', 'Preencha todos os campos', 'danger');
-                return;
-            }
-            if (new_password !== confirm) {
-                showAlert('changePasswordAlert', 'As senhas não coincidem', 'danger');
-                return;
-            }
-            if (new_password.length < 6) {
-                showAlert('changePasswordAlert', 'A nova senha deve ter pelo menos 6 caracteres', 'danger');
-                return;
-            }
-
-            const btn = event.target;
-            btn.disabled = true;
-            try {
-                const response = await fetch(`${API_URL}/auth/change-password`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`
-                    },
-                    body: JSON.stringify({ current_password, new_password })
-                });
-                const data = await response.json();
-
-                if (response.ok) {
-                    showAlert('changePasswordAlert', 'Senha alterada com sucesso!', 'success');
-                    setTimeout(closeChangePasswordModal, 1500);
-                } else {
-                    showAlert('changePasswordAlert', data.error || 'Erro ao alterar senha', 'danger');
-                }
-            } catch (e) {
-                console.error('Erro:', e);
-                showAlert('changePasswordAlert', 'Erro de conexão', 'danger');
-            } finally {
-                btn.disabled = false;
-            }
-        }
-
-        function showUploadBackup() {
-            let fileInput = document.getElementById('backupFileInput');
-            if (!fileInput) {
-                fileInput = document.createElement('input');
-                fileInput.type = 'file';
-                fileInput.id = 'backupFileInput';
-                fileInput.accept = '.json,application/json';
-                fileInput.style.display = 'none';
-                fileInput.addEventListener('change', handleBackupFile);
-                document.body.appendChild(fileInput);
-            }
-            fileInput.value = '';
-            fileInput.click();
-        }
-
-        async function handleBackupFile(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            try {
-                const text = await file.text();
-                const data = JSON.parse(text);
-
-                const response = await fetch(`${API_URL}/import`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`
-                    },
-                    body: JSON.stringify(data)
-                });
-
-                const result = await response.json();
-
-                if (response.ok) {
-                    alert(`Backup restaurado: ${result.demands_count} demandas, ${result.history_count} históricos, ${result.groups_count} grupos.`);
-                    loadDemands();
-                    loadGroups();
-                } else {
-                    alert(result.error || 'Erro ao restaurar backup');
-                }
-            } catch (e) {
-                console.error('Erro:', e);
-                alert('Arquivo inválido (precisa ser o .json exportado pelo Fazer Backup) ou erro de conexão');
-            }
-        }
-
-        // ============= PWA: REGISTRO DO SERVICE WORKER =============
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js')
-                    .catch((err) => console.error('Falha ao registrar Service Worker:', err));
-            });
-        }
-    </script>
-</body>
-</html>
+  .report-card-group { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 
