@@ -800,12 +800,23 @@
                 <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-end;">
                     <div class="form-group" style="margin-bottom:0; flex:1; min-width:160px;">
                         <label>Período</label>
-                        <select id="dashboardPeriod" onchange="loadDashboardStats()">
+                        <select id="dashboardPeriod" onchange="onDashboardPeriodChange()">
                             <option value="7">Últimos 7 dias</option>
                             <option value="14">Últimos 14 dias</option>
                             <option value="30">Últimos 30 dias</option>
                             <option value="90">Últimos 90 dias</option>
+                            <option value="custom">Personalizado</option>
                         </select>
+                    </div>
+                    <div id="dashboardCustomDateRange" style="display:none; gap:1rem; flex-wrap:wrap;">
+                        <div class="form-group" style="margin-bottom:0; flex:1; min-width:140px;">
+                            <label>Data Início</label>
+                            <input type="date" id="dashboardStartDate" onchange="loadDashboardStats()">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0; flex:1; min-width:140px;">
+                            <label>Data Fim</label>
+                            <input type="date" id="dashboardEndDate" onchange="loadDashboardStats()">
+                        </div>
                     </div>
                     <div class="form-group" style="margin-bottom:0; flex:1; min-width:160px;">
                         <label>Grupo</label>
@@ -1991,10 +2002,50 @@
             }
         }
 
+        function onDashboardPeriodChange() {
+            const isCustom = document.getElementById('dashboardPeriod').value === 'custom';
+            document.getElementById('dashboardCustomDateRange').style.display = isCustom ? 'flex' : 'none';
+
+            if (isCustom) {
+                const startEl = document.getElementById('dashboardStartDate');
+                const endEl = document.getElementById('dashboardEndDate');
+                if (!startEl.value) {
+                    const sevenAgo = new Date();
+                    sevenAgo.setDate(sevenAgo.getDate() - 6);
+                    startEl.value = toLocalISODate(sevenAgo);
+                }
+                if (!endEl.value) {
+                    endEl.value = toLocalISODate(new Date());
+                }
+            }
+
+            loadDashboardStats();
+        }
+
         function getDashboardFilters() {
-            const periodDays = parseInt(document.getElementById('dashboardPeriod').value) || 7;
+            const periodValue = document.getElementById('dashboardPeriod').value;
             const groupFilterId = document.getElementById('dashboardGroupFilter').value;
-            return { periodDays, groupFilterId };
+            const todayIso = toLocalISODate(new Date());
+
+            let startIso, endIso, rangeLabel;
+
+            if (periodValue === 'custom') {
+                startIso = document.getElementById('dashboardStartDate').value || todayIso;
+                endIso = document.getElementById('dashboardEndDate').value || todayIso;
+                if (startIso > endIso) {
+                    const tmp = startIso; startIso = endIso; endIso = tmp;
+                }
+                rangeLabel = `${formatDateBR(startIso)} a ${formatDateBR(endIso)}`;
+            } else {
+                const periodDays = parseInt(periodValue) || 7;
+                const start = new Date();
+                start.setDate(start.getDate() - (periodDays - 1));
+                startIso = toLocalISODate(start);
+                endIso = todayIso;
+                rangeLabel = `Últimos ${periodDays} dias`;
+            }
+
+            return { startIso, endIso, rangeLabel, groupFilterId };
         }
 
         async function loadDashboardStats() {
@@ -2017,16 +2068,12 @@
 
         // Calcula todos os números/gráficos do dashboard a partir do histórico e dos filtros atuais.
         // Usado tanto pela tela viva quanto pelo exportador de HTML (mesma fonte de verdade).
-        function computeDashboardData(history, periodDays, groupFilterId) {
+        function computeDashboardData(history, startIso, endIso, groupFilterId) {
             const filteredDemands = groupFilterId
                 ? currentDemands.filter(d => String(d.workGroupId) === groupFilterId)
                 : currentDemands;
 
-            const periodStart = new Date();
-            periodStart.setDate(periodStart.getDate() - periodDays);
-            const periodStartIso = toLocalISODate(periodStart);
-
-            let periodHistory = (history || []).filter(h => h.statusChangeDate && h.statusChangeDate >= periodStartIso);
+            let periodHistory = (history || []).filter(h => h.statusChangeDate && h.statusChangeDate >= startIso && h.statusChangeDate <= endIso);
             if (groupFilterId) {
                 periodHistory = periodHistory.filter(h => String(h.workGroupId) === groupFilterId);
             }
@@ -2077,10 +2124,11 @@
                 count: currentDemands.filter(d => d.workGroupId === g.id).length
             })).filter(g => g.count > 0);
 
-            const trendBuckets = buildTrendBuckets(periodHistory, periodDays);
+            const trendBuckets = buildTrendBuckets(periodHistory, startIso, endIso);
+            const daysSpan = Math.round((new Date(endIso + 'T00:00:00') - new Date(startIso + 'T00:00:00')) / 86400000) + 1;
 
             return {
-                periodDays, groupFilterId,
+                startIso, endIso, daysSpan, groupFilterId,
                 notStartedCount, urgentCount, inProgressCount, overdueCount, concludedInPeriod, avgDays,
                 statusCounts, priorityCounts, groupCounts, trendBuckets,
                 maxStatus: Math.max(1, ...statusCounts.map(s => s.count)),
@@ -2117,41 +2165,45 @@
             `;
         }
 
-        // Granularidade adaptativa: diária até 30 dias, semanal acima disso
-        // (90 barras diárias ficariam ilegíveis num gráfico desse tamanho).
-        function buildTrendBuckets(history, periodDays) {
-            if (periodDays <= 30) {
+        // Granularidade adaptativa: diária até 30 dias de intervalo, semanal acima disso
+        // (um intervalo de 90+ dias em barras diárias ficaria ilegível).
+        function buildTrendBuckets(history, startIso, endIso) {
+            const start = new Date(startIso + 'T00:00:00');
+            const end = new Date(endIso + 'T00:00:00');
+            const daysSpan = Math.round((end - start) / 86400000) + 1;
+
+            if (daysSpan <= 30) {
                 const days = [];
-                for (let i = periodDays - 1; i >= 0; i--) {
-                    const d = new Date();
-                    d.setDate(d.getDate() - i);
-                    const iso = toLocalISODate(d);
+                let cursor = new Date(start);
+                while (cursor <= end) {
+                    const iso = toLocalISODate(cursor);
                     const count = (history || []).filter(h => h.status === 'concluido' && h.statusChangeDate === iso).length;
-                    days.push({ label: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), count });
+                    days.push({ label: cursor.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), count });
+                    cursor.setDate(cursor.getDate() + 1);
                 }
                 return days;
             }
 
             const buckets = [];
-            const numWeeks = Math.ceil(periodDays / 7);
-            for (let w = numWeeks - 1; w >= 0; w--) {
-                const end = new Date();
-                end.setDate(end.getDate() - (w * 7));
-                const start = new Date(end);
-                start.setDate(start.getDate() - 6);
-                const startIso = toLocalISODate(start);
-                const endIso = toLocalISODate(end);
-                const count = (history || []).filter(h => h.status === 'concluido' && h.statusChangeDate >= startIso && h.statusChangeDate <= endIso).length;
-                buckets.push({ label: `${String(start.getDate()).padStart(2,'0')}/${String(start.getMonth() + 1).padStart(2,'0')}`, count });
+            let cursor = new Date(start);
+            while (cursor <= end) {
+                const bucketEnd = new Date(cursor);
+                bucketEnd.setDate(bucketEnd.getDate() + 6);
+                const cappedEnd = bucketEnd > end ? end : bucketEnd;
+                const startIsoB = toLocalISODate(cursor);
+                const endIsoB = toLocalISODate(cappedEnd);
+                const count = (history || []).filter(h => h.status === 'concluido' && h.statusChangeDate >= startIsoB && h.statusChangeDate <= endIsoB).length;
+                buckets.push({ label: `${String(cursor.getDate()).padStart(2,'0')}/${String(cursor.getMonth() + 1).padStart(2,'0')}`, count });
+                cursor.setDate(cursor.getDate() + 7);
             }
             return buckets;
         }
 
         function renderDashboard(history) {
             const container = document.getElementById('dashboardContent');
-            const { periodDays, groupFilterId } = getDashboardFilters();
-            const d = computeDashboardData(history, periodDays, groupFilterId);
-            const trendLabel = periodDays <= 30 ? 'por Dia' : 'por Semana';
+            const { startIso, endIso, rangeLabel, groupFilterId } = getDashboardFilters();
+            const d = computeDashboardData(history, startIso, endIso, groupFilterId);
+            const trendLabel = d.daysSpan <= 30 ? 'por Dia' : 'por Semana';
 
             container.innerHTML = `
                 <div class="stat-grid">
@@ -2173,13 +2225,14 @@
                     </div>
                     <div class="stat-card" style="border-color: var(--led-green);">
                         <div class="stat-value" style="color: var(--led-green);">${d.concludedInPeriod}</div>
-                        <div class="stat-label">Concluídas (${periodDays}d)</div>
+                        <div class="stat-label">Concluídas no Período</div>
                     </div>
                     <div class="stat-card" style="border-color: var(--led-purple);">
                         <div class="stat-value" style="color: var(--led-purple);">${d.avgDays !== null ? d.avgDays : '—'}</div>
                         <div class="stat-label">Dias p/ Concluir (méd.)</div>
                     </div>
                 </div>
+                <div style="text-align:right; font-size:0.7rem; color:var(--text-secondary); margin-top:0.5rem; text-transform:uppercase; letter-spacing:0.04em;">${rangeLabel}</div>
 
                 <div class="grid" style="margin-top: 1.5rem;">
                     <div class="card">
@@ -2216,9 +2269,9 @@
                 console.error('Erro ao buscar histórico para o dashboard exportado:', e);
             }
 
-            const { periodDays, groupFilterId } = getDashboardFilters();
-            const d = computeDashboardData(history, periodDays, groupFilterId);
-            const trendLabel = periodDays <= 30 ? 'por Dia' : 'por Semana';
+            const { startIso, endIso, rangeLabel, groupFilterId } = getDashboardFilters();
+            const d = computeDashboardData(history, startIso, endIso, groupFilterId);
+            const trendLabel = d.daysSpan <= 30 ? 'por Dia' : 'por Semana';
             const selectedGroup = groupFilterId ? currentGroups.find(g => String(g.id) === groupFilterId) : null;
             const groupLabel = selectedGroup ? selectedGroup.name : 'Todos os grupos';
             const generatedAt = new Date().toLocaleDateString('pt-BR');
@@ -2283,7 +2336,7 @@
   <div class="report-header">
     <div>
       <h1>📊 Dashboard de Demandas</h1>
-      <div class="meta">Gerado em ${generatedAt} · Período: últimos ${periodDays} dias · Grupo: ${escapeHtml(groupLabel)}</div>
+      <div class="meta">Gerado em ${generatedAt} · Período: ${rangeLabel} · Grupo: ${escapeHtml(groupLabel)}</div>
     </div>
     <button class="print-btn" onclick="window.print()">🖨️ Imprimir</button>
   </div>
@@ -2293,7 +2346,7 @@
     <div class="stat-card"><div class="stat-value" style="color:var(--led-red);">${d.overdueCount}</div><div class="stat-label">Atrasadas</div></div>
     <div class="stat-card"><div class="stat-value" style="color:var(--amber-bright);">${d.urgentCount}</div><div class="stat-label">Urgentes</div></div>
     <div class="stat-card"><div class="stat-value" style="color:var(--led-blue);">${d.inProgressCount}</div><div class="stat-label">Em Andamento</div></div>
-    <div class="stat-card"><div class="stat-value" style="color:var(--led-green);">${d.concludedInPeriod}</div><div class="stat-label">Concluídas (${periodDays}d)</div></div>
+    <div class="stat-card"><div class="stat-value" style="color:var(--led-green);">${d.concludedInPeriod}</div><div class="stat-label">Concluídas no Período</div></div>
     <div class="stat-card"><div class="stat-value" style="color:var(--led-purple);">${d.avgDays !== null ? d.avgDays : '—'}</div><div class="stat-label">Dias p/ Concluir</div></div>
   </div>
 
