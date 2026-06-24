@@ -1514,7 +1514,8 @@
                     token = data.access_token;
                     currentUser = data.user;
                     localStorage.setItem('token', token);
-                    showApp();
+                    showAlert('registerAlert', '✅ Conta criada com sucesso!', 'success');
+                    setTimeout(() => { showApp(); }, 1200);
                 } else {
                     showAlert('registerAlert', data.error || 'Erro ao criar conta', 'danger');
                 }
