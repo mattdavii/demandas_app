@@ -1648,6 +1648,8 @@
 
             if (currentUser.isAdmin) {
                 document.getElementById('adminKeysTabBtn').style.display = '';
+            } else {
+                document.getElementById('adminKeysTabBtn').style.display = 'none';
             }
 
             await Promise.all([loadGroups(), loadDemands()]);
