@@ -338,19 +338,19 @@ def register():
             if user.access_verified:
                 body_html = f'''
                 <p>Olá {user.full_name or user.username},</p>
-                <p>Sua conta no <strong>Gestor de Demandas</strong> foi criada com sucesso!</p>
+                <p>Sua conta no <strong>Painel de Bordo</strong> foi criada com sucesso!</p>
                 <p>Você já pode acessar a plataforma normalmente:</p>
-                <p><a href="{frontend_url}">Acessar Gestor de Demandas</a></p>
+                <p><a href="{frontend_url}">Acessar Painel de Bordo</a></p>
                 '''
             else:
                 body_html = f'''
                 <p>Olá {user.full_name or user.username},</p>
-                <p>Sua conta no <strong>Gestor de Demandas</strong> foi criada com sucesso!</p>
+                <p>Sua conta no <strong>Painel de Bordo</strong> foi criada com sucesso!</p>
                 <p>Antes de começar a usar a plataforma, você precisa de uma <strong>chave de acesso</strong> fornecida pelo administrador.</p>
                 <p>Entre em contato com quem te convidou para receber sua chave e liberar o acesso completo.</p>
                 '''
             msg = Message(
-                'Bem-vindo ao Gestor de Demandas!',
+                'Bem-vindo ao Painel de Bordo!',
                 recipients=[user.email],
                 html=body_html
             )
@@ -406,7 +406,7 @@ def request_reset():
     if app.config['MAIL_USERNAME']:
         try:
             msg = Message(
-                'Reset de Senha - Demandas App',
+                'Reset de Senha - Painel de Bordo',
                 recipients=[user.email],
                 html=f'''
                 <p>Olá {user.full_name or user.username},</p>
@@ -491,13 +491,13 @@ def verify_access_key():
         try:
             frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5000')
             msg = Message(
-                'Acesso liberado - Gestor de Demandas',
+                'Acesso liberado - Painel de Bordo',
                 recipients=[user.email],
                 html=f'''
                 <p>Olá {user.full_name or user.username},</p>
-                <p>Seu acesso ao <strong>Gestor de Demandas</strong> foi liberado com sucesso!</p>
+                <p>Seu acesso ao <strong>Painel de Bordo</strong> foi liberado com sucesso!</p>
                 <p>Você já pode entrar e começar a usar a plataforma:</p>
-                <p><a href="{frontend_url}">Acessar Gestor de Demandas</a></p>
+                <p><a href="{frontend_url}">Acessar Painel de Bordo</a></p>
                 '''
             )
             mail.send(msg)
