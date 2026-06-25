@@ -231,6 +231,80 @@ class AccessKey(db.Model):
             'status': status
         }
 
+class StatusConfig(db.Model):
+    """Status de demanda configurável por usuário (substitui o conjunto fixo antigo)."""
+    __tablename__ = 'status_configs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    key = db.Column(db.String(50), nullable=False)
+    label = db.Column(db.String(100), nullable=False)
+    color = db.Column(db.String(7), nullable=False, default='#9aa0a7')
+    emoji = db.Column(db.String(10), nullable=True)
+    order = db.Column(db.Integer, default=0)
+    is_completed = db.Column(db.Boolean, default=False)
+
+    __table_args__ = (db.UniqueConstraint('user_id', 'key', name='unique_user_status_key'),)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'key': self.key,
+            'label': self.label,
+            'color': self.color,
+            'emoji': self.emoji,
+            'order': self.order,
+            'isCompleted': self.is_completed
+        }
+
+class PriorityConfig(db.Model):
+    """Prioridade de demanda configurável por usuário."""
+    __tablename__ = 'priority_configs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    key = db.Column(db.String(50), nullable=False)
+    label = db.Column(db.String(100), nullable=False)
+    color = db.Column(db.String(7), nullable=False, default='#9aa0a7')
+    order = db.Column(db.Integer, default=0)
+
+    __table_args__ = (db.UniqueConstraint('user_id', 'key', name='unique_user_priority_key'),)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'key': self.key,
+            'label': self.label,
+            'color': self.color,
+            'order': self.order
+        }
+
+def seed_default_status_and_priority(user_id):
+    """Cria o conjunto padrão de status/prioridade pra uma conta (nova ou já existente sem nenhum configurado)."""
+    if StatusConfig.query.filter_by(user_id=user_id).first() is None:
+        defaults = [
+            {'key': 'agendado', 'label': 'Agendado', 'color': '#ff9f43', 'emoji': '🟠', 'order': 0, 'is_completed': False},
+            {'key': 'nao-iniciado', 'label': 'Não Iniciado', 'color': '#9aa0a7', 'emoji': '⚪', 'order': 1, 'is_completed': False},
+            {'key': 'andamento', 'label': 'Em Andamento', 'color': '#f5a623', 'emoji': '🟡', 'order': 2, 'is_completed': False},
+            {'key': 'aguardando', 'label': 'Aguardando', 'color': '#4fc3f7', 'emoji': '🔵', 'order': 3, 'is_completed': False},
+            {'key': 'aprovacao', 'label': 'Aprovação', 'color': '#b388ff', 'emoji': '🟣', 'order': 4, 'is_completed': False},
+            {'key': 'concluido', 'label': 'Concluído', 'color': '#3ddc84', 'emoji': '🟢', 'order': 5, 'is_completed': True},
+        ]
+        for d in defaults:
+            db.session.add(StatusConfig(user_id=user_id, **d))
+
+    if PriorityConfig.query.filter_by(user_id=user_id).first() is None:
+        defaults = [
+            {'key': 'baixa', 'label': 'Baixa', 'color': '#5b6168', 'order': 0},
+            {'key': 'media', 'label': 'Média', 'color': '#4fc3f7', 'order': 1},
+            {'key': 'alta', 'label': 'Alta', 'color': '#f5a623', 'order': 2},
+            {'key': 'urgente', 'label': 'Urgente', 'color': '#ff5b5b', 'order': 3},
+        ]
+        for d in defaults:
+            db.session.add(PriorityConfig(user_id=user_id, **d))
+
+    db.session.commit()
+
 # ============= CRIAR TABELAS NA INICIALIZAÇÃO =============
 with app.app_context():
     db.create_all()
@@ -259,6 +333,15 @@ with app.app_context():
     except Exception as e:
         db.session.rollback()
         print(f"Aviso: não foi possível definir admin automático: {e}")
+
+    # Garante que toda conta já existente (criada antes desta atualização) tenha
+    # o conjunto padrão de status/prioridade, já que esses dados não existiam antes
+    try:
+        for existing_user in User.query.all():
+            seed_default_status_and_priority(existing_user.id)
+    except Exception as e:
+        db.session.rollback()
+        print(f"Aviso: não foi possível popular status/prioridade padrão: {e}")
 
 # ============= ROTAS DE PÁGINA =============
 @app.route('/')
@@ -311,6 +394,8 @@ def register():
     
     db.session.add(user)
     db.session.commit()
+
+    seed_default_status_and_priority(user.id)
     
     # Criar grupos padrão
     default_groups = [
@@ -326,7 +411,7 @@ def register():
             order=group_data['order']
         )
         db.session.add(group)
-    
+
     db.session.commit()
     
     access_token = create_access_token(identity=str(user.id))
@@ -581,6 +666,184 @@ def change_password():
 
     return jsonify({'message': 'Senha alterada com sucesso'}), 200
 
+# ============= ROTAS DE STATUS CONFIGURÁVEL =============
+@app.route('/api/status-configs', methods=['GET'])
+@jwt_required()
+def get_status_configs():
+    user_id = int(get_jwt_identity())
+    seed_default_status_and_priority(user_id)  # garante que sempre haja pelo menos o padrão
+    configs = StatusConfig.query.filter_by(user_id=user_id).order_by(StatusConfig.order.asc()).all()
+    return jsonify([c.to_dict() for c in configs]), 200
+
+@app.route('/api/status-configs', methods=['POST'])
+@jwt_required()
+def create_status_config():
+    user_id = int(get_jwt_identity())
+    data = request.get_json()
+
+    if not data or not data.get('key') or not data.get('label'):
+        return jsonify({'error': 'Chave e nome são obrigatórios'}), 400
+
+    if StatusConfig.query.filter_by(user_id=user_id, key=data['key']).first():
+        return jsonify({'error': 'Já existe um status com essa chave'}), 409
+
+    max_order = db.session.query(db.func.max(StatusConfig.order)).filter_by(user_id=user_id).scalar() or 0
+
+    config = StatusConfig(
+        user_id=user_id,
+        key=data['key'],
+        label=data['label'],
+        color=data.get('color', '#9aa0a7'),
+        emoji=data.get('emoji', ''),
+        order=data.get('order', max_order + 1),
+        is_completed=data.get('isCompleted', False)
+    )
+    db.session.add(config)
+    db.session.commit()
+
+    return jsonify(config.to_dict()), 201
+
+@app.route('/api/status-configs/<int:config_id>', methods=['PUT'])
+@jwt_required()
+def update_status_config(config_id):
+    user_id = int(get_jwt_identity())
+    config = StatusConfig.query.get_or_404(config_id)
+
+    if config.user_id != user_id:
+        return jsonify({'error': 'Acesso negado'}), 403
+
+    data = request.get_json()
+
+    if 'label' in data:
+        config.label = data['label']
+    if 'color' in data:
+        config.color = data['color']
+    if 'emoji' in data:
+        config.emoji = data['emoji']
+    if 'order' in data:
+        config.order = data['order']
+    if 'isCompleted' in data:
+        # impede remover o último status marcado como conclusivo, senão "Concluir" para de funcionar
+        if not data['isCompleted']:
+            other_completed = StatusConfig.query.filter(
+                StatusConfig.user_id == user_id,
+                StatusConfig.is_completed == True,
+                StatusConfig.id != config.id
+            ).first()
+            if config.is_completed and not other_completed:
+                return jsonify({'error': 'Precisa existir ao menos um status marcado como conclusivo'}), 400
+        config.is_completed = data['isCompleted']
+
+    db.session.commit()
+    return jsonify(config.to_dict()), 200
+
+@app.route('/api/status-configs/<int:config_id>', methods=['DELETE'])
+@jwt_required()
+def delete_status_config(config_id):
+    user_id = int(get_jwt_identity())
+    config = StatusConfig.query.get_or_404(config_id)
+
+    if config.user_id != user_id:
+        return jsonify({'error': 'Acesso negado'}), 403
+
+    if StatusConfig.query.filter_by(user_id=user_id).count() <= 1:
+        return jsonify({'error': 'Não é possível remover o último status restante'}), 400
+
+    in_use = Demand.query.filter_by(user_id=user_id, status=config.key).first()
+    if in_use:
+        return jsonify({'error': 'Existem demandas usando esse status. Mude o status delas antes de remover.'}), 400
+
+    if config.is_completed:
+        other_completed = StatusConfig.query.filter(
+            StatusConfig.user_id == user_id,
+            StatusConfig.is_completed == True,
+            StatusConfig.id != config.id
+        ).first()
+        if not other_completed:
+            return jsonify({'error': 'Precisa existir ao menos um status marcado como conclusivo'}), 400
+
+    db.session.delete(config)
+    db.session.commit()
+
+    return jsonify({'message': 'Status removido'}), 200
+
+# ============= ROTAS DE PRIORIDADE CONFIGURÁVEL =============
+@app.route('/api/priority-configs', methods=['GET'])
+@jwt_required()
+def get_priority_configs():
+    user_id = int(get_jwt_identity())
+    seed_default_status_and_priority(user_id)
+    configs = PriorityConfig.query.filter_by(user_id=user_id).order_by(PriorityConfig.order.asc()).all()
+    return jsonify([c.to_dict() for c in configs]), 200
+
+@app.route('/api/priority-configs', methods=['POST'])
+@jwt_required()
+def create_priority_config():
+    user_id = int(get_jwt_identity())
+    data = request.get_json()
+
+    if not data or not data.get('key') or not data.get('label'):
+        return jsonify({'error': 'Chave e nome são obrigatórios'}), 400
+
+    if PriorityConfig.query.filter_by(user_id=user_id, key=data['key']).first():
+        return jsonify({'error': 'Já existe uma prioridade com essa chave'}), 409
+
+    max_order = db.session.query(db.func.max(PriorityConfig.order)).filter_by(user_id=user_id).scalar() or 0
+
+    config = PriorityConfig(
+        user_id=user_id,
+        key=data['key'],
+        label=data['label'],
+        color=data.get('color', '#9aa0a7'),
+        order=data.get('order', max_order + 1)
+    )
+    db.session.add(config)
+    db.session.commit()
+
+    return jsonify(config.to_dict()), 201
+
+@app.route('/api/priority-configs/<int:config_id>', methods=['PUT'])
+@jwt_required()
+def update_priority_config(config_id):
+    user_id = int(get_jwt_identity())
+    config = PriorityConfig.query.get_or_404(config_id)
+
+    if config.user_id != user_id:
+        return jsonify({'error': 'Acesso negado'}), 403
+
+    data = request.get_json()
+
+    if 'label' in data:
+        config.label = data['label']
+    if 'color' in data:
+        config.color = data['color']
+    if 'order' in data:
+        config.order = data['order']
+
+    db.session.commit()
+    return jsonify(config.to_dict()), 200
+
+@app.route('/api/priority-configs/<int:config_id>', methods=['DELETE'])
+@jwt_required()
+def delete_priority_config(config_id):
+    user_id = int(get_jwt_identity())
+    config = PriorityConfig.query.get_or_404(config_id)
+
+    if config.user_id != user_id:
+        return jsonify({'error': 'Acesso negado'}), 403
+
+    if PriorityConfig.query.filter_by(user_id=user_id).count() <= 1:
+        return jsonify({'error': 'Não é possível remover a última prioridade restante'}), 400
+
+    in_use = Demand.query.filter_by(user_id=user_id, priority=config.key).first()
+    if in_use:
+        return jsonify({'error': 'Existem demandas usando essa prioridade. Mude a prioridade delas antes de remover.'}), 400
+
+    db.session.delete(config)
+    db.session.commit()
+
+    return jsonify({'message': 'Prioridade removida'}), 200
+
 # ============= ROTAS DE GRUPOS DE TRABALHO =============
 @app.route('/api/work-groups', methods=['GET'])
 @jwt_required()
@@ -661,10 +924,11 @@ def delete_work_group(group_id):
 def get_demands():
     """Listar demandas pendentes do usuário"""
     user_id = int(get_jwt_identity())
-    demands = Demand.query.filter(
-        Demand.user_id == user_id,
-        Demand.status != 'concluido'
-    ).all()
+    terminal_keys = [s.key for s in StatusConfig.query.filter_by(user_id=user_id, is_completed=True).all()]
+    query = Demand.query.filter(Demand.user_id == user_id)
+    if terminal_keys:
+        query = query.filter(~Demand.status.in_(terminal_keys))
+    demands = query.all()
     return jsonify([d.to_dict() for d in demands]), 200
 
 @app.route('/api/demands', methods=['POST'])
@@ -680,15 +944,29 @@ def create_demand():
     group = WorkGroup.query.get(data['work_group_id'])
     if not group or group.user_id != user_id:
         return jsonify({'error': 'Grupo inválido'}), 403
-    
+
+    default_status = data.get('status')
+    if not default_status:
+        first_status = StatusConfig.query.filter_by(user_id=user_id, is_completed=False).order_by(StatusConfig.order.asc()).first()
+        default_status = first_status.key if first_status else 'nao-iniciado'
+
+    default_priority = data.get('priority')
+    if not default_priority:
+        media_priority = PriorityConfig.query.filter_by(user_id=user_id, key='media').first()
+        if media_priority:
+            default_priority = media_priority.key
+        else:
+            any_priority = PriorityConfig.query.filter_by(user_id=user_id).order_by(PriorityConfig.order.asc()).first()
+            default_priority = any_priority.key if any_priority else 'media'
+
     demand = Demand(
         user_id=user_id,
         work_group_id=data['work_group_id'],
         location=data['location'],
         activity=data['activity'],
         context=data.get('context', ''),
-        status=data.get('status', 'nao-iniciado'),
-        priority=data.get('priority', 'media'),
+        status=default_status,
+        priority=default_priority,
         due_date=datetime.strptime(data['due_date'], '%Y-%m-%d').date() if data.get('due_date') else None,
         assigned_to=data.get('assigned_to', ''),
         reminder_at=datetime.strptime(data['reminder_at'], '%Y-%m-%dT%H:%M') if data.get('reminder_at') else None
@@ -779,8 +1057,11 @@ def update_demand_status(demand_id):
         created_date=demand.created_date
     )
     db.session.add(history)
-    
-    if new_status == 'concluido':
+
+    status_config = StatusConfig.query.filter_by(user_id=user_id, key=new_status).first()
+    is_terminal = status_config.is_completed if status_config else (new_status == 'concluido')
+
+    if is_terminal:
         db.session.delete(demand)
     else:
         demand.status = new_status
@@ -964,23 +1245,31 @@ def get_whatsapp_text():
     user_id = int(get_jwt_identity())
     today = date.today().strftime('%d/%m/%Y')
     output = f"_*{today}*_\n"
-    
-    demands = Demand.query.filter(Demand.user_id == user_id, Demand.status != 'concluido').all()
-    history = DemandHistory.query.filter(
+
+    terminal_keys = [s.key for s in StatusConfig.query.filter_by(user_id=user_id, is_completed=True).all()]
+
+    demands_query = Demand.query.filter(Demand.user_id == user_id)
+    if terminal_keys:
+        demands_query = demands_query.filter(~Demand.status.in_(terminal_keys))
+    demands = demands_query.all()
+
+    history_query = DemandHistory.query.filter(
         DemandHistory.user_id == user_id,
-        DemandHistory.status_change_date == date.today(),
-        DemandHistory.status == 'concluido'
-    ).all()
+        DemandHistory.status_change_date == date.today()
+    )
+    if terminal_keys:
+        history_query = history_query.filter(DemandHistory.status.in_(terminal_keys))
+    else:
+        history_query = history_query.filter(DemandHistory.status == 'concluido')
+    history = history_query.all()
     
     groups = WorkGroup.query.filter_by(user_id=user_id, is_active=True).order_by(WorkGroup.order).all()
     
     STATUS_EMOJI = {
-        'concluido': '🟢',
-        'andamento': '🟡',
-        'nao-iniciado': '⚪',
-        'aguardando': '🔵',
-        'aprovacao': '🟣',
-        'agendado': '🟠'
+        s.key: s.emoji for s in StatusConfig.query.filter_by(user_id=user_id).all()
+    }
+    STATUS_LABEL = {
+        s.key: s.label for s in StatusConfig.query.filter_by(user_id=user_id).all()
     }
     
     for group in groups:
@@ -992,16 +1281,19 @@ def get_whatsapp_text():
             
             for d in group_demands:
                 emoji = STATUS_EMOJI.get(d.status, '⚪')
+                d_label = STATUS_LABEL.get(d.status, d.status).upper()
                 output += f"> *{d.location}:* {d.activity}"
                 if d.context:
                     output += f" _({d.context})_"
-                output += f"; _*{d.status.upper()} {emoji}*_\n"
+                output += f"; _*{d_label} {emoji}*_\n"
             
             for h in group_history:
                 output += f"> *{h.location}:* {h.activity}"
                 if h.context:
                     output += f" _({h.context})_"
-                output += f"; _*CONCLUÍDO 🟢*_\n"
+                h_label = STATUS_LABEL.get(h.status, 'Concluído').upper()
+                h_emoji = STATUS_EMOJI.get(h.status, '🟢')
+                output += f"; _*{h_label} {h_emoji}*_\n"
             
             output += "\n"
     
