@@ -904,7 +904,6 @@
         <div class="tabs">
             <button class="tab-btn active" onclick="switchTab('today')">🌅 Hoje</button>
             <button class="tab-btn" onclick="switchTab('demands')">📋 Demandas</button>
-            <button class="tab-btn" onclick="switchTab('groups')">👥 Grupos</button>
             <button class="tab-btn" onclick="switchTab('calendar')">🗓️ Calendário</button>
             <button class="tab-btn" onclick="switchTab('history')">📅 Histórico</button>
             <button class="tab-btn" onclick="switchTab('locations')">📍 Locais</button>
@@ -947,36 +946,6 @@
         </div>
 
         <!-- TAB: GRUPOS -->
-        <div id="tab-groups" class="tab-content">
-            <div class="card">
-                <h3>➕ Novo Grupo</h3>
-                <div class="form-group">
-                    <label>Nome do Grupo</label>
-                    <input type="text" id="newGroupName" placeholder="Ex: BACKOFFICE">
-                </div>
-                <div class="form-group">
-                    <label>Emoji</label>
-                    <input type="text" id="newGroupEmoji" placeholder="Ex: 👨🏻‍💻" maxlength="2">
-                </div>
-                <div class="form-group">
-                    <label>Cor</label>
-                    <input type="color" id="newGroupColor" value="#3b82f6">
-                </div>
-                <div class="form-group">
-                    <label>Descrição (opcional)</label>
-                    <input type="text" id="newGroupDescription" placeholder="Descrição do grupo">
-                </div>
-                <button class="btn btn-primary" onclick="createGroup()">Criar Grupo</button>
-            </div>
-
-            <div style="margin-top: 2rem;">
-                <h3 style="margin-bottom: 1rem;">👥 Seus Grupos</h3>
-                <div id="groupsList" class="groups-list">
-                    <div>Carregando...</div>
-                </div>
-            </div>
-        </div>
-
         <!-- TAB: CALENDÁRIO -->
         <div id="tab-calendar" class="tab-content">
             <div class="card" style="margin-bottom: 1.5rem;">
@@ -1114,6 +1083,16 @@
 
         <div id="tab-settings" class="tab-content">
             <div class="card">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+                    <h3 style="margin-bottom:0;">👥 Grupos</h3>
+                    <button class="btn btn-sm btn-primary" style="width:auto;" onclick="showNewGroupModal()">➕ Novo Grupo</button>
+                </div>
+                <div id="groupsList" class="groups-list">
+                    <div>Carregando...</div>
+                </div>
+            </div>
+
+            <div class="card" style="margin-top: 1.5rem;">
                 <h3>👤 Meus Dados</h3>
                 <p id="userEmail" style="margin-bottom: 1rem;"></p>
                 <button class="btn btn-secondary" onclick="downloadBackup()">📥 Fazer Backup</button>
@@ -1189,6 +1168,32 @@
     </div>
 
     <!-- MODAL PARA EDITAR GRUPO -->
+    <!-- MODAL PARA CRIAR GRUPO -->
+    <div id="newGroupModal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" onclick="closeNewGroupModal()">&times;</span>
+            <div class="modal-header">➕ Novo Grupo</div>
+            <div class="form-group">
+                <label>Nome do Grupo</label>
+                <input type="text" id="newGroupName" placeholder="Ex: BACKOFFICE">
+            </div>
+            <div class="form-group">
+                <label>Emoji</label>
+                <input type="text" id="newGroupEmoji" placeholder="Ex: 👨🏻‍💻" maxlength="2">
+            </div>
+            <div class="form-group">
+                <label>Cor</label>
+                <input type="color" id="newGroupColor" value="#3b82f6">
+            </div>
+            <div class="form-group">
+                <label>Descrição (opcional)</label>
+                <input type="text" id="newGroupDescription" placeholder="Descrição do grupo">
+            </div>
+            <button class="btn btn-primary" onclick="createGroup()">Criar Grupo</button>
+            <button class="btn btn-secondary" onclick="closeNewGroupModal()" style="margin-left: 0.5rem;">Cancelar</button>
+        </div>
+    </div>
+
     <div id="editGroupModal" class="modal">
         <div class="modal-content">
             <span class="close-modal" onclick="closeEditGroup()">&times;</span>
@@ -1860,6 +1865,18 @@
                 currentGroups.map(g => `<option value="${g.id}">${escapeHtml(g.emoji)} ${escapeHtml(g.name)}</option>`).join('');
         }
 
+        function showNewGroupModal() {
+            document.getElementById('newGroupName').value = '';
+            document.getElementById('newGroupEmoji').value = '';
+            document.getElementById('newGroupColor').value = '#3b82f6';
+            document.getElementById('newGroupDescription').value = '';
+            document.getElementById('newGroupModal').classList.add('show');
+        }
+
+        function closeNewGroupModal() {
+            document.getElementById('newGroupModal').classList.remove('show');
+        }
+
         async function createGroup() {
             const name = document.getElementById('newGroupName').value;
             const emoji = document.getElementById('newGroupEmoji').value;
@@ -1874,20 +1891,17 @@
             const btn = event.target;
             btn.disabled = true;
             try {
-                const response = await fetch(`${API_URL}/work-groups`, {
+                const response = await fetchWithRetry(`${API_URL}/work-groups`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${token}`
                     },
                     body: JSON.stringify({ name, emoji, color, description })
-                });
+                }, 1);
 
                 if (response.ok) {
-                    document.getElementById('newGroupName').value = '';
-                    document.getElementById('newGroupEmoji').value = '';
-                    document.getElementById('newGroupColor').value = '#3b82f6';
-                    document.getElementById('newGroupDescription').value = '';
+                    closeNewGroupModal();
                     loadGroups();
                 } else {
                     const data = await response.json().catch(() => ({}));
