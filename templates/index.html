@@ -599,6 +599,28 @@
         .history-day-card .stat-label { margin-top: 0.3rem; }
         .history-day-dots { display: flex; justify-content: center; gap: 3px; flex-wrap: wrap; margin-top: 0.5rem; }
 
+        .locations-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 0.85rem;
+        }
+        .location-card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--amber);
+            border-radius: var(--radius);
+            padding: 1.1rem 1.25rem;
+            cursor: pointer;
+            transition: border-color 0.15s, background 0.15s;
+        }
+        .location-card:hover { border-color: var(--amber-bright); background: var(--panel-raised); }
+        .location-card-name {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--amber-bright);
+            letter-spacing: 0.02em;
+        }
+
         .history-chain {
             font-size: 0.7rem;
             color: var(--text-secondary);
@@ -1102,6 +1124,7 @@
         <div class="modal-content" style="max-width: 600px;">
             <span class="close-modal" onclick="closeLocationModal()">&times;</span>
             <div class="modal-header" id="locationModalTitle"></div>
+            <div id="locationModalStats" style="font-size: 0.75rem; color: var(--text-secondary); margin-top: -0.75rem; margin-bottom: 1.25rem; text-transform: uppercase; letter-spacing: 0.03em;"></div>
             <div id="locationModalList" style="max-height: 60vh; overflow-y: auto; padding-right: 4px;"></div>
         </div>
     </div>
@@ -3044,18 +3067,11 @@
                 return;
             }
 
-            container.innerHTML = '<div class="history-days-grid">' + names.map((loc, idx) => {
-                const data = locationsCache[loc];
-                const total = data.active.length + data.history.length;
-                const activeCount = data.active.length;
-                return `
-                    <div class="stat-card history-day-card" onclick="showLocationModal(${idx})">
-                        <div class="stat-value">${total}</div>
-                        <div class="stat-label">📍 ${escapeHtml(loc)}</div>
-                        ${activeCount > 0 ? `<div style="font-size:0.6rem; color:var(--amber-bright); margin-top:0.3rem; text-transform:uppercase; letter-spacing:0.03em;">${activeCount} ativa${activeCount > 1 ? 's' : ''}</div>` : ''}
-                    </div>
-                `;
-            }).join('') + '</div>';
+            container.innerHTML = '<div class="locations-grid">' + names.map((loc, idx) => `
+                <div class="location-card" onclick="showLocationModal(${idx})">
+                    <div class="location-card-name">📍 ${escapeHtml(loc)}</div>
+                </div>
+            `).join('') + '</div>';
         }
 
         function showLocationModal(idx) {
@@ -3076,6 +3092,11 @@
                 const last = entries[entries.length - 1];
                 timeline.push({ sortKey: last.statusChangeDate || '0000-00-00', html: renderLocationHistoryCard(entries) });
             });
+
+            const totalEvents = data.active.length + historyGrouped.length;
+            const activeCount = data.active.length;
+            document.getElementById('locationModalStats').textContent =
+                `${totalEvents} ${totalEvents === 1 ? 'evento' : 'eventos'}${activeCount > 0 ? ` · ${activeCount} ativa${activeCount > 1 ? 's' : ''}` : ''}`;
 
             timeline.sort((a, b) => b.sortKey.localeCompare(a.sortKey));
 
