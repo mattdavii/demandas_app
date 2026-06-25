@@ -160,6 +160,7 @@ class DemandHistory(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     work_group_id = db.Column(db.Integer, db.ForeignKey('work_groups.id'), nullable=True)
+    demand_id = db.Column(db.Integer, nullable=True)  # vínculo real com a demanda de origem (registros novos)
     location = db.Column(db.String(100), nullable=False)
     activity = db.Column(db.String(255), nullable=False)
     context = db.Column(db.Text, nullable=True)
@@ -171,6 +172,7 @@ class DemandHistory(db.Model):
     def to_dict(self):
         return {
             'id': self.id,
+            'demandId': self.demand_id,
             'workGroupId': self.work_group_id,
             'location': self.location,
             'activity': self.activity,
@@ -239,6 +241,7 @@ with app.app_context():
         db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN DEFAULT FALSE"))
         db.session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS access_verified BOOLEAN DEFAULT TRUE"))
         db.session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE"))
+        db.session.execute(text("ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS demand_id INTEGER"))
         db.session.commit()
     except Exception as e:
         db.session.rollback()
@@ -767,6 +770,7 @@ def update_demand_status(demand_id):
     history = DemandHistory(
         user_id=user_id,
         work_group_id=demand.work_group_id,
+        demand_id=demand.id,
         location=demand.location,
         activity=demand.activity,
         context=demand.context,
@@ -902,6 +906,36 @@ def check_reminders():
         db.session.commit()
 
     return jsonify({'triggered': triggered}), 200
+
+@app.route('/api/locations/merge', methods=['POST'])
+@jwt_required()
+def merge_locations():
+    """Renomeia todos os registros (ativos e histórico) de um local pro nome de outro.
+    Útil pra unificar variações de digitação do mesmo local (ex: 'IBIAPINA 1' -> 'IBIAPINA 01')."""
+    user_id = int(get_jwt_identity())
+    data = request.get_json()
+
+    from_location = (data or {}).get('from', '').strip()
+    to_location = (data or {}).get('to', '').strip()
+
+    if not from_location or not to_location:
+        return jsonify({'error': 'Informe os dois locais (origem e destino)'}), 400
+    if from_location == to_location:
+        return jsonify({'error': 'Os locais devem ser diferentes'}), 400
+
+    demands_updated = Demand.query.filter_by(user_id=user_id, location=from_location).update(
+        {Demand.location: to_location}
+    )
+    history_updated = DemandHistory.query.filter_by(user_id=user_id, location=from_location).update(
+        {DemandHistory.location: to_location}
+    )
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Locais mesclados com sucesso',
+        'demandsUpdated': demands_updated,
+        'historyUpdated': history_updated
+    }), 200
 
 # ============= ROTAS DE HISTÓRICO =============
 @app.route('/api/history', methods=['GET'])
