@@ -393,12 +393,9 @@
 
         .kanban-board {
             display: grid;
-            grid-template-columns: repeat(5, 1fr);
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
             gap: 1rem;
         }
-        @media (max-width: 1300px) { .kanban-board { grid-template-columns: repeat(3, 1fr); } }
-        @media (max-width: 1100px) { .kanban-board { grid-template-columns: repeat(2, 1fr); } }
-        @media (max-width: 600px) { .kanban-board { grid-template-columns: 1fr; } }
 
         .kanban-column {
             background: var(--panel-raised);
@@ -509,6 +506,50 @@
         .calendar-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
         .calendar-more { font-size: 0.55rem; color: var(--text-secondary); }
         .calendar-completed-badge { font-size: 0.58rem; color: var(--led-green); font-weight: 700; margin-top: 2px; }
+
+        .config-list-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem;
+            background: var(--panel-raised);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            margin-bottom: 0.6rem;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .config-list-info {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .config-color-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+        .config-completed-tag {
+            font-size: 0.6rem;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            color: var(--led-green);
+            border: 1px solid var(--led-green);
+            padding: 1px 6px;
+            border-radius: 3px;
+        }
+        .config-list-actions { display: flex; gap: 0.4rem; align-items: center; }
+        .btn-icon {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            border-radius: 4px;
+            width: 28px;
+            height: 28px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-family: inherit;
+        }
+        .btn-icon:disabled { opacity: 0.3; cursor: not-allowed; }
+        .btn-icon:hover:not(:disabled) { border-color: var(--amber); color: var(--amber-bright); }
 
         .notes-grid {
             display: grid;
@@ -951,11 +992,6 @@
                         <label>Status</label>
                         <select id="calendarStatusFilter" onchange="renderCalendar()">
                             <option value="">Todos os status</option>
-                            <option value="agendado">🟠 Agendado</option>
-                            <option value="nao-iniciado">⚪ Não Iniciado</option>
-                            <option value="andamento">🟡 Em Andamento</option>
-                            <option value="aguardando">🔵 Aguardando</option>
-                            <option value="aprovacao">🟣 Aprovação</option>
                         </select>
                     </div>
                     <div class="form-group" style="margin-bottom:0; flex:1; min-width:160px;">
@@ -1088,6 +1124,67 @@
                 <h3>🔐 Segurança</h3>
                 <button class="btn btn-secondary" onclick="showChangePasswordModal()">Alterar Senha</button>
             </div>
+
+            <div class="card" style="margin-top: 1.5rem;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
+                    <h3 style="margin-bottom:0;">🎨 Status</h3>
+                    <button class="btn btn-sm btn-primary" style="width:auto;" onclick="showNewStatusModal()">➕ Novo Status</button>
+                </div>
+                <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 1rem;">Defina as etapas do seu fluxo de trabalho. O status marcado como "conclusivo" arquiva a demanda pro histórico quando atingido.</p>
+                <div id="statusConfigList"></div>
+            </div>
+
+            <div class="card" style="margin-top: 1.5rem;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+                    <h3 style="margin-bottom:0;">🎯 Prioridades</h3>
+                    <button class="btn btn-sm btn-primary" style="width:auto;" onclick="showNewPriorityModal()">➕ Nova Prioridade</button>
+                </div>
+                <div id="priorityConfigList"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL STATUS CONFIGURÁVEL -->
+    <div id="statusConfigModal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" onclick="closeStatusConfigModal()">&times;</span>
+            <div class="modal-header" id="statusConfigModalTitle">Novo Status</div>
+            <div class="form-group">
+                <label>Nome</label>
+                <input type="text" id="statusConfigLabel" placeholder="Ex: Em Revisão">
+            </div>
+            <div class="form-group">
+                <label>Emoji (opcional)</label>
+                <input type="text" id="statusConfigEmoji" maxlength="2" placeholder="🔵">
+            </div>
+            <div class="form-group">
+                <label>Cor</label>
+                <input type="color" id="statusConfigColor">
+            </div>
+            <div class="form-group" style="display:flex; align-items:center; gap:0.5rem;">
+                <input type="checkbox" id="statusConfigIsCompleted" style="width:auto; accent-color: var(--led-green); cursor:pointer;">
+                <label style="margin-bottom:0; cursor:pointer;" onclick="document.getElementById('statusConfigIsCompleted').click()">Esse status é conclusivo (arquiva a demanda pro histórico)</label>
+            </div>
+            <button class="btn btn-primary" onclick="saveStatusConfig()">Salvar</button>
+            <button class="btn btn-secondary" onclick="closeStatusConfigModal()" style="margin-left: 0.5rem;">Cancelar</button>
+        </div>
+    </div>
+
+    <!-- MODAL PRIORIDADE CONFIGURÁVEL -->
+    <div id="priorityConfigModal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" onclick="closePriorityConfigModal()">&times;</span>
+            <div class="modal-header" id="priorityConfigModalTitle">Nova Prioridade</div>
+            <div class="form-group">
+                <label>Nome</label>
+                <input type="text" id="priorityConfigLabel" placeholder="Ex: Crítica">
+            </div>
+            <div class="form-group">
+                <label>Cor</label>
+                <input type="color" id="priorityConfigColor">
+            </div>
+            <button class="btn btn-primary" onclick="savePriorityConfig()">Salvar</button>
+            <button class="btn btn-secondary" onclick="closePriorityConfigModal()" style="margin-left: 0.5rem;">Cancelar</button>
         </div>
     </div>
 
@@ -1221,22 +1318,11 @@
             </div>
             <div class="form-group">
                 <label>Prioridade</label>
-                <select id="newPriority">
-                    <option value="baixa">Baixa</option>
-                    <option value="media" selected>Média</option>
-                    <option value="alta">Alta</option>
-                    <option value="urgente">Urgente</option>
-                </select>
+                <select id="newPriority"></select>
             </div>
             <div class="form-group">
                 <label>Status</label>
-                <select id="newStatus">
-                    <option value="nao-iniciado" selected>⚪ Não Iniciado</option>
-                    <option value="agendado">🟠 Agendado</option>
-                    <option value="andamento">🟡 Em Andamento</option>
-                    <option value="aguardando">🔵 Aguardando</option>
-                    <option value="aprovacao">🟣 Aprovação</option>
-                </select>
+                <select id="newStatus"></select>
             </div>
             <div class="form-group">
                 <label>Vencimento (opcional)</label>
@@ -1269,23 +1355,11 @@
             </div>
             <div class="form-group">
                 <label>Prioridade</label>
-                <select id="editDemandPriority">
-                    <option value="baixa">Baixa</option>
-                    <option value="media">Média</option>
-                    <option value="alta">Alta</option>
-                    <option value="urgente">Urgente</option>
-                </select>
+                <select id="editDemandPriority"></select>
             </div>
             <div class="form-group">
                 <label>Status</label>
-                <select id="editDemandStatus">
-                    <option value="agendado">🟠 Agendado</option>
-                    <option value="nao-iniciado">⚪ Não Iniciado</option>
-                    <option value="andamento">🟡 Em Andamento</option>
-                    <option value="aguardando">🔵 Aguardando</option>
-                    <option value="aprovacao">🟣 Aprovação</option>
-                    <option value="concluido">🟢 Concluído</option>
-                </select>
+                <select id="editDemandStatus"></select>
             </div>
             <div class="form-group">
                 <label>Vencimento (opcional)</label>
@@ -1443,7 +1517,7 @@
                 const response = await fetchWithRetry(`${API_URL}/demands/${item.payload.id}/status`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                    body: JSON.stringify({ status: 'concluido' })
+                    body: JSON.stringify({ status: getCompletedStatusKey() })
                 }, 1);
                 if (!response.ok) throw new Error('Falha ao sincronizar conclusão');
             }
@@ -1721,6 +1795,7 @@
                 document.getElementById('adminKeysTabBtn').style.display = 'none';
             }
 
+            await loadStatusAndPriorityConfigs();
             await Promise.all([loadGroups(), loadDemands()]);
             if (isOnline) {
                 checkReminders();
@@ -1954,7 +2029,12 @@
             }
         }
 
-        const STATUS_COLUMNS = [
+        let currentStatusConfigs = [];
+        let currentPriorityConfigs = [];
+
+        // Valores de fábrica usados até a configuração real carregar (ou se o usuário ainda não tiver nenhuma).
+        // Essas variáveis são reconstruídas dinamicamente por loadStatusAndPriorityConfigs().
+        let STATUS_COLUMNS = [
             { key: 'agendado', label: 'Agendado', color: 'var(--led-orange)' },
             { key: 'nao-iniciado', label: 'Não Iniciado', color: 'var(--led-gray)' },
             { key: 'andamento', label: 'Em Andamento', color: 'var(--amber)' },
@@ -1962,7 +2042,434 @@
             { key: 'aprovacao', label: 'Aprovação', color: 'var(--led-purple)' }
         ];
 
-        const PRIORITY_RANK = { 'urgente': 4, 'alta': 3, 'media': 2, 'baixa': 1 };
+        let PRIORITY_RANK = { 'urgente': 4, 'alta': 3, 'media': 2, 'baixa': 1 };
+
+        // Carrega a configuração real de status/prioridade do usuário e reconstrói
+        // STATUS_COLUMNS / PRIORITY_STYLES / PRIORITY_RANK a partir dela. Todo o resto
+        // do app (kanban, badges, calendário, dashboard, exportações) consome essas
+        // mesmas variáveis sem precisar saber que agora são configuráveis.
+        async function loadStatusAndPriorityConfigs() {
+            try {
+                const [statusRes, priorityRes] = await Promise.all([
+                    fetchWithRetry(`${API_URL}/status-configs`, { headers: { 'Authorization': `Bearer ${token}` } }, 2),
+                    fetchWithRetry(`${API_URL}/priority-configs`, { headers: { 'Authorization': `Bearer ${token}` } }, 2)
+                ]);
+
+                if (statusRes.ok) {
+                    currentStatusConfigs = await statusRes.json();
+                }
+                if (priorityRes.ok) {
+                    currentPriorityConfigs = await priorityRes.json();
+                }
+
+                localStorage.setItem('cache_statusConfigs', JSON.stringify(currentStatusConfigs));
+                localStorage.setItem('cache_priorityConfigs', JSON.stringify(currentPriorityConfigs));
+            } catch (e) {
+                console.error('Erro ao carregar status/prioridade, tentando cache local:', e);
+                try {
+                    currentStatusConfigs = JSON.parse(localStorage.getItem('cache_statusConfigs') || '[]');
+                    currentPriorityConfigs = JSON.parse(localStorage.getItem('cache_priorityConfigs') || '[]');
+                } catch (e2) {
+                    currentStatusConfigs = [];
+                    currentPriorityConfigs = [];
+                }
+            }
+
+            rebuildStatusAndPriorityStructures();
+        }
+
+        function rebuildStatusAndPriorityStructures() {
+            if (currentStatusConfigs.length > 0) {
+                const sortedStatus = [...currentStatusConfigs].sort((a, b) => a.order - b.order);
+                STATUS_COLUMNS = sortedStatus
+                    .filter(s => !s.isCompleted)
+                    .map(s => ({ key: s.key, label: s.label, color: s.color, emoji: s.emoji }));
+            }
+
+            if (currentPriorityConfigs.length > 0) {
+                const sortedPriority = [...currentPriorityConfigs].sort((a, b) => a.order - b.order);
+                const newStyles = {};
+                const newRank = {};
+                sortedPriority.forEach(p => {
+                    newStyles[p.key] = { label: p.label, color: p.color };
+                    newRank[p.key] = p.order;
+                });
+                PRIORITY_STYLES = newStyles;
+                PRIORITY_RANK = newRank;
+            }
+        }
+
+        function populateStatusDropdown(selectId, options = {}) {
+            const { includeCompleted = true, includeEmptyOption = false, selectedValue = null } = options;
+            const select = document.getElementById(selectId);
+            const currentValue = selectedValue !== null ? selectedValue : select.value;
+
+            const sorted = [...currentStatusConfigs].sort((a, b) => a.order - b.order);
+            const filtered = includeCompleted ? sorted : sorted.filter(s => !s.isCompleted);
+
+            let html = includeEmptyOption ? '<option value="">Todos os status</option>' : '';
+            html += filtered.map(s => `<option value="${escapeHtml(s.key)}">${s.emoji || ''} ${escapeHtml(s.label)}</option>`).join('');
+            select.innerHTML = html;
+
+            if (selectedValue !== null) {
+                select.value = selectedValue;
+            } else if (includeEmptyOption && currentValue === '') {
+                select.value = '';
+            } else if (filtered.some(s => s.key === currentValue)) {
+                select.value = currentValue;
+            } else if (filtered.length > 0) {
+                select.value = filtered[0].key;
+            }
+        }
+
+        function populatePriorityDropdown(selectId, options = {}) {
+            const { includeEmptyOption = false, selectedValue = null } = options;
+            const select = document.getElementById(selectId);
+            const currentValue = selectedValue !== null ? selectedValue : select.value;
+
+            const sorted = [...currentPriorityConfigs].sort((a, b) => a.order - b.order);
+
+            let html = includeEmptyOption ? '<option value="">Todas as prioridades</option>' : '';
+            html += sorted.map(p => `<option value="${escapeHtml(p.key)}">${escapeHtml(p.label)}</option>`).join('');
+            select.innerHTML = html;
+
+            if (selectedValue !== null) {
+                select.value = selectedValue;
+            } else if (includeEmptyOption && currentValue === '') {
+                select.value = '';
+            } else if (sorted.some(p => p.key === currentValue)) {
+                select.value = currentValue;
+            } else if (sorted.length > 0) {
+                const media = sorted.find(p => p.key === 'media');
+                select.value = media ? media.key : sorted[0].key;
+            }
+        }
+
+        // ============= GERENCIAR STATUS E PRIORIDADES (CONFIGURAÇÕES) =============
+        let editingStatusConfigId = null;
+        let editingPriorityConfigId = null;
+
+        function slugify(text) {
+            return text
+                .toLowerCase()
+                .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/^-+|-+$/g, '') || 'item';
+        }
+
+        function generateUniqueKey(label, existingConfigs) {
+            const base = slugify(label);
+            let key = base;
+            let counter = 2;
+            while (existingConfigs.some(c => c.key === key)) {
+                key = `${base}-${counter}`;
+                counter++;
+            }
+            return key;
+        }
+
+        async function loadStatusAndPriorityConfigLists() {
+            await loadStatusAndPriorityConfigs();
+            renderStatusConfigList();
+            renderPriorityConfigList();
+        }
+
+        function renderStatusConfigList() {
+            const container = document.getElementById('statusConfigList');
+            const sorted = [...currentStatusConfigs].sort((a, b) => a.order - b.order);
+
+            if (sorted.length === 0) {
+                container.innerHTML = '<div class="kanban-empty">Nenhum status configurado</div>';
+                return;
+            }
+
+            container.innerHTML = sorted.map((s, idx) => `
+                <div class="config-list-row">
+                    <div class="config-list-info">
+                        <span class="config-color-dot" style="background:${s.color};"></span>
+                        <span>${s.emoji || ''} ${escapeHtml(s.label)}</span>
+                        ${s.isCompleted ? '<span class="config-completed-tag">Conclusivo</span>' : ''}
+                    </div>
+                    <div class="config-list-actions">
+                        <button class="btn-icon" onclick="moveStatusConfig(${s.id}, -1)" ${idx === 0 ? 'disabled' : ''} title="Mover pra cima">↑</button>
+                        <button class="btn-icon" onclick="moveStatusConfig(${s.id}, 1)" ${idx === sorted.length - 1 ? 'disabled' : ''} title="Mover pra baixo">↓</button>
+                        <button class="btn-edit btn-sm" onclick="editStatusConfig(${s.id})">Editar</button>
+                        <button class="btn-delete btn-sm" onclick="deleteStatusConfig(${s.id})">Apagar</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderPriorityConfigList() {
+            const container = document.getElementById('priorityConfigList');
+            const sorted = [...currentPriorityConfigs].sort((a, b) => a.order - b.order);
+
+            if (sorted.length === 0) {
+                container.innerHTML = '<div class="kanban-empty">Nenhuma prioridade configurada</div>';
+                return;
+            }
+
+            container.innerHTML = sorted.map((p, idx) => `
+                <div class="config-list-row">
+                    <div class="config-list-info">
+                        <span class="config-color-dot" style="background:${p.color};"></span>
+                        <span>${escapeHtml(p.label)}</span>
+                    </div>
+                    <div class="config-list-actions">
+                        <button class="btn-icon" onclick="movePriorityConfig(${p.id}, -1)" ${idx === 0 ? 'disabled' : ''} title="Mover pra cima">↑</button>
+                        <button class="btn-icon" onclick="movePriorityConfig(${p.id}, 1)" ${idx === sorted.length - 1 ? 'disabled' : ''} title="Mover pra baixo">↓</button>
+                        <button class="btn-edit btn-sm" onclick="editPriorityConfig(${p.id})">Editar</button>
+                        <button class="btn-delete btn-sm" onclick="deletePriorityConfig(${p.id})">Apagar</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function showNewStatusModal() {
+            editingStatusConfigId = null;
+            document.getElementById('statusConfigModalTitle').textContent = '➕ Novo Status';
+            document.getElementById('statusConfigLabel').value = '';
+            document.getElementById('statusConfigEmoji').value = '';
+            document.getElementById('statusConfigColor').value = '#9aa0a7';
+            document.getElementById('statusConfigIsCompleted').checked = false;
+            document.getElementById('statusConfigModal').classList.add('show');
+        }
+
+        function editStatusConfig(id) {
+            const config = currentStatusConfigs.find(s => s.id === id);
+            if (!config) return;
+            editingStatusConfigId = id;
+            document.getElementById('statusConfigModalTitle').textContent = '✏️ Editar Status';
+            document.getElementById('statusConfigLabel').value = config.label;
+            document.getElementById('statusConfigEmoji').value = config.emoji || '';
+            document.getElementById('statusConfigColor').value = config.color;
+            document.getElementById('statusConfigIsCompleted').checked = config.isCompleted;
+            document.getElementById('statusConfigModal').classList.add('show');
+        }
+
+        function closeStatusConfigModal() {
+            document.getElementById('statusConfigModal').classList.remove('show');
+            editingStatusConfigId = null;
+        }
+
+        async function saveStatusConfig() {
+            const label = document.getElementById('statusConfigLabel').value.trim();
+            if (!label) {
+                alert('Digite um nome pro status');
+                return;
+            }
+            const emoji = document.getElementById('statusConfigEmoji').value.trim();
+            const color = document.getElementById('statusConfigColor').value;
+            const isCompleted = document.getElementById('statusConfigIsCompleted').checked;
+            const isEdit = editingStatusConfigId !== null;
+
+            try {
+                let response;
+                if (isEdit) {
+                    response = await fetchWithRetry(`${API_URL}/status-configs/${editingStatusConfigId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ label, emoji, color, isCompleted })
+                    }, 1);
+                } else {
+                    const key = generateUniqueKey(label, currentStatusConfigs);
+                    response = await fetchWithRetry(`${API_URL}/status-configs`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ key, label, emoji, color, isCompleted })
+                    }, 1);
+                }
+
+                if (response.ok) {
+                    closeStatusConfigModal();
+                    await loadStatusAndPriorityConfigs();
+                    renderStatusConfigList();
+                    renderDemands();
+                    updateSummary();
+                } else {
+                    const data = await response.json().catch(() => ({}));
+                    alert(data.error || 'Erro ao salvar status');
+                }
+            } catch (e) {
+                console.error('Erro:', e);
+                alert('Erro de conexão ao salvar status');
+            }
+        }
+
+        async function deleteStatusConfig(id) {
+            if (!confirm('Apagar esse status? Essa ação não pode ser desfeita.')) return;
+            try {
+                const response = await fetchWithRetry(`${API_URL}/status-configs/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (response.ok) {
+                    await loadStatusAndPriorityConfigs();
+                    renderStatusConfigList();
+                    renderDemands();
+                    updateSummary();
+                } else {
+                    const data = await response.json().catch(() => ({}));
+                    alert(data.error || 'Erro ao apagar status');
+                }
+            } catch (e) {
+                console.error('Erro:', e);
+                alert('Erro de conexão ao apagar status');
+            }
+        }
+
+        async function moveStatusConfig(id, direction) {
+            const sorted = [...currentStatusConfigs].sort((a, b) => a.order - b.order);
+            const idx = sorted.findIndex(s => s.id === id);
+            const swapIdx = idx + direction;
+            if (swapIdx < 0 || swapIdx >= sorted.length) return;
+
+            const a = sorted[idx];
+            const b = sorted[swapIdx];
+            const tempOrder = a.order;
+
+            try {
+                await Promise.all([
+                    fetchWithRetry(`${API_URL}/status-configs/${a.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ order: b.order })
+                    }, 1),
+                    fetchWithRetry(`${API_URL}/status-configs/${b.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ order: tempOrder })
+                    }, 1)
+                ]);
+                await loadStatusAndPriorityConfigs();
+                renderStatusConfigList();
+                renderDemands();
+                updateSummary();
+            } catch (e) {
+                console.error('Erro:', e);
+                alert('Erro de conexão ao reordenar');
+            }
+        }
+
+        function showNewPriorityModal() {
+            editingPriorityConfigId = null;
+            document.getElementById('priorityConfigModalTitle').textContent = '➕ Nova Prioridade';
+            document.getElementById('priorityConfigLabel').value = '';
+            document.getElementById('priorityConfigColor').value = '#9aa0a7';
+            document.getElementById('priorityConfigModal').classList.add('show');
+        }
+
+        function editPriorityConfig(id) {
+            const config = currentPriorityConfigs.find(p => p.id === id);
+            if (!config) return;
+            editingPriorityConfigId = id;
+            document.getElementById('priorityConfigModalTitle').textContent = '✏️ Editar Prioridade';
+            document.getElementById('priorityConfigLabel').value = config.label;
+            document.getElementById('priorityConfigColor').value = config.color;
+            document.getElementById('priorityConfigModal').classList.add('show');
+        }
+
+        function closePriorityConfigModal() {
+            document.getElementById('priorityConfigModal').classList.remove('show');
+            editingPriorityConfigId = null;
+        }
+
+        async function savePriorityConfig() {
+            const label = document.getElementById('priorityConfigLabel').value.trim();
+            if (!label) {
+                alert('Digite um nome pra prioridade');
+                return;
+            }
+            const color = document.getElementById('priorityConfigColor').value;
+            const isEdit = editingPriorityConfigId !== null;
+
+            try {
+                let response;
+                if (isEdit) {
+                    response = await fetchWithRetry(`${API_URL}/priority-configs/${editingPriorityConfigId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ label, color })
+                    }, 1);
+                } else {
+                    const key = generateUniqueKey(label, currentPriorityConfigs);
+                    response = await fetchWithRetry(`${API_URL}/priority-configs`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ key, label, color })
+                    }, 1);
+                }
+
+                if (response.ok) {
+                    closePriorityConfigModal();
+                    await loadStatusAndPriorityConfigs();
+                    renderPriorityConfigList();
+                    renderDemands();
+                    updateSummary();
+                } else {
+                    const data = await response.json().catch(() => ({}));
+                    alert(data.error || 'Erro ao salvar prioridade');
+                }
+            } catch (e) {
+                console.error('Erro:', e);
+                alert('Erro de conexão ao salvar prioridade');
+            }
+        }
+
+        async function deletePriorityConfig(id) {
+            if (!confirm('Apagar essa prioridade? Essa ação não pode ser desfeita.')) return;
+            try {
+                const response = await fetchWithRetry(`${API_URL}/priority-configs/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (response.ok) {
+                    await loadStatusAndPriorityConfigs();
+                    renderPriorityConfigList();
+                    renderDemands();
+                    updateSummary();
+                } else {
+                    const data = await response.json().catch(() => ({}));
+                    alert(data.error || 'Erro ao apagar prioridade');
+                }
+            } catch (e) {
+                console.error('Erro:', e);
+                alert('Erro de conexão ao apagar prioridade');
+            }
+        }
+
+        async function movePriorityConfig(id, direction) {
+            const sorted = [...currentPriorityConfigs].sort((a, b) => a.order - b.order);
+            const idx = sorted.findIndex(p => p.id === id);
+            const swapIdx = idx + direction;
+            if (swapIdx < 0 || swapIdx >= sorted.length) return;
+
+            const a = sorted[idx];
+            const b = sorted[swapIdx];
+            const tempOrder = a.order;
+
+            try {
+                await Promise.all([
+                    fetchWithRetry(`${API_URL}/priority-configs/${a.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ order: b.order })
+                    }, 1),
+                    fetchWithRetry(`${API_URL}/priority-configs/${b.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ order: tempOrder })
+                    }, 1)
+                ]);
+                await loadStatusAndPriorityConfigs();
+                renderPriorityConfigList();
+                renderDemands();
+                updateSummary();
+            } catch (e) {
+                console.error('Erro:', e);
+                alert('Erro de conexão ao reordenar');
+            }
+        }
 
         function renderDemands() {
             const container = document.getElementById('demandsList');
@@ -2048,8 +2555,8 @@
             document.getElementById('newLocation').value = '';
             document.getElementById('newActivity').value = '';
             document.getElementById('newContext').value = '';
-            document.getElementById('newPriority').value = 'media';
-            document.getElementById('newStatus').value = 'nao-iniciado';
+            populatePriorityDropdown('newPriority');
+            populateStatusDropdown('newStatus', { includeCompleted: false });
             document.getElementById('newDueDate').value = '';
             document.getElementById('newReminderAt').value = '';
             document.getElementById('newDemandModal').classList.add('show');
@@ -2143,14 +2650,14 @@
             const btn = event.target;
             btn.disabled = true;
             try {
-                const response = await fetch(`${API_URL}/demands/${id}/status`, {
+                const response = await fetchWithRetry(`${API_URL}/demands/${id}/status`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${token}`
                     },
-                    body: JSON.stringify({ status: 'concluido' })
-                });
+                    body: JSON.stringify({ status: getCompletedStatusKey() })
+                }, 2);
 
                 if (response.ok) {
                     loadDemands();
@@ -2191,8 +2698,8 @@
             document.getElementById('editDemandLocation').value = demand.location;
             document.getElementById('editDemandActivity').value = demand.activity;
             document.getElementById('editDemandContext').value = demand.context || '';
-            document.getElementById('editDemandPriority').value = demand.priority;
-            document.getElementById('editDemandStatus').value = demand.status;
+            populatePriorityDropdown('editDemandPriority', { selectedValue: demand.priority });
+            populateStatusDropdown('editDemandStatus', { includeCompleted: true, selectedValue: demand.status });
             document.getElementById('editDemandDueDate').value = demand.dueDate || '';
             document.getElementById('editDemandReminderAt').value = demand.reminderAt ? demand.reminderAt.slice(0, 16) : '';
 
@@ -2301,6 +2808,8 @@
         }
 
         function getStatusEmoji(status) {
+            const config = currentStatusConfigs.find(s => s.key === status);
+            if (config && config.emoji) return config.emoji;
             const map = {
                 'agendado': '🟠',
                 'nao-iniciado': '⚪',
@@ -2338,9 +2847,10 @@
         let historyGroupsCache = {};
 
         function getStatusLabel(status) {
+            const config = currentStatusConfigs.find(s => s.key === status);
+            if (config) return config.label;
             if (status === 'concluido') return 'Concluído';
-            const col = STATUS_COLUMNS.find(c => c.key === status);
-            return col ? col.label : status;
+            return status;
         }
 
         // Agrupa os registros de um mesmo dia por item (local+atividade+grupo),
@@ -2391,7 +2901,7 @@
                 totalItems += grouped.length;
                 grouped.forEach(entries => {
                     const last = entries[entries.length - 1];
-                    if (last.status === 'concluido') concludedCount++;
+                    if (isStatusCompleted(last.status)) concludedCount++;
                     else otherCount++;
                 });
             });
@@ -2458,7 +2968,7 @@
                                 <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(last.workGroupId)}</div>
                                 <div class="demand-title">${escapeHtml(last.location)} - ${escapeHtml(last.activity)}</div>
                             </div>
-                            <span class="status-badge status-${last.status}">${getStatusEmoji(last.status)} ${last.status}</span>
+                            ${getStatusBadgeHtml(last.status)}
                         </div>
                         ${chain.length > 1 ? `<div class="history-chain">${chain.join(' → ')}</div>` : ''}
                         ${last.context ? `<p style="font-size: 0.8rem; color: var(--text-secondary);">📌 ${escapeHtml(last.context)}</p>` : ''}
@@ -2717,7 +3227,7 @@
                 });
                 if (response.ok) {
                     const history = await response.json();
-                    concludedToday = history.filter(h => h.status === 'concluido' && h.statusChangeDate === todayIso);
+                    concludedToday = history.filter(h => isStatusCompleted(h.status) && h.statusChangeDate === todayIso);
                 }
             } catch (e) {
                 console.error('Erro ao buscar concluídas de hoje:', e);
@@ -2811,6 +3321,7 @@
                 selectedCalendarDay = toLocalISODate(new Date());
             }
             populateCalendarGroupFilter();
+            populateStatusDropdown('calendarStatusFilter', { includeCompleted: false, includeEmptyOption: true });
             await loadCalendarHistory();
             renderCalendar();
         }
@@ -2822,7 +3333,7 @@
                 }, 1);
                 if (response.ok) {
                     const history = await response.json();
-                    calendarHistoryCache = history.filter(h => h.status === 'concluido');
+                    calendarHistoryCache = history.filter(h => isStatusCompleted(h.status));
                 }
             } catch (e) {
                 console.error('Erro ao carregar concluídas para o calendário:', e);
@@ -2855,9 +3366,35 @@
         }
 
         function getStatusColor(status) {
+            const config = currentStatusConfigs.find(s => s.key === status);
+            if (config) return config.color;
             if (status === 'concluido') return 'var(--led-green)';
-            const col = STATUS_COLUMNS.find(c => c.key === status);
-            return col ? col.color : 'var(--led-gray)';
+            return 'var(--led-gray)';
+        }
+
+        // Retorna a chave do status marcado como conclusivo (configurável pelo usuário).
+        // Se houver mais de um marcado, usa o primeiro encontrado. Fallback pra 'concluido'
+        // só pra não quebrar caso a configuração ainda não tenha carregado.
+        function getCompletedStatusKey() {
+            const completed = currentStatusConfigs.find(s => s.isCompleted);
+            return completed ? completed.key : 'concluido';
+        }
+
+        // Verifica se uma chave de status é (ou já foi, em registros antigos) uma etapa conclusiva.
+        function isStatusCompleted(statusKey) {
+            const config = currentStatusConfigs.find(s => s.key === statusKey);
+            if (config) return config.isCompleted;
+            return statusKey === 'concluido';
+        }
+
+        // Badge de status com cor dinâmica (não dá pra usar classes CSS fixas
+        // já que o usuário pode criar qualquer status com qualquer chave).
+        function getStatusBadgeHtml(status) {
+            const color = getStatusColor(status);
+            const label = getStatusLabel(status);
+            const emoji = getStatusEmoji(status);
+            const bg = color.startsWith('#') ? hexToRgba(color, 0.15) : 'rgba(245,166,35,0.12)';
+            return `<span style="display:inline-block; padding:0.25rem 0.75rem; border-radius:4px; font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; white-space:nowrap; background:${bg}; color:${color};">${emoji} ${label}</span>`;
         }
 
         function renderCalendarLegend() {
@@ -3002,7 +3539,7 @@
                                 <div class="demand-title">${escapeHtml(d.location)} - ${escapeHtml(d.activity)}</div>
                             </div>
                             <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.3rem;">
-                                <span class="status-badge status-${d.status}">${getStatusEmoji(d.status)} ${d.status}</span>
+                                ${getStatusBadgeHtml(d.status)}
                                 ${getPriorityBadge(d.priority)}
                             </div>
                         </div>
@@ -3144,7 +3681,7 @@
                             <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(d.workGroupId, d.workGroupName)}</div>
                             <div class="demand-title">${escapeHtml(d.activity)}</div>
                         </div>
-                        <span class="status-badge status-${d.status}">${getStatusEmoji(d.status)} ${d.status}</span>
+                        ${getStatusBadgeHtml(d.status)}
                     </div>
                     <div style="font-size:0.7rem; color: var(--text-secondary); margin-bottom:0.4rem;">📅 Criada em ${d.createdDate ? formatDateBR(d.createdDate) : '—'} · Ativa</div>
                     ${d.context ? `<p style="font-size:0.8rem; color: var(--text-secondary);">📌 ${escapeHtml(d.context)}</p>` : ''}
@@ -3162,7 +3699,7 @@
                             <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(last.workGroupId)}</div>
                             <div class="demand-title">${escapeHtml(last.activity)}</div>
                         </div>
-                        <span class="status-badge status-${last.status}">${getStatusEmoji(last.status)} ${last.status}</span>
+                        ${getStatusBadgeHtml(last.status)}
                     </div>
                     <div style="font-size:0.7rem; color: var(--text-secondary); margin-bottom:0.4rem;">📅 ${formatDateBR(last.statusChangeDate)}${chain.length > 1 ? ` · ${chain.join(' → ')}` : ''}</div>
                     ${last.context ? `<p style="font-size:0.8rem; color: var(--text-secondary);">📌 ${escapeHtml(last.context)}</p>` : ''}
@@ -3228,8 +3765,7 @@
             const group = currentGroups.find(g => g.id === d.workGroupId);
             const groupColor = group ? (group.color || '#f5a623') : '#5b6168';
             const groupLabel = escapeHtml(group ? `${group.emoji || '📌'} ${group.name}` : '📌 Sem Grupo');
-            const statusColors = { 'agendado': '#ff9f43', 'nao-iniciado': '#9aa0a7', 'andamento': '#ffc35c', 'aguardando': '#4fc3f7', 'aprovacao': '#b388ff', 'concluido': '#3ddc84' };
-            const sColor = statusColors[d.status] || '#9aa0a7';
+                        const sColor = getStatusColor(d.status);
             return `
                 <div class="demand-card">
                     <div class="report-card-group" style="background:${hexToRgba(groupColor, 0.15)}; color:${groupColor}; border-color:${hexToRgba(groupColor, 0.45)};">${groupLabel}</div>
@@ -3248,8 +3784,7 @@
             const group = currentGroups.find(g => g.id === last.workGroupId);
             const groupColor = group ? (group.color || '#f5a623') : '#5b6168';
             const groupLabel = escapeHtml(group ? `${group.emoji || '📌'} ${group.name}` : '📌 Sem Grupo');
-            const statusColors = { 'agendado': '#ff9f43', 'nao-iniciado': '#9aa0a7', 'andamento': '#ffc35c', 'aguardando': '#4fc3f7', 'aprovacao': '#b388ff', 'concluido': '#3ddc84' };
-            const sColor = statusColors[last.status] || '#9aa0a7';
+                        const sColor = getStatusColor(last.status);
             const chain = entries.map(e => getStatusLabel(e.status));
             return `
                 <div class="demand-card">
@@ -3441,13 +3976,15 @@
                 periodHistory = periodHistory.filter(h => String(h.workGroupId) === groupFilterId);
             }
 
-            const notStartedCount = filteredDemands.filter(d => d.status === 'nao-iniciado').length;
-            const urgentCount = filteredDemands.filter(d => d.priority === 'urgente').length;
-            const inProgressCount = filteredDemands.filter(d => d.status === 'andamento').length;
+            const firstStatusKey = STATUS_COLUMNS.length > 0 ? STATUS_COLUMNS[0].key : null;
+            const notStartedCount = firstStatusKey ? filteredDemands.filter(d => d.status === firstStatusKey).length : 0;
+            const topPriority = currentPriorityConfigs.length > 0 ? [...currentPriorityConfigs].sort((a, b) => b.order - a.order)[0] : null;
+            const urgentCount = topPriority ? filteredDemands.filter(d => d.priority === topPriority.key).length : 0;
+            const inProgressCount = firstStatusKey ? filteredDemands.filter(d => d.status !== firstStatusKey).length : filteredDemands.length;
             const overdueCount = filteredDemands.filter(d => isOverdue(d.dueDate)).length;
-            const concludedInPeriod = periodHistory.filter(h => h.status === 'concluido').length;
+            const concludedInPeriod = periodHistory.filter(h => isStatusCompleted(h.status)).length;
 
-            const concludedWithDuration = periodHistory.filter(h => h.status === 'concluido' && h.createdDate && h.statusChangeDate);
+            const concludedWithDuration = periodHistory.filter(h => isStatusCompleted(h.status) && h.createdDate && h.statusChangeDate);
             let avgDays = null;
             if (concludedWithDuration.length > 0) {
                 const totalDays = concludedWithDuration.reduce((sum, h) => {
@@ -3458,24 +3995,13 @@
                 avgDays = (totalDays / concludedWithDuration.length).toFixed(1);
             }
 
-            const statusOrder = [
-                { key: 'agendado', label: 'Agendado', color: 'var(--led-orange)' },
-                { key: 'nao-iniciado', label: 'Não Iniciado', color: 'var(--led-gray)' },
-                { key: 'andamento', label: 'Em Andamento', color: 'var(--amber)' },
-                { key: 'aguardando', label: 'Aguardando', color: 'var(--led-blue)' },
-                { key: 'aprovacao', label: 'Aprovação', color: 'var(--led-purple)' }
-            ];
+            const statusOrder = STATUS_COLUMNS;
             const statusCounts = statusOrder.map(s => ({
                 label: s.label, color: s.color,
                 count: filteredDemands.filter(d => d.status === s.key).length
             }));
 
-            const priorityOrder = [
-                { key: 'urgente', label: 'Urgente', color: 'var(--led-red)' },
-                { key: 'alta', label: 'Alta', color: 'var(--amber)' },
-                { key: 'media', label: 'Média', color: 'var(--led-blue)' },
-                { key: 'baixa', label: 'Baixa', color: 'var(--led-gray)' }
-            ];
+            const priorityOrder = [...currentPriorityConfigs].sort((a, b) => b.order - a.order);
             const priorityCounts = priorityOrder.map(p => ({
                 label: p.label, color: p.color,
                 count: filteredDemands.filter(d => d.priority === p.key).length
@@ -3541,7 +4067,7 @@
                 let cursor = new Date(start);
                 while (cursor <= end) {
                     const iso = toLocalISODate(cursor);
-                    const count = (history || []).filter(h => h.status === 'concluido' && h.statusChangeDate === iso).length;
+                    const count = (history || []).filter(h => isStatusCompleted(h.status) && h.statusChangeDate === iso).length;
                     days.push({ label: cursor.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), count });
                     cursor.setDate(cursor.getDate() + 1);
                 }
@@ -3556,7 +4082,7 @@
                 const cappedEnd = bucketEnd > end ? end : bucketEnd;
                 const startIsoB = toLocalISODate(cursor);
                 const endIsoB = toLocalISODate(cappedEnd);
-                const count = (history || []).filter(h => h.status === 'concluido' && h.statusChangeDate >= startIsoB && h.statusChangeDate <= endIsoB).length;
+                const count = (history || []).filter(h => isStatusCompleted(h.status) && h.statusChangeDate >= startIsoB && h.statusChangeDate <= endIsoB).length;
                 buckets.push({ label: `${String(cursor.getDate()).padStart(2,'0')}/${String(cursor.getMonth() + 1).padStart(2,'0')}`, count });
                 cursor.setDate(cursor.getDate() + 7);
             }
@@ -3806,7 +4332,7 @@
             return `<span style="display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:4px; font-size:0.68rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; background:${hexToRgba(color, 0.15)}; color:${color}; border:1px solid ${hexToRgba(color, 0.45)};">${emoji} ${name}</span>`;
         }
 
-        const PRIORITY_STYLES = {
+        let PRIORITY_STYLES = {
             'baixa': { label: 'Baixa', color: 'var(--led-gray)' },
             'media': { label: 'Média', color: 'var(--led-blue)' },
             'alta': { label: 'Alta', color: 'var(--amber)' },
@@ -3814,7 +4340,8 @@
         };
 
         function getPriorityBadge(priority) {
-            const p = PRIORITY_STYLES[priority] || PRIORITY_STYLES['media'];
+            const fallback = Object.values(PRIORITY_STYLES)[0] || { label: priority || '—', color: 'var(--led-gray)' };
+            const p = PRIORITY_STYLES[priority] || fallback;
             return `<span style="display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:4px; font-size:0.68rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; background:transparent; color:${p.color}; border:1px solid ${p.color}; white-space:nowrap;"><span style="width:6px;height:6px;border-radius:50%;background:${p.color};box-shadow:0 0 4px ${p.color};display:inline-block;"></span>${p.label}</span>`;
         }
 
@@ -3842,6 +4369,9 @@
             }
             if (tab === 'adminkeys') {
                 loadAccessKeys();
+            }
+            if (tab === 'settings') {
+                loadStatusAndPriorityConfigLists();
             }
             if (tab === 'calendar') {
                 initCalendar();
@@ -3876,15 +4406,9 @@
         }
 
         // ============= EXPORTAR HTML =============
-        const REPORT_PRIORITY_STYLES = {
-            'baixa': { label: 'Baixa', color: '#9aa0a7' },
-            'media': { label: 'Média', color: '#4fc3f7' },
-            'alta': { label: 'Alta', color: '#ffc35c' },
-            'urgente': { label: 'Urgente', color: '#ff5b5b' }
-        };
-
         function renderReportCard(d, group) {
-            const p = REPORT_PRIORITY_STYLES[d.priority] || REPORT_PRIORITY_STYLES['media'];
+            const fallback = Object.values(PRIORITY_STYLES)[0] || { label: d.priority || '—', color: '#9aa0a7' };
+            const p = PRIORITY_STYLES[d.priority] || fallback;
             const overdue = isOverdue(d.dueDate);
             const groupColor = group ? (group.color || '#f5a623') : '#5b6168';
             const groupLabel = escapeHtml(group ? `${group.emoji || '📌'} ${group.name}` : '📌 Sem Grupo');
@@ -3922,15 +4446,9 @@
             const [fy, fm, fd] = filterDateIso.split('-');
             const filterDateLabel = `${fd}/${fm}/${fy}`;
 
-            const concludedOnDate = (history || []).filter(h => h.status === 'concluido' && h.statusChangeDate === filterDateIso);
+            const concludedOnDate = (history || []).filter(h => isStatusCompleted(h.status) && h.statusChangeDate === filterDateIso);
 
-            const STATUS_SECTIONS = [
-                { key: 'agendado', label: 'Agendado', color: '#ff9f43', emoji: '🟠' },
-                { key: 'nao-iniciado', label: 'Não Iniciado', color: '#9aa0a7', emoji: '⚪' },
-                { key: 'andamento', label: 'Em Andamento', color: '#ffc35c', emoji: '🟡' },
-                { key: 'aguardando', label: 'Aguardando', color: '#4fc3f7', emoji: '🔵' },
-                { key: 'aprovacao', label: 'Aprovação', color: '#b388ff', emoji: '🟣' }
-            ];
+            const STATUS_SECTIONS = STATUS_COLUMNS.map(s => ({ key: s.key, label: s.label, color: s.color, emoji: s.emoji || '' }));
 
             const concludedSectionHtml = `
                 <section class="group-section">
@@ -3960,17 +4478,14 @@
             }).join('');
 
             const total = currentDemands.length;
-            const notStartedCount = currentDemands.filter(d => d.status === 'nao-iniciado').length;
-            const urgentCount = currentDemands.filter(d => d.priority === 'urgente').length;
-            const inProgressCount = currentDemands.filter(d => d.status === 'andamento').length;
+            const firstStatusKeyReport = STATUS_COLUMNS.length > 0 ? STATUS_COLUMNS[0].key : null;
+            const notStartedCount = firstStatusKeyReport ? currentDemands.filter(d => d.status === firstStatusKeyReport).length : 0;
+            const topPriorityReport = currentPriorityConfigs.length > 0 ? [...currentPriorityConfigs].sort((a, b) => b.order - a.order)[0] : null;
+            const urgentCount = topPriorityReport ? currentDemands.filter(d => d.priority === topPriorityReport.key).length : 0;
+            const inProgressCount = firstStatusKeyReport ? currentDemands.filter(d => d.status !== firstStatusKeyReport).length : currentDemands.length;
             const overdueCount = currentDemands.filter(d => isOverdue(d.dueDate)).length;
 
-            const priorityOrderReport = [
-                { key: 'urgente', label: 'Urgente', color: '#ff5b5b' },
-                { key: 'alta', label: 'Alta', color: '#ffc35c' },
-                { key: 'media', label: 'Média', color: '#4fc3f7' },
-                { key: 'baixa', label: 'Baixa', color: '#9aa0a7' }
-            ];
+            const priorityOrderReport = [...currentPriorityConfigs].sort((a, b) => b.order - a.order);
             const priorityCountsReport = priorityOrderReport.map(p => ({
                 label: p.label, color: p.color,
                 count: currentDemands.filter(d => d.priority === p.key).length
