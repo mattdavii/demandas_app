@@ -1,7 +1,7 @@
 {
-  "name": "Gestor de Demandas Diárias",
-  "short_name": "Demandas",
-  "description": "Aplicação para gerenciar demandas diárias de trabalho",
+  "name": "Painel de Bordo",
+  "short_name": "Painel de Bordo",
+  "description": "Gestor de processos e demandas diárias de trabalho",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -29,14 +29,5 @@
     }
   ],
   "categories": ["productivity"],
-  "shortcuts": [
-    {
-      "name": "Nova Demanda",
-      "short_name": "Nova",
-      "description": "Adicionar nova demanda",
-      "url": "/?tab=demands",
-      "icons": [{ "src": "/static/icon-192.png", "sizes": "192x192" }]
-    }
-  ],
   "prefer_related_applications": false
 }
