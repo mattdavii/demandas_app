@@ -1120,13 +1120,33 @@
     <!-- MODAL TEXTO WHATSAPP -->
     <!-- MODAL HISTÓRICO DO DIA -->
     <!-- MODAL LINHA DO TEMPO DO LOCAL -->
+    <!-- MODAL MESCLAR LOCAL -->
+    <div id="mergeLocationModal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" onclick="closeMergeLocationModal()">&times;</span>
+            <div class="modal-header">🔀 Mesclar Local</div>
+            <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 1.25rem;">
+                Todos os registros de "<strong id="mergeLocationFrom" style="color: var(--amber-bright);"></strong>" passarão a usar o nome do local escolhido abaixo. Essa ação não pode ser desfeita.
+            </p>
+            <div class="form-group">
+                <label>Mesclar com</label>
+                <select id="mergeLocationTarget"></select>
+            </div>
+            <button class="btn btn-primary" onclick="confirmMergeLocation()">Mesclar</button>
+            <button class="btn btn-secondary" onclick="closeMergeLocationModal()" style="margin-left: 0.5rem;">Cancelar</button>
+        </div>
+    </div>
+
     <div id="locationModal" class="modal">
         <div class="modal-content" style="max-width: 600px;">
             <span class="close-modal" onclick="closeLocationModal()">&times;</span>
             <div class="modal-header" id="locationModalTitle"></div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-top: -0.75rem; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.5rem;">
                 <div id="locationModalStats" style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em;"></div>
-                <button class="btn btn-sm" style="width:auto; background:transparent; color:var(--led-blue); border:1px solid var(--led-blue);" onclick="downloadLocationHtml()">📄 Exportar HTML</button>
+                <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                    <button class="btn btn-sm" style="width:auto; background:transparent; color:var(--amber); border:1px solid var(--amber);" onclick="showMergeLocationModal()">🔀 Mesclar</button>
+                    <button class="btn btn-sm" style="width:auto; background:transparent; color:var(--led-blue); border:1px solid var(--led-blue);" onclick="downloadLocationHtml()">📄 Exportar HTML</button>
+                </div>
             </div>
             <div id="locationModalList" style="max-height: 60vh; overflow-y: auto; padding-right: 4px;"></div>
         </div>
@@ -2327,10 +2347,13 @@
         // assumindo que é a mesma demanda. O histórico não guarda o ID original
         // da demanda, então essa é uma inferência por coincidência de texto —
         // funciona bem na prática, mas não é uma garantia absoluta.
+        // Agrupa registros do mesmo dia por item (mesma demanda). Prioriza o demandId real
+        // (gravado a partir desta atualização); registros antigos sem esse vínculo caem
+        // no heurístico por texto (local+atividade+grupo) como antes.
         function groupHistoryItemsByDemand(items) {
             const groups = {};
             items.forEach(h => {
-                const key = `${h.workGroupId}|${h.location}|${h.activity}`;
+                const key = h.demandId ? `id:${h.demandId}` : `text:${h.workGroupId}|${h.location}|${h.activity}`;
                 if (!groups[key]) groups[key] = [];
                 groups[key].push(h);
             });
@@ -3149,6 +3172,56 @@
 
         function closeLocationModal() {
             document.getElementById('locationModal').classList.remove('show');
+        }
+
+        function showMergeLocationModal() {
+            if (currentLocationModalIdx === null) return;
+            const loc = locationNamesOrdered[currentLocationModalIdx];
+
+            document.getElementById('mergeLocationFrom').textContent = loc;
+
+            const select = document.getElementById('mergeLocationTarget');
+            const others = locationNamesOrdered.filter(name => name !== loc);
+            select.innerHTML = others.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+
+            document.getElementById('mergeLocationModal').classList.add('show');
+        }
+
+        function closeMergeLocationModal() {
+            document.getElementById('mergeLocationModal').classList.remove('show');
+        }
+
+        async function confirmMergeLocation() {
+            if (currentLocationModalIdx === null) return;
+            const fromLoc = locationNamesOrdered[currentLocationModalIdx];
+            const toLoc = document.getElementById('mergeLocationTarget').value;
+
+            if (!toLoc) {
+                alert('Escolha um local de destino');
+                return;
+            }
+            if (!confirm(`Mesclar "${fromLoc}" em "${toLoc}"? Essa ação não pode ser desfeita.`)) return;
+
+            try {
+                const response = await fetchWithRetry(`${API_URL}/locations/merge`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ from: fromLoc, to: toLoc })
+                }, 1);
+
+                if (response.ok) {
+                    closeMergeLocationModal();
+                    closeLocationModal();
+                    await loadDemands();
+                    await loadLocationsData();
+                } else {
+                    const data = await response.json().catch(() => ({}));
+                    alert(data.error || 'Erro ao mesclar locais');
+                }
+            } catch (e) {
+                console.error('Erro:', e);
+                alert('Erro de conexão ao mesclar locais');
+            }
         }
 
         function renderLocationReportActiveCard(d) {
