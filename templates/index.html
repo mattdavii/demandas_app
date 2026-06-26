@@ -392,8 +392,14 @@
             border-radius: var(--radius);
             max-width: 500px;
             width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
             box-shadow: 0 20px 60px rgba(0,0,0,0.6);
         }
+        .modal-content::-webkit-scrollbar { width: 6px; }
+        .modal-content::-webkit-scrollbar-track { background: transparent; }
+        .modal-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        .modal-content::-webkit-scrollbar-thumb:hover { background: var(--amber-dim); }
         .modal-header {
             font-size: 1rem;
             font-weight: 700;
@@ -402,7 +408,7 @@
             letter-spacing: 0.04em;
             color: var(--amber-bright);
         }
-        .close-modal { float: right; font-size: 1.5rem; cursor: pointer; color: var(--text-secondary); }
+        .close-modal { float: right; position: sticky; top: 0; font-size: 1.5rem; cursor: pointer; color: var(--text-secondary); background: var(--panel); z-index: 5; }
         .close-modal:hover { color: var(--text-primary); }
 
         .demands-list { display: grid; gap: 1rem; }
