@@ -3986,6 +3986,46 @@
             `).join('') + '</div>';
         }
 
+        // Cruza o histórico com as demandas ativas do mesmo local. Prioriza o demandId real;
+        // pra registros antigos sem esse vínculo, cai pro heurístico por texto (local+atividade+grupo)
+        // comparado especificamente contra as demandas ATIVAS (não entre si, como groupHistoryItemsByDemand faz).
+        function matchHistoryToActiveDemands(activeDemands, history) {
+            const activeDemandIds = new Set(activeDemands.map(d => d.id));
+            const activeDemandByTextKey = {};
+            activeDemands.forEach(d => {
+                const key = `${d.workGroupId}|${d.location}|${d.activity}`;
+                activeDemandByTextKey[key] = d;
+            });
+
+            const historyGrouped = groupHistoryItemsByDemand(history);
+            const historyByActiveDemandId = {};
+            const standaloneHistoryGroups = [];
+
+            historyGrouped.forEach(entries => {
+                const demandId = entries[0].demandId;
+
+                if (demandId && activeDemandIds.has(demandId)) {
+                    const existing = historyByActiveDemandId[demandId] || [];
+                    historyByActiveDemandId[demandId] = [...existing, ...entries].sort((a, b) => a.id - b.id);
+                    return;
+                }
+
+                if (!demandId) {
+                    const textKey = `${entries[0].workGroupId}|${entries[0].location}|${entries[0].activity}`;
+                    const matchedActive = activeDemandByTextKey[textKey];
+                    if (matchedActive) {
+                        const existing = historyByActiveDemandId[matchedActive.id] || [];
+                        historyByActiveDemandId[matchedActive.id] = [...existing, ...entries].sort((a, b) => a.id - b.id);
+                        return;
+                    }
+                }
+
+                standaloneHistoryGroups.push(entries);
+            });
+
+            return { historyByActiveDemandId, standaloneHistoryGroups };
+        }
+
         function showLocationModal(idx) {
             currentLocationModalIdx = idx;
             const loc = locationNamesOrdered[idx];
@@ -3994,22 +4034,7 @@
 
             document.getElementById('locationModalTitle').textContent = `📍 ${loc}`;
 
-            const activeDemandIds = new Set(data.active.map(d => d.id));
-            const historyGrouped = groupHistoryItemsByDemand(data.history);
-
-            // Histórico de uma demanda que ainda está ativa entra DENTRO do card dela
-            // (como uma cadeia), em vez de criar um card duplicado e separado.
-            const historyByActiveDemandId = {};
-            const standaloneHistoryGroups = [];
-
-            historyGrouped.forEach(entries => {
-                const demandId = entries[0].demandId;
-                if (demandId && activeDemandIds.has(demandId)) {
-                    historyByActiveDemandId[demandId] = entries;
-                } else {
-                    standaloneHistoryGroups.push(entries);
-                }
-            });
+            const { historyByActiveDemandId, standaloneHistoryGroups } = matchHistoryToActiveDemands(data.active, data.history);
 
             const timeline = [];
 
@@ -4043,9 +4068,14 @@
 
             let chainHtml = '';
             if (relatedHistory && relatedHistory.length > 0) {
-                const chain = relatedHistory.map(e => getStatusLabel(e.status));
-                chain.push(`${getStatusLabel(d.status)} (atual)`);
-                chainHtml = `<div style="font-size:0.68rem; color: var(--text-secondary); margin-bottom:0.4rem;">${chain.join(' → ')}</div>`;
+                const chainLabels = relatedHistory.map(e => getStatusLabel(e.status));
+                const lastHistoryStatus = relatedHistory[relatedHistory.length - 1].status;
+                if (lastHistoryStatus === d.status) {
+                    chainLabels[chainLabels.length - 1] = `${chainLabels[chainLabels.length - 1]} (atual)`;
+                } else {
+                    chainLabels.push(`${getStatusLabel(d.status)} (atual)`);
+                }
+                chainHtml = `<div style="font-size:0.68rem; color: var(--text-secondary); margin-bottom:0.4rem;">${chainLabels.join(' → ')}</div>`;
             }
 
             return `
@@ -4143,9 +4173,14 @@
             const sColor = getStatusColor(d.status);
             let chainHtml = '';
             if (relatedHistory && relatedHistory.length > 0) {
-                const chain = relatedHistory.map(e => getStatusLabel(e.status));
-                chain.push(`${getStatusLabel(d.status)} (atual)`);
-                chainHtml = `<div class="ctx">${chain.join(' → ')}</div>`;
+                const chainLabels = relatedHistory.map(e => getStatusLabel(e.status));
+                const lastHistoryStatus = relatedHistory[relatedHistory.length - 1].status;
+                if (lastHistoryStatus === d.status) {
+                    chainLabels[chainLabels.length - 1] = `${chainLabels[chainLabels.length - 1]} (atual)`;
+                } else {
+                    chainLabels.push(`${getStatusLabel(d.status)} (atual)`);
+                }
+                chainHtml = `<div class="ctx">${chainLabels.join(' → ')}</div>`;
             }
             return `
                 <div class="demand-card">
@@ -4188,19 +4223,7 @@
 
             const today = new Date().toLocaleDateString('pt-BR');
 
-            const activeDemandIds = new Set(data.active.map(d => d.id));
-            const historyGrouped = groupHistoryItemsByDemand(data.history);
-
-            const historyByActiveDemandId = {};
-            const standaloneHistoryGroups = [];
-            historyGrouped.forEach(entries => {
-                const demandId = entries[0].demandId;
-                if (demandId && activeDemandIds.has(demandId)) {
-                    historyByActiveDemandId[demandId] = entries;
-                } else {
-                    standaloneHistoryGroups.push(entries);
-                }
-            });
+            const { historyByActiveDemandId, standaloneHistoryGroups } = matchHistoryToActiveDemands(data.active, data.history);
 
             const totalEvents = data.active.length + standaloneHistoryGroups.length;
             const activeCount = data.active.length;
