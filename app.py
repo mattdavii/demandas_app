@@ -57,6 +57,7 @@ class User(db.Model):
     reset_token_expires = db.Column(db.DateTime, nullable=True)
     access_verified = db.Column(db.Boolean, default=True)
     is_admin = db.Column(db.Boolean, default=False)
+    theme = db.Column(db.String(30), default='bancada')
     
     # Relacionamentos
     demands = db.relationship('Demand', backref='user', lazy=True, cascade='all, delete-orphan')
@@ -88,7 +89,8 @@ class User(db.Model):
             'full_name': self.full_name,
             'createdAt': self.created_at.isoformat() if self.created_at else None,
             'accessVerified': self.access_verified,
-            'isAdmin': self.is_admin
+            'isAdmin': self.is_admin,
+            'theme': self.theme or 'bancada'
         }
 
 class WorkGroup(db.Model):
@@ -316,6 +318,7 @@ with app.app_context():
         db.session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS access_verified BOOLEAN DEFAULT TRUE"))
         db.session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE"))
         db.session.execute(text("ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS demand_id INTEGER"))
+        db.session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS theme VARCHAR(30) DEFAULT 'bancada'"))
         db.session.commit()
     except Exception as e:
         db.session.rollback()
@@ -537,6 +540,28 @@ def get_current_user():
     if not user:
         return jsonify({'error': 'Usuário não encontrado'}), 404
     
+    return jsonify(user.to_dict()), 200
+
+@app.route('/api/auth/theme', methods=['POST'])
+@jwt_required()
+def set_theme():
+    """Salva a preferência de tema visual do usuário (sincroniza entre dispositivos)"""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+
+    if not user:
+        return jsonify({'error': 'Usuário não encontrado'}), 404
+
+    data = request.get_json()
+    theme = (data or {}).get('theme', '').strip()
+
+    valid_themes = {'bancada', 'claro', 'meianoite', 'violeta'}
+    if theme not in valid_themes:
+        return jsonify({'error': 'Tema inválido'}), 400
+
+    user.theme = theme
+    db.session.commit()
+
     return jsonify(user.to_dict()), 200
 
 @app.route('/api/auth/verify-key', methods=['POST'])
