@@ -420,6 +420,11 @@
             border-radius: var(--radius);
             padding: 1.5rem;
             box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+            transition: border-color 0.15s, background 0.15s;
+        }
+        .demand-card[onclick]:hover {
+            border-color: var(--amber-dim);
+            background: var(--panel-raised);
         }
 
         .demand-header {
@@ -1428,6 +1433,15 @@
     <!-- MODAL NOVA DEMANDA -->
     <!-- MODAL NOTA -->
     <!-- MODAL BUSCA GLOBAL -->
+    <!-- MODAL DETALHES DA DEMANDA -->
+    <div id="demandDetailModal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" onclick="closeDemandDetailModal()">&times;</span>
+            <div class="modal-header" id="demandDetailTitle"></div>
+            <div id="demandDetailContent"></div>
+        </div>
+    </div>
+
     <div id="globalSearchModal" class="modal">
         <div class="modal-content" style="max-width: 600px;">
             <span class="close-modal" onclick="closeGlobalSearch()">&times;</span>
@@ -2838,33 +2852,7 @@
                             <span class="kanban-column-count">${items.length}</span>
                         </div>
                         <div class="kanban-column-cards">
-                        ${items.length === 0 ? '<div class="kanban-empty">Vazio</div>' : items.map(d => {
-                            const isPendingCreate = typeof d.id === 'string';
-                            const lockActions = isPendingCreate || d._pendingComplete;
-                            const pendingLabel = isPendingCreate
-                                ? 'Aguardando conexão p/ criar'
-                                : (d._pendingComplete ? 'Sincronizando conclusão' : 'Edição pendente de sincronização');
-                            const idArg = isPendingCreate ? `'${d.id}'` : d.id;
-                            return `
-                            <div class="demand-card${d._pendingSync ? ' pending-sync' : ''}" style="margin-bottom: 0.75rem; border-left-color: ${isOverdue(d.dueDate) ? 'var(--led-red)' : col.color};">
-                                ${d._pendingSync ? `<div class="pending-sync-tag">🔄 ${pendingLabel}</div>` : ''}
-                                <div class="demand-header">
-                                    <div>
-                                        <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(d.workGroupId, d.workGroupName)}</div>
-                                        <div class="demand-title">${escapeHtml(d.location)} - ${escapeHtml(d.activity)}</div>
-                                    </div>
-                                    ${getPriorityBadge(d.priority)}
-                                </div>
-                                ${d.dueDate ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; font-weight: ${isOverdue(d.dueDate) ? '700' : '400'}; color: ${isOverdue(d.dueDate) ? 'var(--led-red)' : 'var(--text-secondary)'};">${isOverdue(d.dueDate) ? '⚠️ Atrasada — venceu em' : '📅 Vence em'} ${formatDateBR(d.dueDate)}</div>` : ''}
-                                ${d.reminderAt ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; color: ${new Date(d.reminderAt) <= new Date() ? 'var(--amber-bright)' : 'var(--text-secondary)'};">🔔 Lembrete: ${formatDateTimeBR(d.reminderAt)}</div>` : ''}
-                                ${d.context ? `<p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem;">📌 ${escapeHtml(d.context)}</p>` : ''}
-                                ${getChecklistProgressHtml(d.checklist)}
-                                <div style="display: flex; gap: 0.5rem;">
-                                    <button class="btn btn-sm btn-secondary" onclick="completeDemand(${idArg})" ${lockActions ? 'disabled' : ''}>✅ Concluir</button>
-                                    <button class="btn btn-sm btn-secondary" onclick="editDemand(${idArg})" ${lockActions ? 'disabled' : ''}>✏️ Editar</button>
-                                </div>
-                            </div>
-                        `;}).join('')}
+                        ${items.length === 0 ? '<div class="kanban-empty">Vazio</div>' : items.map(d => renderDemandCardCompact(d, col.color)).join('')}
                         </div>
                     </div>
                 `;
@@ -3661,25 +3649,7 @@
                 <div class="card" style="margin-bottom: 1.5rem;">
                     <h3 style="border-left: 3px solid ${color}; padding-left: 0.6rem; border-bottom: none; padding-bottom: 0;">${title}</h3>
                     <div style="margin-top: 1rem; display: grid; gap: 0.75rem;">
-                        ${items.map(d => `
-                            <div class="demand-card" style="border-left-color: ${color};">
-                                <div class="demand-header">
-                                    <div>
-                                        <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(d.workGroupId, d.workGroupName)}</div>
-                                        <div class="demand-title">${escapeHtml(d.location)} - ${escapeHtml(d.activity)}</div>
-                                    </div>
-                                    ${getPriorityBadge(d.priority)}
-                                </div>
-                                ${d.dueDate ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; font-weight: ${isOverdue(d.dueDate) ? '700' : '400'}; color: ${isOverdue(d.dueDate) ? 'var(--led-red)' : 'var(--text-secondary)'};">${isOverdue(d.dueDate) ? '⚠️ Atrasada — venceu em' : '📅 Vence em'} ${formatDateBR(d.dueDate)}</div>` : ''}
-                                ${d.reminderAt ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; color: ${new Date(d.reminderAt) <= new Date() ? 'var(--amber-bright)' : 'var(--text-secondary)'};">🔔 Lembrete: ${formatDateTimeBR(d.reminderAt)}</div>` : ''}
-                                ${d.context ? `<p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem;">📌 ${escapeHtml(d.context)}</p>` : ''}
-                                ${getChecklistProgressHtml(d.checklist)}
-                                <div style="display: flex; gap: 0.5rem;">
-                                    <button class="btn btn-sm btn-secondary" onclick="completeDemand(${d.id})">✅ Concluir</button>
-                                    <button class="btn btn-sm btn-secondary" onclick="editDemand(${d.id})">✏️ Editar</button>
-                                </div>
-                            </div>
-                        `).join('')}
+                        ${items.map(d => renderDemandCardCompact(d, color)).join('')}
                     </div>
                 </div>
             `;
@@ -3929,28 +3899,7 @@
             if (demands.length === 0) {
                 html += '<div class="kanban-empty">Nada planejado para este dia</div>';
             } else {
-                html += demands.map(d => `
-                    <div class="demand-card" style="margin-bottom: 0.75rem; border-left-color: ${getStatusColor(d.status)};">
-                        <div class="demand-header">
-                            <div>
-                                <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(d.workGroupId, d.workGroupName)}</div>
-                                <div class="demand-title">${escapeHtml(d.location)} - ${escapeHtml(d.activity)}</div>
-                            </div>
-                            <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.3rem;">
-                                ${getStatusBadgeHtml(d.status)}
-                                ${getPriorityBadge(d.priority)}
-                            </div>
-                        </div>
-                        ${d.dueDate ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; font-weight: ${isOverdue(d.dueDate) ? '700' : '400'}; color: ${isOverdue(d.dueDate) ? 'var(--led-red)' : 'var(--text-secondary)'};">${isOverdue(d.dueDate) ? '⚠️ Atrasada — venceu em' : '📅 Vence em'} ${formatDateBR(d.dueDate)}</div>` : ''}
-                        ${d.reminderAt ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; color: ${new Date(d.reminderAt) <= new Date() ? 'var(--amber-bright)' : 'var(--text-secondary)'};">🔔 Lembrete: ${formatDateTimeBR(d.reminderAt)}</div>` : ''}
-                        ${d.context ? `<p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem;">📌 ${escapeHtml(d.context)}</p>` : ''}
-                                ${getChecklistProgressHtml(d.checklist)}
-                        <div style="display: flex; gap: 0.5rem;">
-                            <button class="btn btn-sm btn-secondary" onclick="completeDemand(${d.id})">✅ Concluir</button>
-                            <button class="btn btn-sm btn-secondary" onclick="editDemand(${d.id})">✏️ Editar</button>
-                        </div>
-                    </div>
-                `).join('');
+                html += demands.map(d => renderDemandCardCompact(d, getStatusColor(d.status))).join('');
             }
 
             if (showCompleted && completed.length > 0) {
@@ -4073,8 +4022,10 @@
         }
 
         function renderLocationActiveCard(d) {
+            const isPendingCreate = typeof d.id === 'string';
+            const idArg = isPendingCreate ? `'${d.id}'` : d.id;
             return `
-                <div class="demand-card" style="border-left-color: ${getStatusColor(d.status)}; margin-bottom: 0.75rem;">
+                <div class="demand-card" style="border-left-color: ${getStatusColor(d.status)}; margin-bottom: 0.75rem; cursor: pointer;" onclick="showDemandDetailModal(${idArg})">
                     <div class="demand-header">
                         <div>
                             <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(d.workGroupId, d.workGroupName)}</div>
@@ -4083,7 +4034,7 @@
                         ${getStatusBadgeHtml(d.status)}
                     </div>
                     <div style="font-size:0.7rem; color: var(--text-secondary); margin-bottom:0.4rem;">📅 Criada em ${d.createdDate ? formatDateBR(d.createdDate) : '—'} · Ativa</div>
-                    ${d.context ? `<p style="font-size:0.8rem; color: var(--text-secondary);">📌 ${escapeHtml(d.context)}</p>` : ''}
+                    ${getChecklistProgressHtml(d.checklist)}
                 </div>
             `;
         }
@@ -4737,6 +4688,120 @@
             'alta': { label: 'Alta', color: 'var(--amber)' },
             'urgente': { label: 'Urgente', color: 'var(--led-red)' }
         };
+
+        let currentDemandDetailId = null;
+
+        // Card compacto e clicável, reaproveitado em todo lugar que mostra demandas ativas
+        // (kanban, página Hoje, calendário). Detalhes completos ficam no modal, não no card.
+        function renderDemandCardCompact(d, borderColor) {
+            const isPendingCreate = typeof d.id === 'string';
+            const idArg = isPendingCreate ? `'${d.id}'` : d.id;
+            const finalBorderColor = isOverdue(d.dueDate) ? 'var(--led-red)' : borderColor;
+            const pendingLabel = isPendingCreate
+                ? 'Aguardando conexão p/ criar'
+                : (d._pendingComplete ? 'Sincronizando conclusão' : 'Edição pendente de sincronização');
+
+            return `
+                <div class="demand-card${d._pendingSync ? ' pending-sync' : ''}" style="margin-bottom: 0.75rem; border-left-color: ${finalBorderColor}; cursor: pointer;" onclick="showDemandDetailModal(${idArg})">
+                    ${d._pendingSync ? `<div class="pending-sync-tag">🔄 ${pendingLabel}</div>` : ''}
+                    <div class="demand-header">
+                        <div>
+                            <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(d.workGroupId, d.workGroupName)}</div>
+                            <div class="demand-title">${escapeHtml(d.location)} - ${escapeHtml(d.activity)}</div>
+                        </div>
+                        ${getPriorityBadge(d.priority)}
+                    </div>
+                    ${isOverdue(d.dueDate) ? `<div style="font-size:0.7rem; font-weight:700; color: var(--led-red);">⚠️ Atrasada</div>` : ''}
+                    ${getChecklistProgressHtml(d.checklist)}
+                </div>
+            `;
+        }
+
+        function showDemandDetailModal(id) {
+            const demand = currentDemands.find(d => d.id === id);
+            if (!demand) return;
+
+            currentDemandDetailId = id;
+            const isPendingCreate = typeof demand.id === 'string';
+            const lockActions = isPendingCreate || demand._pendingComplete;
+
+            document.getElementById('demandDetailTitle').textContent = `${demand.location} - ${demand.activity}`;
+
+            let html = `
+                <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:1rem;">
+                    ${getGroupBadge(demand.workGroupId, demand.workGroupName)}
+                    ${getStatusBadgeHtml(demand.status)}
+                    ${getPriorityBadge(demand.priority)}
+                </div>
+            `;
+
+            if (demand.dueDate) {
+                const overdue = isOverdue(demand.dueDate);
+                html += `<div style="font-size:0.85rem; margin-bottom:0.6rem; font-weight:${overdue ? '700' : '400'}; color:${overdue ? 'var(--led-red)' : 'var(--text-secondary)'};">${overdue ? '⚠️ Atrasada — venceu em' : '📅 Vence em'} ${formatDateBR(demand.dueDate)}</div>`;
+            }
+            if (demand.reminderAt) {
+                html += `<div style="font-size:0.85rem; margin-bottom:0.6rem; color:${new Date(demand.reminderAt) <= new Date() ? 'var(--amber-bright)' : 'var(--text-secondary)'};">🔔 Lembrete: ${formatDateTimeBR(demand.reminderAt)}</div>`;
+            }
+            if (demand.context) {
+                html += `<p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:1rem;">📌 ${escapeHtml(demand.context)}</p>`;
+            }
+
+            const checklist = demand.checklist || [];
+            if (checklist.length > 0) {
+                const checkedCount = checklist.filter(i => i.checked).length;
+                html += `
+                    <div class="note-checklist-progress">${checkedCount}/${checklist.length} concluídos</div>
+                    <div style="margin-bottom: 1rem;">
+                        ${checklist.map((item, idx) => `
+                            <div class="note-checklist-item ${item.checked ? 'checked' : ''}">
+                                <input type="checkbox" ${item.checked ? 'checked' : ''} ${isPendingCreate ? 'disabled' : ''} onchange="toggleDemandDetailChecklistItem(${idx})" style="width:auto; accent-color: var(--led-green); cursor:pointer;">
+                                <span class="note-checklist-text">${escapeHtml(item.text)}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+
+            html += `
+                <div style="display:flex; gap:0.5rem; margin-top:1rem;">
+                    <button class="btn btn-sm btn-secondary" onclick="completeDemand(${isPendingCreate ? `'${demand.id}'` : demand.id})" ${lockActions ? 'disabled' : ''}>✅ Concluir</button>
+                    <button class="btn btn-sm btn-secondary" onclick="editDemandFromDetail(${isPendingCreate ? `'${demand.id}'` : demand.id})" ${lockActions ? 'disabled' : ''}>✏️ Editar</button>
+                </div>
+            `;
+
+            document.getElementById('demandDetailContent').innerHTML = html;
+            document.getElementById('demandDetailModal').classList.add('show');
+        }
+
+        function closeDemandDetailModal() {
+            document.getElementById('demandDetailModal').classList.remove('show');
+            currentDemandDetailId = null;
+        }
+
+        function editDemandFromDetail(id) {
+            closeDemandDetailModal();
+            editDemand(id);
+        }
+
+        async function toggleDemandDetailChecklistItem(idx) {
+            if (currentDemandDetailId === null) return;
+            const demand = currentDemands.find(d => d.id === currentDemandDetailId);
+            if (!demand || !demand.checklist || !demand.checklist[idx]) return;
+
+            demand.checklist[idx].checked = !demand.checklist[idx].checked;
+            showDemandDetailModal(currentDemandDetailId);
+            renderDemands();
+
+            try {
+                await fetchWithRetry(`${API_URL}/demands/${currentDemandDetailId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ checklist: demand.checklist })
+                }, 1);
+            } catch (e) {
+                console.error('Erro ao salvar checklist:', e);
+            }
+        }
 
         function getChecklistProgressHtml(checklist) {
             if (!checklist || checklist.length === 0) return '';
