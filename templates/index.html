@@ -3994,19 +3994,35 @@
 
             document.getElementById('locationModalTitle').textContent = `📍 ${loc}`;
 
+            const activeDemandIds = new Set(data.active.map(d => d.id));
+            const historyGrouped = groupHistoryItemsByDemand(data.history);
+
+            // Histórico de uma demanda que ainda está ativa entra DENTRO do card dela
+            // (como uma cadeia), em vez de criar um card duplicado e separado.
+            const historyByActiveDemandId = {};
+            const standaloneHistoryGroups = [];
+
+            historyGrouped.forEach(entries => {
+                const demandId = entries[0].demandId;
+                if (demandId && activeDemandIds.has(demandId)) {
+                    historyByActiveDemandId[demandId] = entries;
+                } else {
+                    standaloneHistoryGroups.push(entries);
+                }
+            });
+
             const timeline = [];
 
             data.active.forEach(d => {
-                timeline.push({ sortKey: d.createdDate || '0000-00-00', html: renderLocationActiveCard(d) });
+                timeline.push({ sortKey: d.createdDate || '0000-00-00', html: renderLocationActiveCard(d, historyByActiveDemandId[d.id]) });
             });
 
-            const historyGrouped = groupHistoryItemsByDemand(data.history);
-            historyGrouped.forEach(entries => {
+            standaloneHistoryGroups.forEach(entries => {
                 const last = entries[entries.length - 1];
                 timeline.push({ sortKey: last.statusChangeDate || '0000-00-00', html: renderLocationHistoryCard(entries) });
             });
 
-            const totalEvents = data.active.length + historyGrouped.length;
+            const totalEvents = data.active.length + standaloneHistoryGroups.length;
             const activeCount = data.active.length;
             document.getElementById('locationModalStats').textContent =
                 `${totalEvents} ${totalEvents === 1 ? 'evento' : 'eventos'}${activeCount > 0 ? ` · ${activeCount} ativa${activeCount > 1 ? 's' : ''}` : ''}`;
@@ -4021,9 +4037,17 @@
             document.getElementById('locationModal').classList.add('show');
         }
 
-        function renderLocationActiveCard(d) {
+        function renderLocationActiveCard(d, relatedHistory) {
             const isPendingCreate = typeof d.id === 'string';
             const idArg = isPendingCreate ? `'${d.id}'` : d.id;
+
+            let chainHtml = '';
+            if (relatedHistory && relatedHistory.length > 0) {
+                const chain = relatedHistory.map(e => getStatusLabel(e.status));
+                chain.push(`${getStatusLabel(d.status)} (atual)`);
+                chainHtml = `<div style="font-size:0.68rem; color: var(--text-secondary); margin-bottom:0.4rem;">${chain.join(' → ')}</div>`;
+            }
+
             return `
                 <div class="demand-card" style="border-left-color: ${getStatusColor(d.status)}; margin-bottom: 0.75rem; cursor: pointer;" onclick="showDemandDetailModal(${idArg})">
                     <div class="demand-header">
@@ -4034,6 +4058,7 @@
                         ${getStatusBadgeHtml(d.status)}
                     </div>
                     <div style="font-size:0.7rem; color: var(--text-secondary); margin-bottom:0.4rem;">📅 Criada em ${d.createdDate ? formatDateBR(d.createdDate) : '—'} · Ativa</div>
+                    ${chainHtml}
                     ${getChecklistProgressHtml(d.checklist)}
                 </div>
             `;
@@ -4111,16 +4136,23 @@
             }
         }
 
-        function renderLocationReportActiveCard(d) {
+        function renderLocationReportActiveCard(d, relatedHistory) {
             const group = currentGroups.find(g => g.id === d.workGroupId);
             const groupColor = group ? (group.color || '#f5a623') : '#5b6168';
             const groupLabel = escapeHtml(group ? `${group.emoji || '📌'} ${group.name}` : '📌 Sem Grupo');
-                        const sColor = getStatusColor(d.status);
+            const sColor = getStatusColor(d.status);
+            let chainHtml = '';
+            if (relatedHistory && relatedHistory.length > 0) {
+                const chain = relatedHistory.map(e => getStatusLabel(e.status));
+                chain.push(`${getStatusLabel(d.status)} (atual)`);
+                chainHtml = `<div class="ctx">${chain.join(' → ')}</div>`;
+            }
             return `
                 <div class="demand-card">
                     <div class="report-card-group" style="background:${hexToRgba(groupColor, 0.15)}; color:${groupColor}; border-color:${hexToRgba(groupColor, 0.45)};">${groupLabel}</div>
                     <div class="title">${escapeHtml(d.activity)}</div>
                     <div class="ctx">📅 Criada em ${d.createdDate ? formatDateBR(d.createdDate) : '—'} · Ativa</div>
+                    ${chainHtml}
                     ${d.context ? `<div class="ctx">📌 ${escapeHtml(d.context)}</div>` : ''}
                     <div class="badges">
                         <span class="badge" style="color:${sColor}; border-color:${sColor};">${getStatusLabel(d.status)}</span>
@@ -4155,15 +4187,29 @@
             if (!data) return '';
 
             const today = new Date().toLocaleDateString('pt-BR');
+
+            const activeDemandIds = new Set(data.active.map(d => d.id));
             const historyGrouped = groupHistoryItemsByDemand(data.history);
-            const totalEvents = data.active.length + historyGrouped.length;
+
+            const historyByActiveDemandId = {};
+            const standaloneHistoryGroups = [];
+            historyGrouped.forEach(entries => {
+                const demandId = entries[0].demandId;
+                if (demandId && activeDemandIds.has(demandId)) {
+                    historyByActiveDemandId[demandId] = entries;
+                } else {
+                    standaloneHistoryGroups.push(entries);
+                }
+            });
+
+            const totalEvents = data.active.length + standaloneHistoryGroups.length;
             const activeCount = data.active.length;
 
             const timeline = [];
             data.active.forEach(d => {
-                timeline.push({ sortKey: d.createdDate || '0000-00-00', html: renderLocationReportActiveCard(d) });
+                timeline.push({ sortKey: d.createdDate || '0000-00-00', html: renderLocationReportActiveCard(d, historyByActiveDemandId[d.id]) });
             });
-            historyGrouped.forEach(entries => {
+            standaloneHistoryGroups.forEach(entries => {
                 const last = entries[entries.length - 1];
                 timeline.push({ sortKey: last.statusChangeDate || '0000-00-00', html: renderLocationReportHistoryCard(entries) });
             });
