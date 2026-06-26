@@ -655,6 +655,30 @@
         .theme-swatch-panel { flex: 1; border-radius: 3px; border: 1px solid; }
         .theme-swatch-name { font-size: 0.75rem; font-weight: 600; color: var(--text-primary); }
 
+        .search-section-title {
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+            margin: 1rem 0 0.5rem 0;
+            padding-bottom: 0.35rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .search-section-title:first-child { margin-top: 0; }
+        .search-result-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.6rem 0.75rem;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-size: 0.82rem;
+            color: var(--text-primary);
+            transition: background 0.15s;
+        }
+        .search-result-row:hover { background: var(--panel-raised); }
+
         .notes-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -1000,6 +1024,7 @@
                 <h1>🎛️ Painel de Bordo</h1>
             </div>
             <div class="user-info">
+                <button class="logout-btn" style="background:transparent; border:1px solid var(--border); color:var(--text-secondary); margin-right:0.5rem;" onclick="openGlobalSearch()" title="Buscar (Ctrl/Cmd+K)">🔍 Buscar</button>
                 <p>Olá, <strong id="userName">Usuário</strong></p>
                 <button class="logout-btn" onclick="doLogout()">Sair</button>
             </div>
@@ -1227,6 +1252,14 @@
             </div>
 
             <div class="card" style="margin-top: 1.5rem;">
+                <h3>🔔 Notificações Push</h3>
+                <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 1rem;">Receba o lembrete direto no celular/computador, mesmo com o app fechado.</p>
+                <div id="pushStatusText" style="font-size: 0.8rem; margin-bottom: 1rem;">Verificando...</div>
+                <button class="btn btn-primary" id="pushEnableBtn" onclick="setupPushNotifications()" style="display:none;">Ativar Notificações</button>
+                <button class="btn btn-secondary" id="pushDisableBtn" onclick="disablePushNotifications()" style="display:none;">Desativar Notificações</button>
+            </div>
+
+            <div class="card" style="margin-top: 1.5rem;">
                 <h3>🔐 Segurança</h3>
                 <button class="btn btn-secondary" onclick="showChangePasswordModal()">Alterar Senha</button>
             </div>
@@ -1387,6 +1420,16 @@
     <!-- MODAL EDITAR DEMANDA -->
     <!-- MODAL NOVA DEMANDA -->
     <!-- MODAL NOTA -->
+    <!-- MODAL BUSCA GLOBAL -->
+    <div id="globalSearchModal" class="modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <span class="close-modal" onclick="closeGlobalSearch()">&times;</span>
+            <div class="modal-header">🔍 Buscar em tudo</div>
+            <input type="text" id="globalSearchInput" placeholder="Digite pra buscar em demandas, notas, locais e histórico..." oninput="performGlobalSearch()" style="margin-bottom: 1rem;">
+            <div id="globalSearchResults" style="max-height: 55vh; overflow-y: auto; padding-right: 4px;"></div>
+        </div>
+    </div>
+
     <div id="noteModal" class="modal">
         <div class="modal-content">
             <span class="close-modal" onclick="closeNoteModal()">&times;</span>
@@ -1447,6 +1490,11 @@
                 <label>🔔 Lembrete - data e hora (opcional)</label>
                 <input type="datetime-local" id="newReminderAt">
             </div>
+            <div class="form-group">
+                <label>Checklist (opcional)</label>
+                <div id="newDemandChecklistItems"></div>
+                <button class="btn btn-sm btn-secondary" style="width:auto; margin-top:0.5rem;" onclick="addDemandChecklistItemField(false)">➕ Adicionar item</button>
+            </div>
             <button class="btn btn-primary" onclick="createDemand()">Criar Demanda</button>
             <button class="btn btn-secondary" onclick="closeNewDemandModal()" style="margin-left: 0.5rem;">Cancelar</button>
         </div>
@@ -1483,6 +1531,11 @@
             <div class="form-group">
                 <label>🔔 Lembrete - data e hora (opcional)</label>
                 <input type="datetime-local" id="editDemandReminderAt">
+            </div>
+            <div class="form-group">
+                <label>Checklist (opcional)</label>
+                <div id="editDemandChecklistItems"></div>
+                <button class="btn btn-sm btn-secondary" style="width:auto; margin-top:0.5rem;" onclick="addDemandChecklistItemField(true)">➕ Adicionar item</button>
             </div>
             <button class="btn btn-primary" onclick="saveDemandEdit()">Salvar</button>
             <button class="btn btn-secondary" onclick="closeEditDemand()" style="margin-left: 0.5rem;">Cancelar</button>
@@ -1570,6 +1623,112 @@
                 }, 1);
             } catch (e) {
                 console.error('Erro ao salvar preferência de tema:', e);
+            }
+        }
+
+        // ============= NOTIFICAÇÕES PUSH =============
+        function urlBase64ToUint8Array(base64String) {
+            const padding = '='.repeat((4 - base64String.length % 4) % 4);
+            const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+            const rawData = atob(base64);
+            const outputArray = new Uint8Array(rawData.length);
+            for (let i = 0; i < rawData.length; ++i) {
+                outputArray[i] = rawData.charCodeAt(i);
+            }
+            return outputArray;
+        }
+
+        async function refreshPushStatus() {
+            const statusEl = document.getElementById('pushStatusText');
+            const enableBtn = document.getElementById('pushEnableBtn');
+            const disableBtn = document.getElementById('pushDisableBtn');
+            if (!statusEl) return;
+
+            if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+                statusEl.textContent = '⚠️ Seu navegador não suporta notificações push.';
+                enableBtn.style.display = 'none';
+                disableBtn.style.display = 'none';
+                return;
+            }
+
+            try {
+                const registration = await navigator.serviceWorker.ready;
+                const subscription = await registration.pushManager.getSubscription();
+
+                if (subscription) {
+                    statusEl.innerHTML = '🟢 Notificações ativadas neste dispositivo.';
+                    enableBtn.style.display = 'none';
+                    disableBtn.style.display = '';
+                } else {
+                    statusEl.innerHTML = '🔴 Notificações desativadas neste dispositivo.';
+                    enableBtn.style.display = '';
+                    disableBtn.style.display = 'none';
+                }
+            } catch (e) {
+                console.error('Erro ao verificar status de push:', e);
+                statusEl.textContent = 'Não foi possível verificar o status.';
+            }
+        }
+
+        async function setupPushNotifications() {
+            if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+                alert('Seu navegador não suporta notificações push.');
+                return;
+            }
+
+            try {
+                const permission = await Notification.requestPermission();
+                if (permission !== 'granted') {
+                    alert('Permissão de notificação não foi concedida.');
+                    return;
+                }
+
+                const vapidResponse = await fetchWithRetry(`${API_URL}/push/vapid-public-key`, {}, 1);
+                const { publicKey } = await vapidResponse.json();
+
+                if (!publicKey) {
+                    alert('Notificações push ainda não foram configuradas no servidor.');
+                    return;
+                }
+
+                const registration = await navigator.serviceWorker.ready;
+                const subscription = await registration.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: urlBase64ToUint8Array(publicKey)
+                });
+
+                await fetchWithRetry(`${API_URL}/push/subscribe`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify(subscription.toJSON())
+                }, 1);
+
+                await refreshPushStatus();
+            } catch (e) {
+                console.error('Erro ao ativar notificações push:', e);
+                alert('Erro ao ativar notificações. Tente novamente.');
+            }
+        }
+
+        async function disablePushNotifications() {
+            try {
+                const registration = await navigator.serviceWorker.ready;
+                const subscription = await registration.pushManager.getSubscription();
+
+                if (subscription) {
+                    const endpoint = subscription.endpoint;
+                    await subscription.unsubscribe();
+                    await fetchWithRetry(`${API_URL}/push/unsubscribe`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ endpoint })
+                    }, 1);
+                }
+
+                await refreshPushStatus();
+            } catch (e) {
+                console.error('Erro ao desativar notificações push:', e);
+                alert('Erro ao desativar notificações.');
             }
         }
 
@@ -2692,6 +2851,7 @@
                                 ${d.dueDate ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; font-weight: ${isOverdue(d.dueDate) ? '700' : '400'}; color: ${isOverdue(d.dueDate) ? 'var(--led-red)' : 'var(--text-secondary)'};">${isOverdue(d.dueDate) ? '⚠️ Atrasada — venceu em' : '📅 Vence em'} ${formatDateBR(d.dueDate)}</div>` : ''}
                                 ${d.reminderAt ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; color: ${new Date(d.reminderAt) <= new Date() ? 'var(--amber-bright)' : 'var(--text-secondary)'};">🔔 Lembrete: ${formatDateTimeBR(d.reminderAt)}</div>` : ''}
                                 ${d.context ? `<p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem;">📌 ${escapeHtml(d.context)}</p>` : ''}
+                                ${getChecklistProgressHtml(d.checklist)}
                                 <div style="display: flex; gap: 0.5rem;">
                                     <button class="btn btn-sm btn-secondary" onclick="completeDemand(${idArg})" ${lockActions ? 'disabled' : ''}>✅ Concluir</button>
                                     <button class="btn btn-sm btn-secondary" onclick="editDemand(${idArg})" ${lockActions ? 'disabled' : ''}>✏️ Editar</button>
@@ -2740,6 +2900,8 @@
             populateStatusDropdown('newStatus', { includeCompleted: false });
             document.getElementById('newDueDate').value = '';
             document.getElementById('newReminderAt').value = '';
+            newDemandChecklistDraft = [];
+            renderDemandChecklistDraftEditor(false);
             document.getElementById('newDemandModal').classList.add('show');
         }
 
@@ -2779,7 +2941,8 @@
                         priority,
                         due_date: due_date || null,
                         reminder_at: reminder_at || null,
-                        status
+                        status,
+                        checklist: newDemandChecklistDraft.filter(item => item.text.trim() !== '')
                     })
                 });
 
@@ -2795,12 +2958,14 @@
 
                 const groupIdInt = parseInt(work_group_id);
                 const tempId = 'temp_' + Date.now();
+                const demandChecklist = newDemandChecklistDraft.filter(item => item.text.trim() !== '');
                 const optimisticPayload = {
                     work_group_id: groupIdInt,
                     location, activity, context, priority,
                     due_date: due_date || null,
                     reminder_at: reminder_at || null,
-                    status
+                    status,
+                    checklist: demandChecklist
                 };
                 currentDemands.push({
                     id: tempId,
@@ -2810,6 +2975,7 @@
                     status,
                     dueDate: due_date || null,
                     reminderAt: reminder_at || null,
+                    checklist: demandChecklist,
                     _pendingSync: true
                 });
                 localStorage.setItem('cache_demands', JSON.stringify(currentDemands));
@@ -2883,6 +3049,8 @@
             populateStatusDropdown('editDemandStatus', { includeCompleted: true, selectedValue: demand.status });
             document.getElementById('editDemandDueDate').value = demand.dueDate || '';
             document.getElementById('editDemandReminderAt').value = demand.reminderAt ? demand.reminderAt.slice(0, 16) : '';
+            editDemandChecklistDraft = (demand.checklist || []).map(item => ({ text: item.text, checked: !!item.checked }));
+            renderDemandChecklistDraftEditor(true);
 
             document.getElementById('editDemandModal').classList.add('show');
         }
@@ -2916,7 +3084,8 @@
                         context: document.getElementById('editDemandContext').value,
                         priority: document.getElementById('editDemandPriority').value,
                         due_date: dueDate || null,
-                        reminder_at: reminderAt || null
+                        reminder_at: reminderAt || null,
+                        checklist: editDemandChecklistDraft.filter(item => item.text.trim() !== '')
                     })
                 });
 
@@ -2956,7 +3125,8 @@
                     context: document.getElementById('editDemandContext').value,
                     priority: document.getElementById('editDemandPriority').value,
                     due_date: dueDate || null,
-                    reminder_at: reminderAt || null
+                    reminder_at: reminderAt || null,
+                    checklist: editDemandChecklistDraft.filter(item => item.text.trim() !== '')
                 };
 
                 const idx = currentDemands.findIndex(dm => dm.id === id);
@@ -2967,6 +3137,7 @@
                     currentDemands[idx].priority = fields.priority;
                     currentDemands[idx].dueDate = fields.due_date;
                     currentDemands[idx].reminderAt = fields.reminder_at;
+                    currentDemands[idx].checklist = fields.checklist;
                     if (statusChanged) currentDemands[idx].status = newStatus;
                     currentDemands[idx]._pendingSync = true;
                 }
@@ -3283,6 +3454,44 @@
             noteChecklistDraft[idx].checked = !noteChecklistDraft[idx].checked;
         }
 
+        // ============= CHECKLIST DA DEMANDA (criar/editar) =============
+        let newDemandChecklistDraft = [];
+        let editDemandChecklistDraft = [];
+
+        function renderDemandChecklistDraftEditor(isEdit) {
+            const draft = isEdit ? editDemandChecklistDraft : newDemandChecklistDraft;
+            const container = document.getElementById(isEdit ? 'editDemandChecklistItems' : 'newDemandChecklistItems');
+            container.innerHTML = draft.map((item, idx) => `
+                <div class="note-checklist-draft-row">
+                    <input type="checkbox" ${item.checked ? 'checked' : ''} onchange="toggleDemandChecklistItem(${isEdit}, ${idx})" style="width:auto; accent-color: var(--led-green); cursor:pointer;">
+                    <input type="text" value="${escapeHtml(item.text)}" oninput="updateDemandChecklistItemText(${isEdit}, ${idx}, this.value)" placeholder="Item da checklist" style="flex:1;">
+                    <span class="note-checklist-draft-remove" onclick="removeDemandChecklistItem(${isEdit}, ${idx})">&times;</span>
+                </div>
+            `).join('');
+        }
+
+        function addDemandChecklistItemField(isEdit) {
+            const draft = isEdit ? editDemandChecklistDraft : newDemandChecklistDraft;
+            draft.push({ text: '', checked: false });
+            renderDemandChecklistDraftEditor(isEdit);
+        }
+
+        function removeDemandChecklistItem(isEdit, idx) {
+            const draft = isEdit ? editDemandChecklistDraft : newDemandChecklistDraft;
+            draft.splice(idx, 1);
+            renderDemandChecklistDraftEditor(isEdit);
+        }
+
+        function updateDemandChecklistItemText(isEdit, idx, value) {
+            const draft = isEdit ? editDemandChecklistDraft : newDemandChecklistDraft;
+            draft[idx].text = value;
+        }
+
+        function toggleDemandChecklistItem(isEdit, idx) {
+            const draft = isEdit ? editDemandChecklistDraft : newDemandChecklistDraft;
+            draft[idx].checked = !draft[idx].checked;
+        }
+
         function showNewNoteModal() {
             editingNoteId = null;
             document.getElementById('noteModalTitle').textContent = '📝 Nova Nota';
@@ -3457,6 +3666,7 @@
                                 ${d.dueDate ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; font-weight: ${isOverdue(d.dueDate) ? '700' : '400'}; color: ${isOverdue(d.dueDate) ? 'var(--led-red)' : 'var(--text-secondary)'};">${isOverdue(d.dueDate) ? '⚠️ Atrasada — venceu em' : '📅 Vence em'} ${formatDateBR(d.dueDate)}</div>` : ''}
                                 ${d.reminderAt ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; color: ${new Date(d.reminderAt) <= new Date() ? 'var(--amber-bright)' : 'var(--text-secondary)'};">🔔 Lembrete: ${formatDateTimeBR(d.reminderAt)}</div>` : ''}
                                 ${d.context ? `<p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem;">📌 ${escapeHtml(d.context)}</p>` : ''}
+                                ${getChecklistProgressHtml(d.checklist)}
                                 <div style="display: flex; gap: 0.5rem;">
                                     <button class="btn btn-sm btn-secondary" onclick="completeDemand(${d.id})">✅ Concluir</button>
                                     <button class="btn btn-sm btn-secondary" onclick="editDemand(${d.id})">✏️ Editar</button>
@@ -3727,6 +3937,7 @@
                         ${d.dueDate ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; font-weight: ${isOverdue(d.dueDate) ? '700' : '400'}; color: ${isOverdue(d.dueDate) ? 'var(--led-red)' : 'var(--text-secondary)'};">${isOverdue(d.dueDate) ? '⚠️ Atrasada — venceu em' : '📅 Vence em'} ${formatDateBR(d.dueDate)}</div>` : ''}
                         ${d.reminderAt ? `<div style="font-size: 0.7rem; margin-bottom: 0.5rem; color: ${new Date(d.reminderAt) <= new Date() ? 'var(--amber-bright)' : 'var(--text-secondary)'};">🔔 Lembrete: ${formatDateTimeBR(d.reminderAt)}</div>` : ''}
                         ${d.context ? `<p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem;">📌 ${escapeHtml(d.context)}</p>` : ''}
+                                ${getChecklistProgressHtml(d.checklist)}
                         <div style="display: flex; gap: 0.5rem;">
                             <button class="btn btn-sm btn-secondary" onclick="completeDemand(${d.id})">✅ Concluir</button>
                             <button class="btn btn-sm btn-secondary" onclick="editDemand(${d.id})">✏️ Editar</button>
@@ -4520,6 +4731,13 @@
             'urgente': { label: 'Urgente', color: 'var(--led-red)' }
         };
 
+        function getChecklistProgressHtml(checklist) {
+            if (!checklist || checklist.length === 0) return '';
+            const checkedCount = checklist.filter(i => i.checked).length;
+            const allDone = checkedCount === checklist.length;
+            return `<div style="font-size: 0.7rem; color: ${allDone ? 'var(--led-green)' : 'var(--text-secondary)'}; margin-bottom: 0.5rem;">☑️ ${checkedCount}/${checklist.length} itens da checklist</div>`;
+        }
+
         function getPriorityBadge(priority) {
             const fallback = Object.values(PRIORITY_STYLES)[0] || { label: priority || '—', color: 'var(--led-gray)' };
             const p = PRIORITY_STYLES[priority] || fallback;
@@ -4527,6 +4745,148 @@
         }
 
         // ============= UTILITÁRIOS =============
+        // ============= BUSCA GLOBAL =============
+        let globalSearchDataLoaded = false;
+
+        async function openGlobalSearch() {
+            document.getElementById('globalSearchInput').value = '';
+            document.getElementById('globalSearchResults').innerHTML = '<div style="text-align:center; padding:2rem; color:var(--text-secondary);">Digite pra buscar em demandas, notas, locais e histórico...</div>';
+            document.getElementById('globalSearchModal').classList.add('show');
+            document.getElementById('globalSearchInput').focus();
+
+            if (!globalSearchDataLoaded) {
+                try {
+                    await Promise.all([
+                        currentNotes.length === 0 ? loadNotes() : Promise.resolve(),
+                        allHistoryForLocations.length === 0 ? loadLocationsData() : Promise.resolve()
+                    ]);
+                    globalSearchDataLoaded = true;
+                } catch (e) {
+                    console.error('Erro ao carregar dados pra busca global:', e);
+                }
+            }
+        }
+
+        function closeGlobalSearch() {
+            document.getElementById('globalSearchModal').classList.remove('show');
+        }
+
+        function performGlobalSearch() {
+            const term = document.getElementById('globalSearchInput').value.trim().toLowerCase();
+            const container = document.getElementById('globalSearchResults');
+
+            if (!term) {
+                container.innerHTML = '<div style="text-align:center; padding:2rem; color:var(--text-secondary);">Digite pra buscar em demandas, notas, locais e histórico...</div>';
+                return;
+            }
+
+            const demandResults = currentDemands.filter(d =>
+                d.location.toLowerCase().includes(term) ||
+                d.activity.toLowerCase().includes(term) ||
+                (d.context || '').toLowerCase().includes(term)
+            ).slice(0, 8);
+
+            const noteResults = currentNotes.filter(n =>
+                n.subject.toLowerCase().includes(term) ||
+                (n.description || '').toLowerCase().includes(term) ||
+                (n.checklist || []).some(item => item.text.toLowerCase().includes(term))
+            ).slice(0, 8);
+
+            const historyResults = (allHistoryForLocations || []).filter(h =>
+                h.location.toLowerCase().includes(term) ||
+                h.activity.toLowerCase().includes(term)
+            ).slice(0, 6);
+
+            const matchingLocations = [...new Set(
+                [...currentDemands.map(d => d.location), ...(allHistoryForLocations || []).map(h => h.location)]
+            )].filter(loc => loc.toLowerCase().includes(term)).slice(0, 6);
+
+            const total = demandResults.length + noteResults.length + historyResults.length + matchingLocations.length;
+
+            if (total === 0) {
+                container.innerHTML = '<div style="text-align:center; padding:2rem; color:var(--text-secondary);">Nenhum resultado encontrado</div>';
+                return;
+            }
+
+            let html = '';
+
+            if (matchingLocations.length > 0) {
+                html += '<div class="search-section-title">📍 Locais</div>';
+                html += matchingLocations.map(loc => `
+                    <div class="search-result-row" onclick="goToLocationFromSearch(${JSON.stringify(loc)})">
+                        <span>📍 ${escapeHtml(loc)}</span>
+                    </div>
+                `).join('');
+            }
+
+            if (demandResults.length > 0) {
+                html += '<div class="search-section-title">📋 Demandas Ativas</div>';
+                html += demandResults.map(d => `
+                    <div class="search-result-row" onclick="goToDemandFromSearch(${JSON.stringify(d.id)})">
+                        <span><strong>${escapeHtml(d.location)}</strong> — ${escapeHtml(d.activity)}</span>
+                        <span style="font-size:0.65rem; color:${getStatusColor(d.status)}; white-space:nowrap;">${getStatusLabel(d.status)}</span>
+                    </div>
+                `).join('');
+            }
+
+            if (noteResults.length > 0) {
+                html += '<div class="search-section-title">📝 Notas</div>';
+                html += noteResults.map(n => `
+                    <div class="search-result-row" onclick="goToNoteFromSearch(${n.id})">
+                        <span><strong>${escapeHtml(n.subject)}</strong></span>
+                    </div>
+                `).join('');
+            }
+
+            if (historyResults.length > 0) {
+                html += '<div class="search-section-title">📅 Histórico</div>';
+                html += historyResults.map(h => `
+                    <div class="search-result-row" onclick="goToHistoryFromSearch()">
+                        <span>${escapeHtml(h.location)} — ${escapeHtml(h.activity)}</span>
+                        <span style="font-size:0.65rem; color:var(--text-secondary); white-space:nowrap;">${h.statusChangeDate ? formatDateBR(h.statusChangeDate) : ''}</span>
+                    </div>
+                `).join('');
+            }
+
+            container.innerHTML = html;
+        }
+
+        function goToDemandFromSearch(id) {
+            closeGlobalSearch();
+            switchTab('demands');
+            setTimeout(() => editDemand(id), 100);
+        }
+
+        function goToNoteFromSearch(id) {
+            closeGlobalSearch();
+            switchTab('notes');
+            setTimeout(() => editNote(id), 100);
+        }
+
+        async function goToLocationFromSearch(locName) {
+            closeGlobalSearch();
+            switchTab('locations');
+            await loadLocationsData();
+            const idx = locationNamesOrdered.indexOf(locName);
+            if (idx !== -1) {
+                showLocationModal(idx);
+            }
+        }
+
+        function goToHistoryFromSearch() {
+            closeGlobalSearch();
+            switchTab('history');
+        }
+
+        document.addEventListener('keydown', function(e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                e.preventDefault();
+                if (document.getElementById('appContainer').classList.contains('show')) {
+                    openGlobalSearch();
+                }
+            }
+        });
+
         function switchTab(tab) {
             document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
             document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
@@ -4554,6 +4914,7 @@
             if (tab === 'settings') {
                 loadStatusAndPriorityConfigLists();
                 renderThemeGrid();
+                refreshPushStatus();
             }
             if (tab === 'calendar') {
                 initCalendar();
