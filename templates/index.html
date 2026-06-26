@@ -9,6 +9,24 @@
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
     <link rel="icon" href="/favicon.ico">
     <link rel="apple-touch-icon" href="/static/icon-192.png">
+    <script>
+        // Aplica o tema salvo ANTES do resto da página renderizar, evitando o "flash" do tema padrão.
+        (function() {
+            try {
+                var saved = localStorage.getItem('theme');
+                var themes = {
+                    claro: { cls: 'theme-claro', bg: '#f4f5f7' },
+                    meianoite: { cls: 'theme-meianoite', bg: '#0a0e1a' },
+                    violeta: { cls: 'theme-violeta', bg: '#150b1a' }
+                };
+                if (saved && themes[saved]) {
+                    document.documentElement.classList.add(themes[saved].cls);
+                    var meta = document.querySelector('meta[name="theme-color"]');
+                    if (meta) meta.setAttribute('content', themes[saved].bg);
+                }
+            } catch (e) {}
+        })();
+    </script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap');
 
@@ -39,6 +57,63 @@
             --bg-secondary: var(--panel-raised);
             --border: var(--panel-border);
             --radius: 6px;
+        }
+
+        /* ===== TEMA: CLARO ===== */
+        html.theme-claro {
+            --bg-deep: #f4f5f7;
+            --panel: #ffffff;
+            --panel-raised: #f0f1f4;
+            --panel-border: #d8dade;
+            --amber: #2563eb;
+            --amber-bright: #3b82f6;
+            --amber-dim: #93b4f0;
+            --text-primary: #1f2329;
+            --text-secondary: #6b7280;
+            --led-green: #16a34a;
+            --led-red: #dc2626;
+            --led-blue: #2563eb;
+            --led-purple: #9333ea;
+            --led-orange: #ea7c1e;
+            --led-gray: #9aa0a7;
+        }
+
+        /* ===== TEMA: MEIA-NOITE ===== */
+        html.theme-meianoite {
+            --bg-deep: #0a0e1a;
+            --panel: #131a2e;
+            --panel-raised: #1b2440;
+            --panel-border: #2a3658;
+            --amber: #38bdf8;
+            --amber-bright: #7dd3fc;
+            --amber-dim: #0c5a85;
+            --text-primary: #e8edf7;
+            --text-secondary: #8590ad;
+            --led-green: #34d399;
+            --led-red: #f87171;
+            --led-blue: #60a5fa;
+            --led-purple: #c084fc;
+            --led-orange: #fb923c;
+            --led-gray: #64748b;
+        }
+
+        /* ===== TEMA: VIOLETA ===== */
+        html.theme-violeta {
+            --bg-deep: #150b1a;
+            --panel: #1f1326;
+            --panel-raised: #2a1c34;
+            --panel-border: #3d2a4a;
+            --amber: #e056a8;
+            --amber-bright: #f17fc1;
+            --amber-dim: #6e2a55;
+            --text-primary: #f0e6f5;
+            --text-secondary: #9684a3;
+            --led-green: #3ddc84;
+            --led-red: #ff5b5b;
+            --led-blue: #4fc3f7;
+            --led-purple: #b388ff;
+            --led-orange: #ff9f43;
+            --led-gray: #6b5e76;
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -550,6 +625,35 @@
         }
         .btn-icon:disabled { opacity: 0.3; cursor: not-allowed; }
         .btn-icon:hover:not(:disabled) { border-color: var(--amber); color: var(--amber-bright); }
+
+        .theme-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 1rem;
+        }
+        .theme-swatch {
+            cursor: pointer;
+            border: 2px solid var(--border);
+            border-radius: var(--radius);
+            padding: 0.75rem;
+            transition: border-color 0.15s;
+            text-align: center;
+        }
+        .theme-swatch:hover { border-color: var(--amber-dim); }
+        .theme-swatch.active { border-color: var(--amber); box-shadow: 0 0 0 2px var(--amber); }
+        .theme-swatch-preview {
+            height: 60px;
+            border-radius: 4px;
+            padding: 8px;
+            margin-bottom: 0.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+        .theme-swatch-bar { height: 4px; border-radius: 2px; width: 50%; flex-shrink: 0; }
+        .theme-swatch-panel { flex: 1; border-radius: 3px; border: 1px solid; }
+        .theme-swatch-name { font-size: 0.75rem; font-weight: 600; color: var(--text-primary); }
 
         .notes-grid {
             display: grid;
@@ -1117,6 +1221,12 @@
             </div>
 
             <div class="card" style="margin-top: 1.5rem;">
+                <h3>🎨 Tema</h3>
+                <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 1rem;">Escolha o visual que mais agrada você. Aplica em todo o app, em qualquer dispositivo onde você entrar.</p>
+                <div class="theme-grid" id="themeGrid"></div>
+            </div>
+
+            <div class="card" style="margin-top: 1.5rem;">
                 <h3>🔐 Segurança</h3>
                 <button class="btn btn-secondary" onclick="showChangePasswordModal()">Alterar Senha</button>
             </div>
@@ -1411,6 +1521,57 @@
         let editingGroupId = null;
         let isOnline = navigator.onLine;
         let syncInProgress = false;
+
+        const THEMES = [
+            { id: 'bancada', name: 'Bancada de Instrumento', class: '', bgDeep: '#0b0d0f', panel: '#16191d', border: '#2a2f35', accent: '#f5a623' },
+            { id: 'claro', name: 'Claro', class: 'theme-claro', bgDeep: '#f4f5f7', panel: '#ffffff', border: '#d8dade', accent: '#2563eb' },
+            { id: 'meianoite', name: 'Meia-noite', class: 'theme-meianoite', bgDeep: '#0a0e1a', panel: '#131a2e', border: '#2a3658', accent: '#38bdf8' },
+            { id: 'violeta', name: 'Violeta', class: 'theme-violeta', bgDeep: '#150b1a', panel: '#1f1326', border: '#3d2a4a', accent: '#e056a8' }
+        ];
+        let currentTheme = localStorage.getItem('theme') || 'bancada';
+
+        function applyTheme(themeId, save = true) {
+            const theme = THEMES.find(t => t.id === themeId) || THEMES[0];
+            THEMES.forEach(t => { if (t.class) document.documentElement.classList.remove(t.class); });
+            if (theme.class) document.documentElement.classList.add(theme.class);
+
+            const metaTheme = document.querySelector('meta[name="theme-color"]');
+            if (metaTheme) metaTheme.setAttribute('content', theme.bgDeep);
+
+            currentTheme = theme.id;
+            localStorage.setItem('theme', theme.id);
+            renderThemeGrid();
+
+            if (save && token) {
+                saveThemePreference(theme.id);
+            }
+        }
+
+        function renderThemeGrid() {
+            const container = document.getElementById('themeGrid');
+            if (!container) return;
+            container.innerHTML = THEMES.map(t => `
+                <div class="theme-swatch ${t.id === currentTheme ? 'active' : ''}" onclick="applyTheme('${t.id}')">
+                    <div class="theme-swatch-preview" style="background:${t.bgDeep};">
+                        <div class="theme-swatch-bar" style="background:${t.accent};"></div>
+                        <div class="theme-swatch-panel" style="background:${t.panel}; border-color:${t.border};"></div>
+                    </div>
+                    <div class="theme-swatch-name">${t.name}</div>
+                </div>
+            `).join('');
+        }
+
+        async function saveThemePreference(themeId) {
+            try {
+                await fetchWithRetry(`${API_URL}/auth/theme`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ theme: themeId })
+                }, 1);
+            } catch (e) {
+                console.error('Erro ao salvar preferência de tema:', e);
+            }
+        }
 
         // ============= OFFLINE / SINCRONIZAÇÃO =============
         function sleep(ms) {
@@ -1789,6 +1950,12 @@
         async function enterApp() {
             document.getElementById('userName').textContent = currentUser.full_name || currentUser.username;
             document.getElementById('userEmail').textContent = `Email: ${currentUser.email}`;
+
+            // Se a conta tem um tema salvo diferente do aplicado localmente (ex: trocou de dispositivo),
+            // a conta é a fonte da verdade.
+            if (currentUser.theme && currentUser.theme !== currentTheme) {
+                applyTheme(currentUser.theme, false);
+            }
 
             document.getElementById('authContainer').style.display = 'none';
             document.getElementById('accessKeyContainer').style.display = 'none';
@@ -4386,6 +4553,7 @@
             }
             if (tab === 'settings') {
                 loadStatusAndPriorityConfigLists();
+                renderThemeGrid();
             }
             if (tab === 'calendar') {
                 initCalendar();
