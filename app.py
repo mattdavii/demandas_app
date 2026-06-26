@@ -1,5 +1,6 @@
 import os
 import secrets
+import json
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
@@ -10,6 +11,7 @@ from datetime import datetime, date, timedelta
 from dotenv import load_dotenv
 from functools import wraps
 from sqlalchemy import text
+from pywebpush import webpush, WebPushException
 
 load_dotenv()
 
@@ -139,6 +141,7 @@ class Demand(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
     reminder_at = db.Column(db.DateTime, nullable=True)
     reminder_sent = db.Column(db.Boolean, default=False)
+    checklist = db.Column(db.JSON, default=list)  # [{"text": "...", "checked": false}, ...]
     
     def to_dict(self):
         return {
@@ -153,7 +156,8 @@ class Demand(db.Model):
             'dueDate': self.due_date.isoformat() if self.due_date else None,
             'assignedTo': self.assigned_to,
             'createdDate': self.created_date.isoformat() if self.created_date else None,
-            'reminderAt': self.reminder_at.isoformat() if self.reminder_at else None
+            'reminderAt': self.reminder_at.isoformat() if self.reminder_at else None,
+            'checklist': self.checklist or []
         }
 
 class DemandHistory(db.Model):
@@ -281,6 +285,51 @@ class PriorityConfig(db.Model):
             'order': self.order
         }
 
+class PushSubscription(db.Model):
+    """Inscrição de um dispositivo/navegador pra receber notificações push."""
+    __tablename__ = 'push_subscriptions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    endpoint = db.Column(db.String(500), unique=True, nullable=False)
+    p256dh = db.Column(db.String(255), nullable=False)
+    auth = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    def to_subscription_info(self):
+        return {
+            "endpoint": self.endpoint,
+            "keys": {"p256dh": self.p256dh, "auth": self.auth}
+        }
+
+def send_push_notification(user_id, title, body, url='/'):
+    """Envia uma notificação push pra todos os dispositivos inscritos de um usuário.
+    Remove automaticamente inscrições que o navegador já invalidou (erro 410)."""
+    vapid_private_key = os.getenv('VAPID_PRIVATE_KEY')
+    if not vapid_private_key:
+        return  # push não configurado neste ambiente, ignora silenciosamente
+
+    subscriptions = PushSubscription.query.filter_by(user_id=user_id).all()
+    vapid_claims = {"sub": "mailto:" + os.getenv('MAIL_USERNAME', 'admin@example.com')}
+
+    for sub in subscriptions:
+        try:
+            webpush(
+                subscription_info=sub.to_subscription_info(),
+                data=json.dumps({"title": title, "body": body, "url": url}),
+                vapid_private_key=vapid_private_key,
+                vapid_claims=vapid_claims.copy()
+            )
+        except WebPushException as e:
+            status_code = e.response.status_code if e.response is not None else None
+            if status_code in (404, 410):
+                # inscrição expirada/inválida — remove pra não tentar de novo
+                db.session.delete(sub)
+                db.session.commit()
+            print(f"Erro ao enviar push pro usuário {user_id}: {e}")
+        except Exception as e:
+            print(f"Erro inesperado ao enviar push pro usuário {user_id}: {e}")
+
 def seed_default_status_and_priority(user_id):
     """Cria o conjunto padrão de status/prioridade pra uma conta (nova ou já existente sem nenhum configurado)."""
     if StatusConfig.query.filter_by(user_id=user_id).first() is None:
@@ -319,6 +368,7 @@ with app.app_context():
         db.session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE"))
         db.session.execute(text("ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS demand_id INTEGER"))
         db.session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS theme VARCHAR(30) DEFAULT 'bancada'"))
+        db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS checklist JSON"))
         db.session.commit()
     except Exception as e:
         db.session.rollback()
@@ -994,7 +1044,8 @@ def create_demand():
         priority=default_priority,
         due_date=datetime.strptime(data['due_date'], '%Y-%m-%d').date() if data.get('due_date') else None,
         assigned_to=data.get('assigned_to', ''),
-        reminder_at=datetime.strptime(data['reminder_at'], '%Y-%m-%dT%H:%M') if data.get('reminder_at') else None
+        reminder_at=datetime.strptime(data['reminder_at'], '%Y-%m-%dT%H:%M') if data.get('reminder_at') else None,
+        checklist=data.get('checklist', [])
     )
     
     db.session.add(demand)
@@ -1035,6 +1086,8 @@ def update_demand(demand_id):
         else:
             demand.reminder_at = None
             demand.reminder_sent = False
+    if 'checklist' in data:
+        demand.checklist = data['checklist']
     
     db.session.commit()
     return jsonify(demand.to_dict()), 200
@@ -1166,6 +1219,27 @@ def delete_note(note_id):
     return jsonify({'message': 'Nota deletada'}), 200
 
 # ============= ROTAS DE LEMBRETE =============
+def send_reminder_notification(demand, user):
+    """Envia e-mail e push de lembrete pra uma demanda específica."""
+    if app.config['MAIL_USERNAME']:
+        try:
+            msg = Message(
+                f'Lembrete: {demand.activity}',
+                recipients=[user.email],
+                html=f'''
+                <p>Olá {user.full_name or user.username},</p>
+                <p>Lembrete da demanda:</p>
+                <p><strong>{demand.location}:</strong> {demand.activity}</p>
+                {f"<p>{demand.context}</p>" if demand.context else ""}
+                <p>Status atual: {demand.status}</p>
+                '''
+            )
+            mail.send(msg)
+        except Exception as e:
+            print(f'Erro ao enviar email de lembrete: {e}')
+
+    send_push_notification(user.id, f'🔔 {demand.location}', demand.activity, '/')
+
 @app.route('/api/reminders/check', methods=['POST'])
 @jwt_required()
 def check_reminders():
@@ -1177,34 +1251,22 @@ def check_reminders():
     if not user:
         return jsonify({'error': 'Usuário não encontrado'}), 404
 
+    terminal_keys = [s.key for s in StatusConfig.query.filter_by(user_id=user_id, is_completed=True).all()]
+
     now = datetime.now()
-    due_demands = Demand.query.filter(
+    query = Demand.query.filter(
         Demand.user_id == user_id,
         Demand.reminder_at.isnot(None),
         Demand.reminder_at <= now,
-        Demand.reminder_sent == False,
-        Demand.status != 'concluido'
-    ).all()
+        Demand.reminder_sent == False
+    )
+    if terminal_keys:
+        query = query.filter(~Demand.status.in_(terminal_keys))
+    due_demands = query.all()
 
     triggered = []
     for demand in due_demands:
-        if app.config['MAIL_USERNAME']:
-            try:
-                msg = Message(
-                    f'Lembrete: {demand.activity}',
-                    recipients=[user.email],
-                    html=f'''
-                    <p>Olá {user.full_name or user.username},</p>
-                    <p>Lembrete da demanda:</p>
-                    <p><strong>{demand.location}:</strong> {demand.activity}</p>
-                    {f"<p>{demand.context}</p>" if demand.context else ""}
-                    <p>Status atual: {demand.status}</p>
-                    '''
-                )
-                mail.send(msg)
-            except Exception as e:
-                print(f'Erro ao enviar email de lembrete: {e}')
-
+        send_reminder_notification(demand, user)
         demand.reminder_sent = True
         triggered.append(demand.to_dict())
 
@@ -1212,6 +1274,88 @@ def check_reminders():
         db.session.commit()
 
     return jsonify({'triggered': triggered}), 200
+
+@app.route('/api/cron/check-all-reminders', methods=['POST', 'GET'])
+def cron_check_all_reminders():
+    """Endpoint pra ser chamado por um serviço externo de cron (ex: cron-job.org) de tempos
+    em tempos, garantindo que lembretes disparem (email + push) mesmo com o app fechado.
+    Protegido por chave secreta (não usa JWT, já que não há usuário logado nesse contexto)."""
+    secret = request.args.get('key') or request.headers.get('X-Cron-Key')
+    if not secret or secret != os.getenv('CRON_SECRET_KEY'):
+        return jsonify({'error': 'Não autorizado'}), 403
+
+    now = datetime.now()
+    due_demands = Demand.query.filter(
+        Demand.reminder_at.isnot(None),
+        Demand.reminder_at <= now,
+        Demand.reminder_sent == False
+    ).all()
+
+    sent_count = 0
+    for demand in due_demands:
+        user = User.query.get(demand.user_id)
+        if not user:
+            continue
+
+        status_config = StatusConfig.query.filter_by(user_id=user.id, key=demand.status).first()
+        if status_config and status_config.is_completed:
+            continue  # defesa extra: não deveria existir demanda ativa com status conclusivo
+
+        send_reminder_notification(demand, user)
+        demand.reminder_sent = True
+        sent_count += 1
+
+    if sent_count:
+        db.session.commit()
+
+    return jsonify({'message': f'{sent_count} lembretes verificados e enviados'}), 200
+
+# ============= ROTAS DE PUSH NOTIFICATIONS =============
+@app.route('/api/push/vapid-public-key', methods=['GET'])
+def get_vapid_public_key():
+    return jsonify({'publicKey': os.getenv('VAPID_PUBLIC_KEY', '')}), 200
+
+@app.route('/api/push/subscribe', methods=['POST'])
+@jwt_required()
+def push_subscribe():
+    """Registra (ou atualiza) a inscrição push de um dispositivo/navegador pro usuário atual."""
+    user_id = int(get_jwt_identity())
+    data = request.get_json()
+
+    endpoint = (data or {}).get('endpoint')
+    keys = (data or {}).get('keys', {})
+
+    if not endpoint or not keys.get('p256dh') or not keys.get('auth'):
+        return jsonify({'error': 'Dados de inscrição incompletos'}), 400
+
+    existing = PushSubscription.query.filter_by(endpoint=endpoint).first()
+    if existing:
+        existing.user_id = user_id
+        existing.p256dh = keys['p256dh']
+        existing.auth = keys['auth']
+    else:
+        db.session.add(PushSubscription(
+            user_id=user_id,
+            endpoint=endpoint,
+            p256dh=keys['p256dh'],
+            auth=keys['auth']
+        ))
+
+    db.session.commit()
+    return jsonify({'message': 'Inscrito com sucesso'}), 200
+
+@app.route('/api/push/unsubscribe', methods=['POST'])
+@jwt_required()
+def push_unsubscribe():
+    """Remove a inscrição push deste dispositivo/navegador."""
+    user_id = int(get_jwt_identity())
+    data = request.get_json()
+    endpoint = (data or {}).get('endpoint')
+
+    PushSubscription.query.filter_by(user_id=user_id, endpoint=endpoint).delete()
+    db.session.commit()
+
+    return jsonify({'message': 'Desinscrito com sucesso'}), 200
 
 @app.route('/api/locations/merge', methods=['POST'])
 @jwt_required()
