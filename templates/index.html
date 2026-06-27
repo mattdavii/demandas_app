@@ -260,29 +260,113 @@
         .alert-success { background: rgba(61,220,132,0.1); color: var(--led-green); border-left: 3px solid var(--led-green); }
         .alert-danger { background: rgba(255,91,91,0.1); color: var(--led-red); border-left: 3px solid var(--led-red); }
 
-        .app-container { display: none; padding: 1.5rem; max-width: 1800px; width: 100%; }
-        .app-container.show { display: block; }
+        .app-shell { display: none; width: 100%; min-height: 100vh; }
+        .app-shell.show { display: flex; }
 
-        .header {
+        .sidebar {
+            width: 220px;
+            flex-shrink: 0;
+            background: var(--panel);
+            border-right: 1px solid var(--border);
             display: flex;
-            justify-content: space-between;
+            flex-direction: column;
+            height: 100vh;
+            position: sticky;
+            top: 0;
+            transition: width 0.2s ease;
+            overflow: hidden;
+        }
+        .sidebar.collapsed { width: 64px; }
+        .sidebar.collapsed .sidebar-logo span,
+        .sidebar.collapsed .sidebar-link span,
+        .sidebar.collapsed .sidebar-user { display: none; }
+        .sidebar.collapsed .sidebar-header { justify-content: center; }
+        .sidebar.collapsed .sidebar-collapse-btn { transform: rotate(180deg); }
+
+        .sidebar-header {
+            display: flex;
             align-items: center;
-            margin-bottom: 2rem;
-            padding-bottom: 1rem;
+            justify-content: space-between;
+            padding: 1.1rem 1rem;
             border-bottom: 1px solid var(--border);
-            flex-wrap: wrap;
-            gap: 1rem;
+            flex-shrink: 0;
+        }
+        .sidebar-logo {
+            font-size: 0.95rem;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            color: var(--amber-bright);
+            white-space: nowrap;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+        .sidebar-collapse-btn {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            border-radius: 4px;
+            width: 24px;
+            height: 24px;
+            cursor: pointer;
+            font-family: inherit;
+            flex-shrink: 0;
+            transition: transform 0.2s, border-color 0.15s, color 0.15s;
+        }
+        .sidebar-collapse-btn:hover { border-color: var(--amber); color: var(--amber-bright); }
+
+        .sidebar-nav {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0.75rem 0.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.2rem;
         }
 
-        .header h1 {
-            font-size: 1.4rem;
+        .sidebar-link {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            padding: 0.65rem 0.75rem;
+            border-radius: var(--radius);
+            background: transparent;
+            border: none;
+            border-left: 3px solid transparent;
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 0.8rem;
+            font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 0.04em;
-            color: var(--amber-bright);
+            letter-spacing: 0.03em;
+            text-align: left;
+            cursor: pointer;
+            white-space: nowrap;
+            overflow: hidden;
+            width: 100%;
         }
-        .user-info { text-align: right; }
-        .user-info p { margin: 0.25rem 0; font-size: 0.85rem; color: var(--text-secondary); }
-        .user-info strong { color: var(--text-primary); }
+        .sidebar-link span { overflow: hidden; text-overflow: ellipsis; }
+        .sidebar-link:hover { background: var(--panel-raised); color: var(--text-primary); }
+        .sidebar-link.active { background: var(--panel-raised); color: var(--amber-bright); border-left-color: var(--amber); }
+
+        .sidebar-footer {
+            padding: 0.6rem 0.5rem;
+            border-top: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+        .sidebar-user { padding: 0.75rem 0.75rem 0.25rem; font-size: 0.78rem; }
+        .sidebar-user p { margin: 0 0 0.6rem 0; color: var(--text-secondary); }
+        .sidebar-user strong { color: var(--text-primary); }
+
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 999;
+        }
+
         .logout-btn {
             background: transparent;
             color: var(--led-red);
@@ -294,36 +378,62 @@
             font-size: 0.8rem;
             text-transform: uppercase;
             letter-spacing: 0.04em;
+            width: 100%;
         }
         .logout-btn:hover { background: rgba(255,91,91,0.1); }
 
-        .tabs {
-            display: flex;
-            gap: 0.5rem;
-            margin-bottom: 1.5rem;
+        .main-content {
+            flex: 1;
+            min-width: 0;
+            height: 100vh;
+            overflow-y: auto;
+        }
+
+        .mobile-topbar {
+            display: none;
+            align-items: center;
+            gap: 1rem;
+            padding: 1rem 1.25rem;
             border-bottom: 1px solid var(--border);
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-            scrollbar-width: thin;
+            background: var(--panel);
+            position: sticky;
+            top: 0;
+            z-index: 10;
         }
-        .tabs::-webkit-scrollbar { height: 4px; }
-        .tabs::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-        .tab-btn {
-            padding: 0.75rem 1.25rem;
-            border: none;
+        .mobile-menu-btn {
             background: transparent;
-            color: var(--text-secondary);
-            font-weight: 600;
-            font-size: 0.8rem;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            border-radius: 4px;
+            width: 36px;
+            height: 36px;
+            font-size: 1.1rem;
             cursor: pointer;
-            border-bottom: 3px solid transparent;
-            font-family: inherit;
             flex-shrink: 0;
-            white-space: nowrap;
         }
-        .tab-btn.active { color: var(--amber-bright); border-bottom-color: var(--amber); }
+        .mobile-topbar h1 { font-size: 1rem; color: var(--amber-bright); margin: 0; text-transform: uppercase; letter-spacing: 0.03em; }
+
+        .content-inner { padding: 1.5rem; }
+
+        @media (max-width: 900px) {
+            .sidebar {
+                position: fixed;
+                top: 0; left: 0;
+                height: 100vh;
+                z-index: 1000;
+                width: 260px !important;
+                transform: translateX(-100%);
+                transition: transform 0.25s ease;
+            }
+            .sidebar.mobile-open { transform: translateX(0); }
+            .sidebar.mobile-open + .sidebar-overlay,
+            .sidebar-overlay.show { display: block; }
+            .sidebar.collapsed .sidebar-logo span,
+            .sidebar.collapsed .sidebar-link span,
+            .sidebar.collapsed .sidebar-user { display: inline; }
+            .sidebar-collapse-btn { display: none; }
+            .mobile-topbar { display: flex; }
+        }
 
         .tab-content { display: none; }
         .tab-content.active { display: block; }
@@ -873,15 +983,13 @@
         /* ===== Ajustes finos para telas pequenas ===== */
         @media (max-width: 600px) {
             body { padding: 10px; }
-            .app-container { padding: 0.85rem; }
+            .content-inner { padding: 0.85rem; }
             .card { padding: 1.1rem; }
             .modal-content { padding: 1.25rem; width: 94%; }
-            .header h1 { font-size: 1.15rem; }
+            .mobile-topbar h1 { font-size: 0.9rem; }
         }
 
         @media (max-width: 480px) {
-            .header { flex-direction: column; align-items: flex-start; }
-            .user-info { text-align: left; width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
             .auth-info-side { padding: 2.5rem 1.25rem; }
             .auth-form-side { padding: 2rem 1.25rem; }
             .calendar-day { min-height: 46px; padding: 0.25rem; }
@@ -1030,29 +1138,43 @@
     </div>
 
     <!-- SEÇÃO DO APP PRINCIPAL -->
-    <div class="container app-container" id="appContainer">
-        <div class="header">
-            <div>
+    <div class="app-shell" id="appContainer">
+        <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebarMobile()"></div>
+
+        <nav class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h1 class="sidebar-logo">🎛️ <span>Painel de Bordo</span></h1>
+                <button class="sidebar-collapse-btn" onclick="toggleSidebarCollapse()" title="Encolher menu">«</button>
+            </div>
+
+            <div class="sidebar-nav">
+                <button class="sidebar-link active" data-tab="today" onclick="switchTab('today')">🌅 <span>Hoje</span></button>
+                <button class="sidebar-link" data-tab="demands" onclick="switchTab('demands')">📋 <span>Demandas</span></button>
+                <button class="sidebar-link" data-tab="calendar" onclick="switchTab('calendar')">🗓️ <span>Calendário</span></button>
+                <button class="sidebar-link" data-tab="history" onclick="switchTab('history')">📅 <span>Histórico</span></button>
+                <button class="sidebar-link" data-tab="locations" onclick="switchTab('locations')">📍 <span>Locais</span></button>
+                <button class="sidebar-link" data-tab="dashboard" onclick="switchTab('dashboard')">📊 <span>Dashboard</span></button>
+                <button class="sidebar-link" data-tab="notes" onclick="switchTab('notes')">📝 <span>Notas</span></button>
+                <button class="sidebar-link" id="adminKeysTabBtn" data-tab="adminkeys" style="display:none;" onclick="switchTab('adminkeys')">🔑 <span>Chaves</span></button>
+                <button class="sidebar-link" data-tab="settings" onclick="switchTab('settings')">⚙️ <span>Configurações</span></button>
+            </div>
+
+            <div class="sidebar-footer">
+                <button class="sidebar-link" onclick="openGlobalSearch()" title="Buscar (Ctrl/Cmd+K)">🔍 <span>Buscar</span></button>
+                <div class="sidebar-user">
+                    <p>Olá, <strong id="userName">Usuário</strong></p>
+                    <button class="logout-btn" onclick="doLogout()">Sair</button>
+                </div>
+            </div>
+        </nav>
+
+        <div class="main-content">
+            <div class="mobile-topbar">
+                <button class="mobile-menu-btn" onclick="toggleSidebarMobile()">☰</button>
                 <h1>🎛️ Painel de Bordo</h1>
             </div>
-            <div class="user-info">
-                <button class="logout-btn" style="background:transparent; border:1px solid var(--border); color:var(--text-secondary); margin-right:0.5rem;" onclick="openGlobalSearch()" title="Buscar (Ctrl/Cmd+K)">🔍 Buscar</button>
-                <p>Olá, <strong id="userName">Usuário</strong></p>
-                <button class="logout-btn" onclick="doLogout()">Sair</button>
-            </div>
-        </div>
 
-        <div class="tabs">
-            <button class="tab-btn active" onclick="switchTab('today')">🌅 Hoje</button>
-            <button class="tab-btn" onclick="switchTab('demands')">📋 Demandas</button>
-            <button class="tab-btn" onclick="switchTab('calendar')">🗓️ Calendário</button>
-            <button class="tab-btn" onclick="switchTab('history')">📅 Histórico</button>
-            <button class="tab-btn" onclick="switchTab('locations')">📍 Locais</button>
-            <button class="tab-btn" onclick="switchTab('dashboard')">📊 Dashboard</button>
-            <button class="tab-btn" onclick="switchTab('notes')">📝 Notas</button>
-            <button class="tab-btn" id="adminKeysTabBtn" style="display:none;" onclick="switchTab('adminkeys')">🔑 Chaves</button>
-            <button class="tab-btn" onclick="switchTab('settings')">⚙️ Configurações</button>
-        </div>
+            <div class="content-inner">
 
         <!-- TAB: DEMANDAS -->
         <!-- TAB: HOJE -->
@@ -1274,6 +1396,8 @@
             <div class="card" style="margin-top: 1.5rem;">
                 <h3>🔐 Segurança</h3>
                 <button class="btn btn-secondary" onclick="showChangePasswordModal()">Alterar Senha</button>
+            </div>
+        </div>
             </div>
         </div>
     </div>
@@ -1595,6 +1719,32 @@
         let editingGroupId = null;
         let isOnline = navigator.onLine;
         let syncInProgress = false;
+
+        // ============= MENU LATERAL (SIDEBAR) =============
+        function toggleSidebarCollapse() {
+            const sidebar = document.getElementById('sidebar');
+            const collapsed = sidebar.classList.toggle('collapsed');
+            localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0');
+        }
+
+        function toggleSidebarMobile() {
+            document.getElementById('sidebar').classList.toggle('mobile-open');
+            document.getElementById('sidebarOverlay').classList.toggle('show');
+        }
+
+        function closeSidebarMobile() {
+            document.getElementById('sidebar').classList.remove('mobile-open');
+            document.getElementById('sidebarOverlay').classList.remove('show');
+        }
+
+        // Restaura o estado de colapso salvo (só importa no desktop; no mobile a sidebar
+        // já força largura total via CSS, então isso fica inofensivo lá).
+        if (localStorage.getItem('sidebarCollapsed') === '1') {
+            document.addEventListener('DOMContentLoaded', () => {
+                const sidebar = document.getElementById('sidebar');
+                if (sidebar) sidebar.classList.add('collapsed');
+            });
+        }
 
         const THEMES = [
             { id: 'bancada', name: 'Bancada de Instrumento', class: '', bgDeep: '#0b0d0f', panel: '#16191d', border: '#2a2f35', accent: '#f5a623' },
@@ -5030,9 +5180,12 @@
 
         function switchTab(tab) {
             document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.sidebar-link[data-tab]').forEach(el => el.classList.remove('active'));
             document.getElementById('tab-' + tab).classList.add('active');
-            event.target.classList.add('active');
+            const clicked = event.target.closest('.sidebar-link');
+            if (clicked) clicked.classList.add('active');
+            closeSidebarMobile();
+            document.querySelector('.content-inner').scrollTop = 0;
 
             if (tab === 'today') {
                 loadTodayPage();
