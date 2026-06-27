@@ -460,6 +460,16 @@
         }
 
         .groups-list { display: grid; gap: 1rem; }
+
+        .scrollable-list {
+            max-height: 60vh;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+        .scrollable-list::-webkit-scrollbar { width: 6px; }
+        .scrollable-list::-webkit-scrollbar-track { background: transparent; }
+        .scrollable-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        .scrollable-list::-webkit-scrollbar-thumb:hover { background: var(--amber-dim); }
         .group-item {
             background: var(--panel-raised);
             border: 1px solid var(--border);
@@ -657,7 +667,10 @@
         }
         .donut-chart-total { font-size: 1.3rem; font-weight: 800; color: var(--text-primary); }
         .donut-chart-total-label { font-size: 0.55rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; }
-        .donut-legend { flex: 1; min-width: 140px; }
+        .donut-legend { flex: 1; min-width: 140px; max-height: 220px; overflow-y: auto; padding-right: 4px; }
+        .donut-legend::-webkit-scrollbar { width: 6px; }
+        .donut-legend::-webkit-scrollbar-track { background: transparent; }
+        .donut-legend::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
         .donut-legend-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; margin-bottom: 0.55rem; }
         .donut-legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
         .donut-legend-label { flex: 1; color: var(--text-secondary); text-transform: uppercase; font-size: 0.66rem; letter-spacing: 0.03em; }
@@ -1281,7 +1294,7 @@
 
             <div class="card">
                 <h3 id="calendarDayDetailTitle">Carregando...</h3>
-                <div id="calendarDayDetailList"></div>
+                <div id="calendarDayDetailList" class="scrollable-list"></div>
             </div>
         </div>
 
@@ -1383,7 +1396,7 @@
                 <button class="btn btn-sm btn-primary" style="width: auto;" onclick="createAccessKey()">➕ Gerar Nova Chave</button>
             </div>
             <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 1.5rem;">Cada chave libera o acesso de uma única conta nova, uma vez só. Compartilhe apenas com quem você confia.</p>
-            <div id="adminKeysList">
+            <div id="adminKeysList" class="scrollable-list">
                 <div>Carregando...</div>
             </div>
         </div>
@@ -1394,7 +1407,7 @@
                     <h3 style="margin-bottom:0;">👥 Grupos</h3>
                     <button class="btn btn-sm btn-primary" style="width:auto;" onclick="showNewGroupModal()">➕ Novo Grupo</button>
                 </div>
-                <div id="groupsList" class="groups-list">
+                <div id="groupsList" class="groups-list scrollable-list">
                     <div>Carregando...</div>
                 </div>
             </div>
@@ -1405,7 +1418,7 @@
                     <button class="btn btn-sm btn-primary" style="width:auto;" onclick="showNewStatusModal()">➕ Novo Status</button>
                 </div>
                 <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 1rem;">Defina as etapas do seu fluxo de trabalho. O status marcado como "conclusivo" arquiva a demanda pro histórico quando atingido.</p>
-                <div id="statusConfigList"></div>
+                <div id="statusConfigList" class="scrollable-list"></div>
             </div>
 
             <div class="card" style="margin-top: 1.5rem;">
@@ -1413,7 +1426,7 @@
                     <h3 style="margin-bottom:0;">🎯 Prioridades</h3>
                     <button class="btn btn-sm btn-primary" style="width:auto;" onclick="showNewPriorityModal()">➕ Nova Prioridade</button>
                 </div>
-                <div id="priorityConfigList"></div>
+                <div id="priorityConfigList" class="scrollable-list"></div>
             </div>
 
             <div class="card" style="margin-top: 1.5rem;">
