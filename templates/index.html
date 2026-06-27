@@ -626,6 +626,43 @@
         }
         .kanban-empty { text-align: center; color: var(--led-gray); font-size: 0.72rem; padding: 1rem 0; }
 
+        .dashboard-trend {
+            font-size: 0.62rem;
+            font-weight: 700;
+            margin-top: 0.3rem;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+        }
+
+        .donut-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+        }
+        .donut-chart {
+            border-radius: 50%;
+            flex-shrink: 0;
+            position: relative;
+        }
+        .donut-chart-hole {
+            position: absolute;
+            inset: 20%;
+            background: var(--panel);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+        .donut-chart-total { font-size: 1.3rem; font-weight: 800; color: var(--text-primary); }
+        .donut-chart-total-label { font-size: 0.55rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; }
+        .donut-legend { flex: 1; min-width: 140px; }
+        .donut-legend-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; margin-bottom: 0.55rem; }
+        .donut-legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+        .donut-legend-label { flex: 1; color: var(--text-secondary); text-transform: uppercase; font-size: 0.66rem; letter-spacing: 0.03em; }
+        .donut-legend-value { color: var(--text-primary); font-weight: 700; white-space: nowrap; }
+
         .kanban-column-cards {
             height: 60vh;
             overflow-y: auto;
@@ -4586,14 +4623,102 @@
             const trendBuckets = buildTrendBuckets(periodHistory, startIso, endIso);
             const daysSpan = Math.round((new Date(endIso + 'T00:00:00') - new Date(startIso + 'T00:00:00')) / 86400000) + 1;
 
+            // Período anterior de mesmo tamanho, imediatamente antes do período atual — base de comparação.
+            const prevPeriodEnd = new Date(startIso + 'T00:00:00');
+            prevPeriodEnd.setDate(prevPeriodEnd.getDate() - 1);
+            const prevPeriodStart = new Date(prevPeriodEnd);
+            prevPeriodStart.setDate(prevPeriodStart.getDate() - (daysSpan - 1));
+            const prevStartIso = toLocalISODate(prevPeriodStart);
+            const prevEndIso = toLocalISODate(prevPeriodEnd);
+
+            let prevPeriodHistory = (history || []).filter(h => h.statusChangeDate && h.statusChangeDate >= prevStartIso && h.statusChangeDate <= prevEndIso);
+            if (groupFilterId) {
+                prevPeriodHistory = prevPeriodHistory.filter(h => String(h.workGroupId) === groupFilterId);
+            }
+
+            const prevConcludedCount = prevPeriodHistory.filter(h => isStatusCompleted(h.status)).length;
+            const concludedTrend = prevConcludedCount > 0
+                ? Math.round(((concludedInPeriod - prevConcludedCount) / prevConcludedCount) * 100)
+                : (concludedInPeriod > 0 ? null : 0);
+
+            const prevConcludedWithDuration = prevPeriodHistory.filter(h => isStatusCompleted(h.status) && h.createdDate && h.statusChangeDate);
+            let avgDaysTrend = null;
+            if (prevConcludedWithDuration.length > 0 && avgDays !== null) {
+                const prevTotalDays = prevConcludedWithDuration.reduce((sum, h) => {
+                    const created = new Date(h.createdDate + 'T00:00:00');
+                    const concluded = new Date(h.statusChangeDate + 'T00:00:00');
+                    return sum + Math.max(0, Math.round((concluded - created) / 86400000));
+                }, 0);
+                const prevAvgDays = prevTotalDays / prevConcludedWithDuration.length;
+                if (prevAvgDays > 0) {
+                    avgDaysTrend = Math.round(((parseFloat(avgDays) - prevAvgDays) / prevAvgDays) * 100);
+                }
+            }
+
             return {
                 startIso, endIso, daysSpan, groupFilterId,
                 notStartedCount, urgentCount, inProgressCount, overdueCount, concludedInPeriod, avgDays,
+                concludedTrend, avgDaysTrend,
                 statusCounts, priorityCounts, groupCounts, trendBuckets,
                 maxStatus: Math.max(1, ...statusCounts.map(s => s.count)),
                 maxPriority: Math.max(1, ...priorityCounts.map(p => p.count)),
                 maxGroup: Math.max(1, ...groupCounts.map(g => g.count))
             };
+        }
+
+        // Indicador de tendência (▲/▼ X% vs período anterior). invertGood = true quando
+        // um número MENOR é a melhoria (ex: dias pra concluir — menos é melhor).
+        function getTrendHtml(trendPercent, invertGood = false) {
+            if (trendPercent === null) return '';
+            if (trendPercent === 0) {
+                return `<div class="dashboard-trend" style="color: var(--text-secondary);">— estável vs período anterior</div>`;
+            }
+            const isPositive = trendPercent > 0;
+            const isGood = invertGood ? !isPositive : isPositive;
+            const color = isGood ? 'var(--led-green)' : 'var(--led-red)';
+            const arrow = isPositive ? '▲' : '▼';
+            return `<div class="dashboard-trend" style="color: ${color};">${arrow} ${Math.abs(trendPercent)}% vs período anterior</div>`;
+        }
+
+        // Gráfico de rosca via CSS conic-gradient, com legenda — sem precisar de biblioteca externa.
+        function renderDonutChart(items, size = 140) {
+            const visible = items.filter(i => i.count > 0);
+            const total = visible.reduce((sum, i) => sum + i.count, 0);
+
+            if (total === 0) {
+                return '<div class="kanban-empty">Sem dados no período</div>';
+            }
+
+            let cumulative = 0;
+            const gradientParts = visible.map(item => {
+                const pct = (item.count / total) * 100;
+                const start = cumulative;
+                cumulative += pct;
+                return `${item.color} ${start}% ${cumulative}%`;
+            });
+
+            const legend = visible.map(item => {
+                const pct = Math.round((item.count / total) * 100);
+                return `
+                    <div class="donut-legend-item">
+                        <span class="donut-legend-dot" style="background:${item.color};"></span>
+                        <span class="donut-legend-label">${item.label}</span>
+                        <span class="donut-legend-value">${item.count} <span style="color:var(--text-secondary); font-weight:400;">(${pct}%)</span></span>
+                    </div>
+                `;
+            }).join('');
+
+            return `
+                <div class="donut-wrapper">
+                    <div class="donut-chart" style="width:${size}px; height:${size}px; background: conic-gradient(${gradientParts.join(', ')});">
+                        <div class="donut-chart-hole">
+                            <div class="donut-chart-total">${total}</div>
+                            <div class="donut-chart-total-label">total</div>
+                        </div>
+                    </div>
+                    <div class="donut-legend">${legend}</div>
+                </div>
+            `;
         }
 
         function barRow(label, count, max, color) {
@@ -4685,10 +4810,12 @@
                     <div class="stat-card" style="border-color: var(--led-green);">
                         <div class="stat-value" style="color: var(--led-green);">${d.concludedInPeriod}</div>
                         <div class="stat-label">Concluídas no Período</div>
+                        ${getTrendHtml(d.concludedTrend)}
                     </div>
                     <div class="stat-card" style="border-color: var(--led-purple);">
                         <div class="stat-value" style="color: var(--led-purple);">${d.avgDays !== null ? d.avgDays : '—'}</div>
                         <div class="stat-label">Dias p/ Concluir (méd.)</div>
+                        ${getTrendHtml(d.avgDaysTrend, true)}
                     </div>
                 </div>
                 <div style="text-align:right; font-size:0.7rem; color:var(--text-secondary); margin-top:0.5rem; text-transform:uppercase; letter-spacing:0.04em;">${rangeLabel}</div>
@@ -4700,7 +4827,7 @@
                     </div>
                     <div class="card">
                         <h3>Por Status</h3>
-                        ${d.statusCounts.map(s => barRow(s.label, s.count, d.maxStatus, s.color)).join('')}
+                        ${renderDonutChart(d.statusCounts)}
                     </div>
                 </div>
 
@@ -4776,6 +4903,17 @@
   .trend-bar-count { font-size: 0.62rem; color: var(--text-primary); margin-bottom: 0.25rem; font-weight: 700; height: 1em; }
   .trend-bar-label { font-size: 0.55rem; color: var(--text-secondary); margin-top: 0.35rem; text-transform: uppercase; }
   .kanban-empty { text-align: center; color: var(--text-secondary); font-size: 0.75rem; padding: 1rem 0; }
+  .dashboard-trend { font-size: 0.62rem; font-weight: 700; margin-top: 0.3rem; text-transform: uppercase; letter-spacing: 0.02em; }
+  .donut-wrapper { display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; }
+  .donut-chart { border-radius: 50%; flex-shrink: 0; position: relative; }
+  .donut-chart-hole { position: absolute; inset: 20%; background: var(--panel); border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-direction: column; }
+  .donut-chart-total { font-size: 1.3rem; font-weight: 800; color: var(--text-primary); }
+  .donut-chart-total-label { font-size: 0.55rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; }
+  .donut-legend { flex: 1; min-width: 140px; }
+  .donut-legend-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; margin-bottom: 0.55rem; }
+  .donut-legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .donut-legend-label { flex: 1; color: var(--text-secondary); text-transform: uppercase; font-size: 0.66rem; letter-spacing: 0.03em; }
+  .donut-legend-value { color: var(--text-primary); font-weight: 700; white-space: nowrap; }
   @media print {
     .print-btn { display: none; }
     body { background: #ffffff; color: #1f2329; padding: 0.5rem; }
@@ -4805,8 +4943,8 @@
     <div class="stat-card"><div class="stat-value" style="color:var(--led-red);">${d.overdueCount}</div><div class="stat-label">Atrasadas</div></div>
     <div class="stat-card"><div class="stat-value" style="color:var(--amber-bright);">${d.urgentCount}</div><div class="stat-label">Urgentes</div></div>
     <div class="stat-card"><div class="stat-value" style="color:var(--led-blue);">${d.inProgressCount}</div><div class="stat-label">Em Andamento</div></div>
-    <div class="stat-card"><div class="stat-value" style="color:var(--led-green);">${d.concludedInPeriod}</div><div class="stat-label">Concluídas no Período</div></div>
-    <div class="stat-card"><div class="stat-value" style="color:var(--led-purple);">${d.avgDays !== null ? d.avgDays : '—'}</div><div class="stat-label">Dias p/ Concluir</div></div>
+    <div class="stat-card"><div class="stat-value" style="color:var(--led-green);">${d.concludedInPeriod}</div><div class="stat-label">Concluídas no Período</div>${getTrendHtml(d.concludedTrend)}</div>
+    <div class="stat-card"><div class="stat-value" style="color:var(--led-purple);">${d.avgDays !== null ? d.avgDays : '—'}</div><div class="stat-label">Dias p/ Concluir</div>${getTrendHtml(d.avgDaysTrend, true)}</div>
   </div>
 
   <div class="grid-2">
@@ -4816,7 +4954,7 @@
     </div>
     <div class="card">
       <h3>Por Status</h3>
-      ${d.statusCounts.map(s => barRow(s.label, s.count, d.maxStatus, s.color)).join('')}
+      ${renderDonutChart(d.statusCounts)}
     </div>
   </div>
 
