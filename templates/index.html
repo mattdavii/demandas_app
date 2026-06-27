@@ -710,8 +710,12 @@
         .bar-track { background: var(--panel-raised); border: 1px solid var(--border); border-radius: 4px; height: 8px; overflow: hidden; }
         .bar-fill { height: 100%; border-radius: 4px; }
 
-        .trend-chart { display: flex; align-items: flex-end; gap: 0.5rem; height: 120px; padding-top: 0.5rem; }
-        .trend-bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+        .trend-chart-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        .trend-chart-scroll::-webkit-scrollbar { height: 6px; }
+        .trend-chart-scroll::-webkit-scrollbar-track { background: transparent; }
+        .trend-chart-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        .trend-chart { display: flex; align-items: flex-end; gap: 0.5rem; height: 120px; padding-top: 0.5rem; min-width: min-content; }
+        .trend-bar-wrap { flex: 0 0 auto; width: 34px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
         .trend-bar { width: 100%; max-width: 28px; background: var(--led-green); border-radius: 3px 3px 0 0; box-shadow: 0 0 6px var(--led-green); min-height: 3px; }
         .trend-bar-count { font-size: 0.68rem; color: var(--text-primary); margin-bottom: 0.3rem; font-weight: 700; height: 1em; }
         .trend-bar-label { font-size: 0.6rem; color: var(--text-secondary); margin-top: 0.4rem; text-transform: uppercase; }
@@ -4791,6 +4795,7 @@
         function renderTrendChart(buckets) {
             const maxCount = Math.max(1, ...buckets.map(b => b.count));
             return `
+                <div class="trend-chart-scroll">
                 <div class="trend-chart">
                     ${buckets.map(b => {
                         const heightPct = Math.max(4, Math.round((b.count / maxCount) * 100));
@@ -4802,6 +4807,7 @@
                             </div>
                         `;
                     }).join('')}
+                </div>
                 </div>
             `;
         }
@@ -4954,8 +4960,9 @@
   .bar-count { color: var(--text-primary); font-weight: 700; }
   .bar-track { background: var(--panel-raised); border: 1px solid var(--border); border-radius: 4px; height: 7px; overflow: hidden; }
   .bar-fill { height: 100%; border-radius: 4px; }
-  .trend-chart { display: flex; align-items: flex-end; gap: 0.4rem; height: 110px; padding-top: 0.5rem; }
-  .trend-bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+  .trend-chart-scroll { overflow-x: auto; }
+  .trend-chart { display: flex; align-items: flex-end; gap: 0.4rem; height: 110px; padding-top: 0.5rem; min-width: min-content; }
+  .trend-bar-wrap { flex: 0 0 auto; width: 30px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
   .trend-bar { width: 100%; max-width: 24px; background: var(--led-green); border-radius: 3px 3px 0 0; box-shadow: 0 0 6px var(--led-green); min-height: 3px; }
   .trend-bar-count { font-size: 0.62rem; color: var(--text-primary); margin-bottom: 0.25rem; font-weight: 700; height: 1em; }
   .trend-bar-label { font-size: 0.55rem; color: var(--text-secondary); margin-top: 0.35rem; text-transform: uppercase; }
