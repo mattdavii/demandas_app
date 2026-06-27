@@ -171,6 +171,7 @@ class DemandHistory(db.Model):
     activity = db.Column(db.String(255), nullable=False)
     context = db.Column(db.Text, nullable=True)
     status = db.Column(db.String(20), nullable=False)
+    priority = db.Column(db.String(20), nullable=True)  # snapshot da prioridade no momento da mudança (registros novos)
     status_change_date = db.Column(db.Date, nullable=False)
     created_date = db.Column(db.Date, nullable=True)
     timestamp = db.Column(db.DateTime, default=datetime.now)
@@ -180,6 +181,7 @@ class DemandHistory(db.Model):
             'id': self.id,
             'demandId': self.demand_id,
             'workGroupId': self.work_group_id,
+            'priority': self.priority,
             'location': self.location,
             'activity': self.activity,
             'context': self.context,
@@ -367,6 +369,7 @@ with app.app_context():
         db.session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS access_verified BOOLEAN DEFAULT TRUE"))
         db.session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE"))
         db.session.execute(text("ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS demand_id INTEGER"))
+        db.session.execute(text("ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS priority VARCHAR(20)"))
         db.session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS theme VARCHAR(30) DEFAULT 'bancada'"))
         db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS checklist JSON"))
         db.session.commit()
@@ -1127,6 +1130,7 @@ def update_demand_status(demand_id):
         user_id=user_id,
         work_group_id=demand.work_group_id,
         demand_id=demand.id,
+        priority=demand.priority,
         location=demand.location,
         activity=demand.activity,
         context=demand.context,
