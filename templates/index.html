@@ -1326,10 +1326,10 @@
                     <div class="form-group" style="margin-bottom:0; flex:1; min-width:160px;">
                         <label>Período</label>
                         <select id="dashboardPeriod" onchange="onDashboardPeriodChange()">
-                            <option value="7">Últimos 7 dias</option>
-                            <option value="14">Últimos 14 dias</option>
-                            <option value="30">Últimos 30 dias</option>
-                            <option value="90">Últimos 90 dias</option>
+                            <option value="day">Hoje</option>
+                            <option value="week">Esta Semana</option>
+                            <option value="month" selected>Este Mês</option>
+                            <option value="year">Este Ano</option>
                             <option value="custom">Personalizado</option>
                         </select>
                     </div>
@@ -1342,6 +1342,13 @@
                             <label>Data Fim</label>
                             <input type="date" id="dashboardEndDate" onchange="loadDashboardStats()">
                         </div>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0; flex:1; min-width:160px;">
+                        <label>Escopo</label>
+                        <select id="dashboardScope" onchange="loadDashboardStats()">
+                            <option value="open">Somente Abertas</option>
+                            <option value="all">Todas as Demandas</option>
+                        </select>
                     </div>
                     <div class="form-group" style="margin-bottom:0; flex:1; min-width:160px;">
                         <label>Grupo</label>
@@ -4529,7 +4536,9 @@
         function getDashboardFilters() {
             const periodValue = document.getElementById('dashboardPeriod').value;
             const groupFilterId = document.getElementById('dashboardGroupFilter').value;
+            const scope = document.getElementById('dashboardScope').value;
             const todayIso = toLocalISODate(new Date());
+            const now = new Date();
 
             let startIso, endIso, rangeLabel;
 
@@ -4540,16 +4549,28 @@
                     const tmp = startIso; startIso = endIso; endIso = tmp;
                 }
                 rangeLabel = `${formatDateBR(startIso)} a ${formatDateBR(endIso)}`;
-            } else {
-                const periodDays = parseInt(periodValue) || 7;
-                const start = new Date();
-                start.setDate(start.getDate() - (periodDays - 1));
+            } else if (periodValue === 'day') {
+                startIso = todayIso;
+                endIso = todayIso;
+                rangeLabel = 'Hoje';
+            } else if (periodValue === 'week') {
+                const start = new Date(now);
+                start.setDate(start.getDate() - start.getDay()); // domingo desta semana
                 startIso = toLocalISODate(start);
                 endIso = todayIso;
-                rangeLabel = `Últimos ${periodDays} dias`;
+                rangeLabel = 'Esta Semana';
+            } else if (periodValue === 'year') {
+                startIso = `${now.getFullYear()}-01-01`;
+                endIso = todayIso;
+                rangeLabel = 'Este Ano';
+            } else {
+                // 'month' (padrão)
+                startIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+                endIso = todayIso;
+                rangeLabel = 'Este Mês';
             }
 
-            return { startIso, endIso, rangeLabel, groupFilterId };
+            return { startIso, endIso, rangeLabel, groupFilterId, scope };
         }
 
         async function loadDashboardStats() {
@@ -4572,7 +4593,7 @@
 
         // Calcula todos os números/gráficos do dashboard a partir do histórico e dos filtros atuais.
         // Usado tanto pela tela viva quanto pelo exportador de HTML (mesma fonte de verdade).
-        function computeDashboardData(history, startIso, endIso, groupFilterId) {
+        function computeDashboardData(history, startIso, endIso, groupFilterId, scope) {
             const filteredDemands = groupFilterId
                 ? currentDemands.filter(d => String(d.workGroupId) === groupFilterId)
                 : currentDemands;
@@ -4601,23 +4622,46 @@
                 avgDays = (totalDays / concludedWithDuration.length).toFixed(1);
             }
 
-            const statusOrder = STATUS_COLUMNS;
-            const statusCounts = statusOrder.map(s => ({
+            // Conjunto usado nos gráficos de composição (Por Status/Prioridade/Grupo).
+            // "Somente Abertas": só o que está ativo agora. "Todas": ativas + o que foi concluído
+            // dentro do período (pelo estado em que cada demanda estava ao ser concluída).
+            let compositionSet = filteredDemands;
+            let statusCategoriesForChart = STATUS_COLUMNS;
+
+            if (scope === 'all') {
+                const concludedGrouped = groupHistoryItemsByDemand(periodHistory.filter(h => isStatusCompleted(h.status)));
+                const concludedAsDemands = concludedGrouped.map(entries => {
+                    const last = entries[entries.length - 1];
+                    return { workGroupId: last.workGroupId, status: last.status, priority: last.priority || null };
+                });
+                compositionSet = [...filteredDemands, ...concludedAsDemands];
+
+                const completedKeysPresent = [...new Set(concludedAsDemands.map(d => d.status))];
+                const completedCategories = completedKeysPresent.map(key => {
+                    const config = currentStatusConfigs.find(s => s.key === key);
+                    return config
+                        ? { key: config.key, label: config.label, color: config.color }
+                        : { key, label: getStatusLabel(key), color: getStatusColor(key) };
+                });
+                statusCategoriesForChart = [...STATUS_COLUMNS, ...completedCategories];
+            }
+
+            const statusCounts = statusCategoriesForChart.map(s => ({
                 label: s.label, color: s.color,
-                count: filteredDemands.filter(d => d.status === s.key).length
+                count: compositionSet.filter(d => d.status === s.key).length
             }));
 
             const priorityOrder = [...currentPriorityConfigs].sort((a, b) => b.order - a.order);
             const priorityCounts = priorityOrder.map(p => ({
                 label: p.label, color: p.color,
-                count: filteredDemands.filter(d => d.priority === p.key).length
+                count: compositionSet.filter(d => d.priority === p.key).length
             }));
 
             const groupsToShow = groupFilterId ? currentGroups.filter(g => String(g.id) === groupFilterId) : currentGroups;
             const groupCounts = groupsToShow.map(g => ({
                 label: escapeHtml(`${g.emoji || ''} ${g.name}`.trim()),
                 color: g.color || '#f5a623',
-                count: currentDemands.filter(d => d.workGroupId === g.id).length
+                count: compositionSet.filter(d => d.workGroupId === g.id).length
             })).filter(g => g.count > 0);
 
             const trendBuckets = buildTrendBuckets(periodHistory, startIso, endIso);
@@ -4785,8 +4829,8 @@
 
         function renderDashboard(history) {
             const container = document.getElementById('dashboardContent');
-            const { startIso, endIso, rangeLabel, groupFilterId } = getDashboardFilters();
-            const d = computeDashboardData(history, startIso, endIso, groupFilterId);
+            const { startIso, endIso, rangeLabel, groupFilterId, scope } = getDashboardFilters();
+            const d = computeDashboardData(history, startIso, endIso, groupFilterId, scope);
             const trendLabel = d.daysSpan <= 30 ? 'por Dia' : 'por Semana';
 
             container.innerHTML = `
@@ -4818,7 +4862,7 @@
                         ${getTrendHtml(d.avgDaysTrend, true)}
                     </div>
                 </div>
-                <div style="text-align:right; font-size:0.7rem; color:var(--text-secondary); margin-top:0.5rem; text-transform:uppercase; letter-spacing:0.04em;">${rangeLabel}</div>
+                <div style="text-align:right; font-size:0.7rem; color:var(--text-secondary); margin-top:0.5rem; text-transform:uppercase; letter-spacing:0.04em;">${rangeLabel} · ${scope === 'all' ? 'Todas as Demandas' : 'Somente Abertas'}</div>
 
                 <div class="grid" style="margin-top: 1.5rem;">
                     <div class="card">
@@ -4855,8 +4899,8 @@
                 console.error('Erro ao buscar histórico para o dashboard exportado:', e);
             }
 
-            const { startIso, endIso, rangeLabel, groupFilterId } = getDashboardFilters();
-            const d = computeDashboardData(history, startIso, endIso, groupFilterId);
+            const { startIso, endIso, rangeLabel, groupFilterId, scope } = getDashboardFilters();
+            const d = computeDashboardData(history, startIso, endIso, groupFilterId, scope);
             const trendLabel = d.daysSpan <= 30 ? 'por Dia' : 'por Semana';
             const selectedGroup = groupFilterId ? currentGroups.find(g => String(g.id) === groupFilterId) : null;
             const groupLabel = selectedGroup ? selectedGroup.name : 'Todos os grupos';
@@ -4933,7 +4977,7 @@
   <div class="report-header">
     <div>
       <h1>📊 Dashboard de Demandas</h1>
-      <div class="meta">Gerado em ${generatedAt} · Período: ${rangeLabel} · Grupo: ${escapeHtml(groupLabel)}</div>
+      <div class="meta">Gerado em ${generatedAt} · Período: ${rangeLabel} · Escopo: ${scope === 'all' ? 'Todas as Demandas' : 'Somente Abertas'} · Grupo: ${escapeHtml(groupLabel)}</div>
     </div>
     <button class="print-btn" onclick="window.print()">🖨️ Imprimir</button>
   </div>
