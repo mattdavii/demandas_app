@@ -3214,7 +3214,8 @@
                 }, 2);
 
                 if (response.ok) {
-                    loadDemands();
+                    closeDemandDetailModal();
+                    await loadDemands();
                 } else {
                     const data = await response.json().catch(() => ({}));
                     alert(data.error || 'Erro ao concluir demanda');
@@ -3230,6 +3231,7 @@
                 }
                 localStorage.setItem('cache_demands', JSON.stringify(currentDemands));
                 renderDemands();
+                closeDemandDetailModal();
 
                 addToSyncQueue({ type: 'complete', payload: { id } });
 
