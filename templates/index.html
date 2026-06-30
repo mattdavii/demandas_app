@@ -296,12 +296,15 @@
         .sidebar.collapsed .workspace-logo-img { display: none !important; }
         .sidebar-credit {
             text-align: center;
-            font-size: 0.6rem;
-            color: var(--text-secondary);
-            opacity: 0.6;
-            padding: 0.6rem 0.5rem 0.2rem;
+            font-size: 0.65rem;
+            color: var(--amber-dim);
+            opacity: 0.85;
+            padding: 0.5rem 0.75rem 0.4rem;
             text-transform: uppercase;
-            letter-spacing: 0.02em;
+            letter-spacing: 0.04em;
+            font-weight: 600;
+            border-top: 1px solid var(--border);
+            margin-top: 0.25rem;
         }
         .sidebar.collapsed .sidebar-credit { display: none; }
         .sidebar-logo {
@@ -2549,7 +2552,11 @@
 
         function filterByViewScope(items) {
             if (viewScope !== 'mine' || !currentUser) return items;
-            return items.filter(item => item.assignedToUserId === currentUser.id);
+            // Filtra demandas atribuídas ao usuário OU criadas por ele (user_id).
+            // Usa == em vez de === porque o id pode vir como número ou string dependendo do contexto.
+            return items.filter(item =>
+                (item.assignedToUserId != null && item.assignedToUserId == currentUser.id)
+            );
         }
 
         async function loadWorkspaceInfo() {
@@ -5340,8 +5347,15 @@
             const { startIso, endIso, rangeLabel, groupFilterId, scope } = getDashboardFilters();
             const d = computeDashboardData(history, startIso, endIso, groupFilterId, scope);
             const trendLabel = d.daysSpan <= 30 ? 'por Dia' : 'por Semana';
+            const isMineEmpty = viewScope === 'mine' && d.notStartedCount === 0 && d.urgentCount === 0 && d.inProgressCount === 0 && d.overdueCount === 0;
+            const mineEmptyBanner = isMineEmpty ? `
+                <div style="text-align:center; padding:1rem; color:var(--text-secondary); font-size:0.82rem; margin-bottom:1rem;">
+                    📭 Você ainda não tem demandas atribuídas.
+                    <span style="color:var(--amber-bright); cursor:pointer; text-decoration:underline;" onclick="setViewScope('team', loadDashboardStats)">Ver o time todo</span>
+                </div>` : '';
 
             container.innerHTML = `
+                ${mineEmptyBanner}
                 <div class="stat-grid">
                     <div class="stat-card">
                         <div class="stat-value">${d.notStartedCount}</div>
@@ -5370,7 +5384,7 @@
                         ${getTrendHtml(d.avgDaysTrend, true)}
                     </div>
                 </div>
-                <div style="text-align:right; font-size:0.7rem; color:var(--text-secondary); margin-top:0.5rem; text-transform:uppercase; letter-spacing:0.04em;">${rangeLabel} · ${scope === 'all' ? 'Todas as Demandas' : 'Somente Abertas'}</div>
+                <div style="text-align:right; font-size:0.7rem; color:var(--text-secondary); margin-top:0.5rem; text-transform:uppercase; letter-spacing:0.04em;">${rangeLabel} · ${viewScope === 'mine' ? '👤 Minhas' : '👥 Time Todo'} · ${scope === 'all' ? 'Todas' : 'Abertas'}</div>
 
                 <div class="grid" style="margin-top: 1.5rem;">
                     <div class="card">
