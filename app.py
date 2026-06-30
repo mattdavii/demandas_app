@@ -95,11 +95,92 @@ class User(db.Model):
             'theme': self.theme or 'bancada'
         }
 
+class Workspace(db.Model):
+    """Espaço de dados compartilhado. Toda demanda/grupo/status/etc pertence a um
+    workspace, não diretamente a uma conta — isso é o que permite várias pessoas
+    trabalharem nos mesmos dados (time), mantendo conta de uso individual sozinho
+    (workspace com um único membro) funcionando exatamente como hoje."""
+    __tablename__ = 'workspaces'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    logo_url = db.Column(db.String(500), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'logoUrl': self.logo_url,
+            'createdAt': self.created_at.isoformat() if self.created_at else None
+        }
+
+class WorkspaceMember(db.Model):
+    """Vínculo entre uma conta e um workspace, com papel de permissão e cargo
+    (cargo é só rótulo descritivo, não afeta permissão — quem decide isso é role)."""
+    __tablename__ = 'workspace_members'
+
+    id = db.Column(db.Integer, primary_key=True)
+    workspace_id = db.Column(db.Integer, db.ForeignKey('workspaces.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    role = db.Column(db.String(20), nullable=False, default='member')  # 'admin' | 'member'
+    cargo = db.Column(db.String(100), nullable=True)
+    joined_at = db.Column(db.DateTime, default=datetime.now)
+
+    __table_args__ = (db.UniqueConstraint('workspace_id', 'user_id', name='unique_workspace_user'),)
+
+    def to_dict(self):
+        user = User.query.get(self.user_id)
+        return {
+            'id': self.id,
+            'workspaceId': self.workspace_id,
+            'userId': self.user_id,
+            'username': user.username if user else None,
+            'fullName': user.full_name if user else None,
+            'email': user.email if user else None,
+            'role': self.role,
+            'cargo': self.cargo,
+            'joinedAt': self.joined_at.isoformat() if self.joined_at else None
+        }
+
+def get_user_workspace_id(user_id):
+    """Resolve o workspace de uma conta. Hoje cada conta pertence a exatamente um
+    workspace (o próprio, ou aquele pra que foi convidada) — não há troca de
+    workspace ainda, então sempre pega o primeiro vínculo encontrado."""
+    membership = WorkspaceMember.query.filter_by(user_id=user_id).first()
+    return membership.workspace_id if membership else None
+
+def get_user_workspace_role(user_id, workspace_id=None):
+    """Retorna 'admin' ou 'member' da conta dentro do workspace informado
+    (ou do workspace dela, se nenhum for passado). None se não for membro."""
+    query = WorkspaceMember.query.filter_by(user_id=user_id)
+    if workspace_id is not None:
+        query = query.filter_by(workspace_id=workspace_id)
+    membership = query.first()
+    return membership.role if membership else None
+
+def is_workspace_admin(user_id, workspace_id=None):
+    return get_user_workspace_role(user_id, workspace_id) == 'admin'
+
+def create_personal_workspace(user):
+    """Cria um workspace próprio pra uma conta nova e a torna admin dele.
+    É o que acontece quando alguém usa uma chave PESSOAL (não convite de time)."""
+    workspace_name = user.full_name or user.username
+    workspace = Workspace(name=f"Espaço de {workspace_name}")
+    db.session.add(workspace)
+    db.session.flush()  # garante que workspace.id já existe antes do membro referenciar
+
+    member = WorkspaceMember(workspace_id=workspace.id, user_id=user.id, role='admin')
+    db.session.add(member)
+    db.session.commit()
+    return workspace
+
 class WorkGroup(db.Model):
     __tablename__ = 'work_groups'
     
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    workspace_id = db.Column(db.Integer, db.ForeignKey('workspaces.id'), nullable=True)
     name = db.Column(db.String(100), nullable=False)
     emoji = db.Column(db.String(10), nullable=True)
     color = db.Column(db.String(7), default='#3b82f6')
@@ -111,9 +192,11 @@ class WorkGroup(db.Model):
     # Relacionamento
     demands = db.relationship('Demand', backref='work_group', lazy=True)
     
-    __table_args__ = (db.UniqueConstraint('user_id', 'name', name='unique_user_group_name'),)
+    __table_args__ = (db.UniqueConstraint('workspace_id', 'name', name='unique_workspace_group_name'),)
     
     def to_dict(self):
+        completed_keys = {s.key for s in StatusConfig.query.filter_by(workspace_id=self.workspace_id, is_completed=True).all()}
+        active_demands = [d for d in self.demands if d.status not in completed_keys]
         return {
             'id': self.id,
             'name': self.name,
@@ -121,7 +204,7 @@ class WorkGroup(db.Model):
             'color': self.color,
             'description': self.description,
             'order': self.order,
-            'demandsCount': len([d for d in self.demands if d.status != 'concluido'])
+            'demandsCount': len(active_demands)
         }
 
 class Demand(db.Model):
@@ -129,6 +212,7 @@ class Demand(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    workspace_id = db.Column(db.Integer, db.ForeignKey('workspaces.id'), nullable=True)
     work_group_id = db.Column(db.Integer, db.ForeignKey('work_groups.id'), nullable=False)
     location = db.Column(db.String(100), nullable=False)
     activity = db.Column(db.String(255), nullable=False)
@@ -165,6 +249,7 @@ class DemandHistory(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    workspace_id = db.Column(db.Integer, db.ForeignKey('workspaces.id'), nullable=True)
     work_group_id = db.Column(db.Integer, db.ForeignKey('work_groups.id'), nullable=True)
     demand_id = db.Column(db.Integer, nullable=True)  # vínculo real com a demanda de origem (registros novos)
     location = db.Column(db.String(100), nullable=False)
@@ -216,6 +301,8 @@ class AccessKey(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     key_value = db.Column(db.String(64), unique=True, nullable=False)
+    key_type = db.Column(db.String(20), nullable=False, default='personal')  # 'personal' | 'team_invite'
+    workspace_id = db.Column(db.Integer, db.ForeignKey('workspaces.id'), nullable=True)  # só usado em 'team_invite'
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
     used_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
@@ -233,6 +320,8 @@ class AccessKey(db.Model):
         return {
             'id': self.id,
             'key': self.key_value,
+            'type': self.key_type,
+            'workspaceId': self.workspace_id,
             'createdAt': self.created_at.isoformat() if self.created_at else None,
             'usedBy': used_by_user.username if used_by_user else None,
             'usedAt': self.used_at.isoformat() if self.used_at else None,
@@ -240,11 +329,12 @@ class AccessKey(db.Model):
         }
 
 class StatusConfig(db.Model):
-    """Status de demanda configurável por usuário (substitui o conjunto fixo antigo)."""
+    """Status de demanda configurável por workspace (compartilhado entre os membros)."""
     __tablename__ = 'status_configs'
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    workspace_id = db.Column(db.Integer, db.ForeignKey('workspaces.id'), nullable=True)
     key = db.Column(db.String(50), nullable=False)
     label = db.Column(db.String(100), nullable=False)
     color = db.Column(db.String(7), nullable=False, default='#9aa0a7')
@@ -252,7 +342,7 @@ class StatusConfig(db.Model):
     order = db.Column(db.Integer, default=0)
     is_completed = db.Column(db.Boolean, default=False)
 
-    __table_args__ = (db.UniqueConstraint('user_id', 'key', name='unique_user_status_key'),)
+    __table_args__ = (db.UniqueConstraint('workspace_id', 'key', name='unique_workspace_status_key'),)
 
     def to_dict(self):
         return {
@@ -266,17 +356,18 @@ class StatusConfig(db.Model):
         }
 
 class PriorityConfig(db.Model):
-    """Prioridade de demanda configurável por usuário."""
+    """Prioridade de demanda configurável por workspace (compartilhada entre os membros)."""
     __tablename__ = 'priority_configs'
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    workspace_id = db.Column(db.Integer, db.ForeignKey('workspaces.id'), nullable=True)
     key = db.Column(db.String(50), nullable=False)
     label = db.Column(db.String(100), nullable=False)
     color = db.Column(db.String(7), nullable=False, default='#9aa0a7')
     order = db.Column(db.Integer, default=0)
 
-    __table_args__ = (db.UniqueConstraint('user_id', 'key', name='unique_user_priority_key'),)
+    __table_args__ = (db.UniqueConstraint('workspace_id', 'key', name='unique_workspace_priority_key'),)
 
     def to_dict(self):
         return {
@@ -332,9 +423,11 @@ def send_push_notification(user_id, title, body, url='/'):
         except Exception as e:
             print(f"Erro inesperado ao enviar push pro usuário {user_id}: {e}")
 
-def seed_default_status_and_priority(user_id):
-    """Cria o conjunto padrão de status/prioridade pra uma conta (nova ou já existente sem nenhum configurado)."""
-    if StatusConfig.query.filter_by(user_id=user_id).first() is None:
+def seed_default_status_and_priority(user_id, workspace_id):
+    """Cria o conjunto padrão de status/prioridade pra um workspace (novo ou já
+    existente sem nenhum configurado). user_id aqui é só quem fica registrado
+    como criador do registro — o que importa pra escopo é workspace_id."""
+    if StatusConfig.query.filter_by(workspace_id=workspace_id).first() is None:
         defaults = [
             {'key': 'agendado', 'label': 'Agendado', 'color': '#ff9f43', 'emoji': '🟠', 'order': 0, 'is_completed': False},
             {'key': 'nao-iniciado', 'label': 'Não Iniciado', 'color': '#9aa0a7', 'emoji': '⚪', 'order': 1, 'is_completed': False},
@@ -344,9 +437,9 @@ def seed_default_status_and_priority(user_id):
             {'key': 'concluido', 'label': 'Concluído', 'color': '#3ddc84', 'emoji': '🟢', 'order': 5, 'is_completed': True},
         ]
         for d in defaults:
-            db.session.add(StatusConfig(user_id=user_id, **d))
+            db.session.add(StatusConfig(user_id=user_id, workspace_id=workspace_id, **d))
 
-    if PriorityConfig.query.filter_by(user_id=user_id).first() is None:
+    if PriorityConfig.query.filter_by(workspace_id=workspace_id).first() is None:
         defaults = [
             {'key': 'baixa', 'label': 'Baixa', 'color': '#5b6168', 'order': 0},
             {'key': 'media', 'label': 'Média', 'color': '#4fc3f7', 'order': 1},
@@ -354,7 +447,7 @@ def seed_default_status_and_priority(user_id):
             {'key': 'urgente', 'label': 'Urgente', 'color': '#ff5b5b', 'order': 3},
         ]
         for d in defaults:
-            db.session.add(PriorityConfig(user_id=user_id, **d))
+            db.session.add(PriorityConfig(user_id=user_id, workspace_id=workspace_id, **d))
 
     db.session.commit()
 
@@ -372,6 +465,14 @@ with app.app_context():
         db.session.execute(text("ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS priority VARCHAR(20)"))
         db.session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS theme VARCHAR(30) DEFAULT 'bancada'"))
         db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS checklist JSON"))
+        # Colunas de workspace (feature de Time) em tabelas que já existiam antes dela
+        db.session.execute(text("ALTER TABLE work_groups ADD COLUMN IF NOT EXISTS workspace_id INTEGER"))
+        db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS workspace_id INTEGER"))
+        db.session.execute(text("ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS workspace_id INTEGER"))
+        db.session.execute(text("ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS workspace_id INTEGER"))
+        db.session.execute(text("ALTER TABLE priority_configs ADD COLUMN IF NOT EXISTS workspace_id INTEGER"))
+        db.session.execute(text("ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS key_type VARCHAR(20) DEFAULT 'personal'"))
+        db.session.execute(text("ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS workspace_id INTEGER"))
         db.session.commit()
     except Exception as e:
         db.session.rollback()
@@ -390,14 +491,29 @@ with app.app_context():
         db.session.rollback()
         print(f"Aviso: não foi possível definir admin automático: {e}")
 
-    # Garante que toda conta já existente (criada antes desta atualização) tenha
-    # o conjunto padrão de status/prioridade, já que esses dados não existiam antes
+    # Feature de Time: garante que toda conta já existente (criada antes dessa atualização)
+    # tenha um workspace próprio, virando admin dele, e que todos os dados que ela já tinha
+    # (grupos, demandas, histórico, status, prioridades) passem a apontar pra esse workspace.
+    # Isso é o que torna essa mudança invisível pra quem já usa a plataforma — nada muda na
+    # prática, só passa a existir um "espaço" formal por trás do que já era dela.
     try:
         for existing_user in User.query.all():
-            seed_default_status_and_priority(existing_user.id)
+            workspace_id = get_user_workspace_id(existing_user.id)
+            if workspace_id is None:
+                workspace = create_personal_workspace(existing_user)
+                workspace_id = workspace.id
+
+            WorkGroup.query.filter_by(user_id=existing_user.id, workspace_id=None).update({'workspace_id': workspace_id})
+            Demand.query.filter_by(user_id=existing_user.id, workspace_id=None).update({'workspace_id': workspace_id})
+            DemandHistory.query.filter_by(user_id=existing_user.id, workspace_id=None).update({'workspace_id': workspace_id})
+            StatusConfig.query.filter_by(user_id=existing_user.id, workspace_id=None).update({'workspace_id': workspace_id})
+            PriorityConfig.query.filter_by(user_id=existing_user.id, workspace_id=None).update({'workspace_id': workspace_id})
+            db.session.commit()
+
+            seed_default_status_and_priority(existing_user.id, workspace_id)
     except Exception as e:
         db.session.rollback()
-        print(f"Aviso: não foi possível popular status/prioridade padrão: {e}")
+        print(f"Aviso: não foi possível concluir a migração de workspaces: {e}")
 
 # ============= ROTAS DE PÁGINA =============
 @app.route('/')
@@ -451,24 +567,9 @@ def register():
     db.session.add(user)
     db.session.commit()
 
-    seed_default_status_and_priority(user.id)
-    
-    # Criar grupos padrão
-    default_groups = [
-        {'name': 'BACKOFFICE', 'emoji': '👨🏻‍💻', 'order': 1},
-        {'name': 'ATENDIMENTOS', 'emoji': '👨🏼‍🔧', 'order': 2}
-    ]
-    
-    for group_data in default_groups:
-        group = WorkGroup(
-            user_id=user.id,
-            name=group_data['name'],
-            emoji=group_data['emoji'],
-            order=group_data['order']
-        )
-        db.session.add(group)
-
-    db.session.commit()
+    # Status, prioridades e grupos padrão só são criados quando o workspace da conta
+    # é determinado (ao validar a chave de acesso) — uma conta recém-registrada ainda
+    # não pertence a nenhum workspace, então não há onde anexar esses dados ainda.
     
     access_token = create_access_token(identity=str(user.id))
 
@@ -650,6 +751,31 @@ def verify_access_key():
     user.access_verified = True
     db.session.commit()
 
+    if access_key.key_type == 'team_invite':
+        # Entra como membro comum de um workspace que já existe — não recria nada,
+        # já que o time já tem seus próprios grupos/status/prioridades configurados.
+        db.session.add(WorkspaceMember(workspace_id=access_key.workspace_id, user_id=user.id, role='member'))
+        db.session.commit()
+    else:
+        # Chave pessoal: cria um workspace novo e independente, com o conjunto
+        # padrão de status/prioridade e os grupos iniciais, como sempre foi.
+        workspace = create_personal_workspace(user)
+        seed_default_status_and_priority(user.id, workspace.id)
+
+        default_groups = [
+            {'name': 'BACKOFFICE', 'emoji': '👨🏻‍💻', 'order': 1},
+            {'name': 'ATENDIMENTOS', 'emoji': '👨🏼‍🔧', 'order': 2}
+        ]
+        for group_data in default_groups:
+            db.session.add(WorkGroup(
+                user_id=user.id,
+                workspace_id=workspace.id,
+                name=group_data['name'],
+                emoji=group_data['emoji'],
+                order=group_data['order']
+            ))
+        db.session.commit()
+
     if app.config['MAIL_USERNAME']:
         try:
             frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5000')
@@ -749,26 +875,29 @@ def change_password():
 @jwt_required()
 def get_status_configs():
     user_id = int(get_jwt_identity())
-    seed_default_status_and_priority(user_id)  # garante que sempre haja pelo menos o padrão
-    configs = StatusConfig.query.filter_by(user_id=user_id).order_by(StatusConfig.order.asc()).all()
+    workspace_id = get_user_workspace_id(user_id)
+    seed_default_status_and_priority(user_id, workspace_id)  # garante que sempre haja pelo menos o padrão
+    configs = StatusConfig.query.filter_by(workspace_id=workspace_id).order_by(StatusConfig.order.asc()).all()
     return jsonify([c.to_dict() for c in configs]), 200
 
 @app.route('/api/status-configs', methods=['POST'])
 @jwt_required()
 def create_status_config():
     user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
     data = request.get_json()
 
     if not data or not data.get('key') or not data.get('label'):
         return jsonify({'error': 'Chave e nome são obrigatórios'}), 400
 
-    if StatusConfig.query.filter_by(user_id=user_id, key=data['key']).first():
+    if StatusConfig.query.filter_by(workspace_id=workspace_id, key=data['key']).first():
         return jsonify({'error': 'Já existe um status com essa chave'}), 409
 
-    max_order = db.session.query(db.func.max(StatusConfig.order)).filter_by(user_id=user_id).scalar() or 0
+    max_order = db.session.query(db.func.max(StatusConfig.order)).filter_by(workspace_id=workspace_id).scalar() or 0
 
     config = StatusConfig(
         user_id=user_id,
+        workspace_id=workspace_id,
         key=data['key'],
         label=data['label'],
         color=data.get('color', '#9aa0a7'),
@@ -785,9 +914,10 @@ def create_status_config():
 @jwt_required()
 def update_status_config(config_id):
     user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
     config = StatusConfig.query.get_or_404(config_id)
 
-    if config.user_id != user_id:
+    if config.workspace_id != workspace_id:
         return jsonify({'error': 'Acesso negado'}), 403
 
     data = request.get_json()
@@ -804,7 +934,7 @@ def update_status_config(config_id):
         # impede remover o último status marcado como conclusivo, senão "Concluir" para de funcionar
         if not data['isCompleted']:
             other_completed = StatusConfig.query.filter(
-                StatusConfig.user_id == user_id,
+                StatusConfig.workspace_id == workspace_id,
                 StatusConfig.is_completed == True,
                 StatusConfig.id != config.id
             ).first()
@@ -819,21 +949,22 @@ def update_status_config(config_id):
 @jwt_required()
 def delete_status_config(config_id):
     user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
     config = StatusConfig.query.get_or_404(config_id)
 
-    if config.user_id != user_id:
+    if config.workspace_id != workspace_id:
         return jsonify({'error': 'Acesso negado'}), 403
 
-    if StatusConfig.query.filter_by(user_id=user_id).count() <= 1:
+    if StatusConfig.query.filter_by(workspace_id=workspace_id).count() <= 1:
         return jsonify({'error': 'Não é possível remover o último status restante'}), 400
 
-    in_use = Demand.query.filter_by(user_id=user_id, status=config.key).first()
+    in_use = Demand.query.filter_by(workspace_id=workspace_id, status=config.key).first()
     if in_use:
         return jsonify({'error': 'Existem demandas usando esse status. Mude o status delas antes de remover.'}), 400
 
     if config.is_completed:
         other_completed = StatusConfig.query.filter(
-            StatusConfig.user_id == user_id,
+            StatusConfig.workspace_id == workspace_id,
             StatusConfig.is_completed == True,
             StatusConfig.id != config.id
         ).first()
@@ -850,26 +981,29 @@ def delete_status_config(config_id):
 @jwt_required()
 def get_priority_configs():
     user_id = int(get_jwt_identity())
-    seed_default_status_and_priority(user_id)
-    configs = PriorityConfig.query.filter_by(user_id=user_id).order_by(PriorityConfig.order.asc()).all()
+    workspace_id = get_user_workspace_id(user_id)
+    seed_default_status_and_priority(user_id, workspace_id)
+    configs = PriorityConfig.query.filter_by(workspace_id=workspace_id).order_by(PriorityConfig.order.asc()).all()
     return jsonify([c.to_dict() for c in configs]), 200
 
 @app.route('/api/priority-configs', methods=['POST'])
 @jwt_required()
 def create_priority_config():
     user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
     data = request.get_json()
 
     if not data or not data.get('key') or not data.get('label'):
         return jsonify({'error': 'Chave e nome são obrigatórios'}), 400
 
-    if PriorityConfig.query.filter_by(user_id=user_id, key=data['key']).first():
+    if PriorityConfig.query.filter_by(workspace_id=workspace_id, key=data['key']).first():
         return jsonify({'error': 'Já existe uma prioridade com essa chave'}), 409
 
-    max_order = db.session.query(db.func.max(PriorityConfig.order)).filter_by(user_id=user_id).scalar() or 0
+    max_order = db.session.query(db.func.max(PriorityConfig.order)).filter_by(workspace_id=workspace_id).scalar() or 0
 
     config = PriorityConfig(
         user_id=user_id,
+        workspace_id=workspace_id,
         key=data['key'],
         label=data['label'],
         color=data.get('color', '#9aa0a7'),
@@ -884,9 +1018,10 @@ def create_priority_config():
 @jwt_required()
 def update_priority_config(config_id):
     user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
     config = PriorityConfig.query.get_or_404(config_id)
 
-    if config.user_id != user_id:
+    if config.workspace_id != workspace_id:
         return jsonify({'error': 'Acesso negado'}), 403
 
     data = request.get_json()
@@ -905,15 +1040,16 @@ def update_priority_config(config_id):
 @jwt_required()
 def delete_priority_config(config_id):
     user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
     config = PriorityConfig.query.get_or_404(config_id)
 
-    if config.user_id != user_id:
+    if config.workspace_id != workspace_id:
         return jsonify({'error': 'Acesso negado'}), 403
 
-    if PriorityConfig.query.filter_by(user_id=user_id).count() <= 1:
+    if PriorityConfig.query.filter_by(workspace_id=workspace_id).count() <= 1:
         return jsonify({'error': 'Não é possível remover a última prioridade restante'}), 400
 
-    in_use = Demand.query.filter_by(user_id=user_id, priority=config.key).first()
+    in_use = Demand.query.filter_by(workspace_id=workspace_id, priority=config.key).first()
     if in_use:
         return jsonify({'error': 'Existem demandas usando essa prioridade. Mude a prioridade delas antes de remover.'}), 400
 
@@ -926,9 +1062,10 @@ def delete_priority_config(config_id):
 @app.route('/api/work-groups', methods=['GET'])
 @jwt_required()
 def get_work_groups():
-    """Listar grupos de trabalho do usuário"""
+    """Listar grupos de trabalho do workspace"""
     user_id = int(get_jwt_identity())
-    groups = WorkGroup.query.filter_by(user_id=user_id, is_active=True).order_by(WorkGroup.order).all()
+    workspace_id = get_user_workspace_id(user_id)
+    groups = WorkGroup.query.filter_by(workspace_id=workspace_id, is_active=True).order_by(WorkGroup.order).all()
     return jsonify([g.to_dict() for g in groups]), 200
 
 @app.route('/api/work-groups', methods=['POST'])
@@ -936,6 +1073,7 @@ def get_work_groups():
 def create_work_group():
     """Criar novo grupo de trabalho"""
     user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
     data = request.get_json()
     
     if not data or not data.get('name'):
@@ -943,6 +1081,7 @@ def create_work_group():
     
     group = WorkGroup(
         user_id=user_id,
+        workspace_id=workspace_id,
         name=data['name'],
         emoji=data.get('emoji', '📌'),
         color=data.get('color', '#3b82f6'),
@@ -960,9 +1099,10 @@ def create_work_group():
 def update_work_group(group_id):
     """Atualizar grupo de trabalho"""
     user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
     group = WorkGroup.query.get_or_404(group_id)
     
-    if group.user_id != user_id:
+    if group.workspace_id != workspace_id:
         return jsonify({'error': 'Acesso negado'}), 403
     
     data = request.get_json()
@@ -986,9 +1126,10 @@ def update_work_group(group_id):
 def delete_work_group(group_id):
     """Deletar grupo de trabalho"""
     user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
     group = WorkGroup.query.get_or_404(group_id)
     
-    if group.user_id != user_id:
+    if group.workspace_id != workspace_id:
         return jsonify({'error': 'Acesso negado'}), 403
     
     group.is_active = False
@@ -1000,10 +1141,11 @@ def delete_work_group(group_id):
 @app.route('/api/demands', methods=['GET'])
 @jwt_required()
 def get_demands():
-    """Listar demandas pendentes do usuário"""
+    """Listar demandas pendentes do workspace"""
     user_id = int(get_jwt_identity())
-    terminal_keys = [s.key for s in StatusConfig.query.filter_by(user_id=user_id, is_completed=True).all()]
-    query = Demand.query.filter(Demand.user_id == user_id)
+    workspace_id = get_user_workspace_id(user_id)
+    terminal_keys = [s.key for s in StatusConfig.query.filter_by(workspace_id=workspace_id, is_completed=True).all()]
+    query = Demand.query.filter(Demand.workspace_id == workspace_id)
     if terminal_keys:
         query = query.filter(~Demand.status.in_(terminal_keys))
     demands = query.all()
@@ -1014,31 +1156,33 @@ def get_demands():
 def create_demand():
     """Criar nova demanda"""
     user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
     data = request.get_json()
     
     if not data or not data.get('work_group_id') or not data.get('location') or not data.get('activity'):
         return jsonify({'error': 'Dados incompletos'}), 400
     
     group = WorkGroup.query.get(data['work_group_id'])
-    if not group or group.user_id != user_id:
+    if not group or group.workspace_id != workspace_id:
         return jsonify({'error': 'Grupo inválido'}), 403
 
     default_status = data.get('status')
     if not default_status:
-        first_status = StatusConfig.query.filter_by(user_id=user_id, is_completed=False).order_by(StatusConfig.order.asc()).first()
+        first_status = StatusConfig.query.filter_by(workspace_id=workspace_id, is_completed=False).order_by(StatusConfig.order.asc()).first()
         default_status = first_status.key if first_status else 'nao-iniciado'
 
     default_priority = data.get('priority')
     if not default_priority:
-        media_priority = PriorityConfig.query.filter_by(user_id=user_id, key='media').first()
+        media_priority = PriorityConfig.query.filter_by(workspace_id=workspace_id, key='media').first()
         if media_priority:
             default_priority = media_priority.key
         else:
-            any_priority = PriorityConfig.query.filter_by(user_id=user_id).order_by(PriorityConfig.order.asc()).first()
+            any_priority = PriorityConfig.query.filter_by(workspace_id=workspace_id).order_by(PriorityConfig.order.asc()).first()
             default_priority = any_priority.key if any_priority else 'media'
 
     demand = Demand(
         user_id=user_id,
+        workspace_id=workspace_id,
         work_group_id=data['work_group_id'],
         location=data['location'],
         activity=data['activity'],
@@ -1061,9 +1205,10 @@ def create_demand():
 def update_demand(demand_id):
     """Atualizar demanda"""
     user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
     demand = Demand.query.get_or_404(demand_id)
     
-    if demand.user_id != user_id:
+    if demand.workspace_id != workspace_id:
         return jsonify({'error': 'Acesso negado'}), 403
     
     data = request.get_json()
@@ -1100,9 +1245,10 @@ def update_demand(demand_id):
 def delete_demand(demand_id):
     """Deletar demanda"""
     user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
     demand = Demand.query.get_or_404(demand_id)
     
-    if demand.user_id != user_id:
+    if demand.workspace_id != workspace_id:
         return jsonify({'error': 'Acesso negado'}), 403
     
     db.session.delete(demand)
@@ -1115,9 +1261,10 @@ def delete_demand(demand_id):
 def update_demand_status(demand_id):
     """Atualizar status de demanda e mover para histórico se concluído"""
     user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
     demand = Demand.query.get_or_404(demand_id)
     
-    if demand.user_id != user_id:
+    if demand.workspace_id != workspace_id:
         return jsonify({'error': 'Acesso negado'}), 403
     
     data = request.get_json()
@@ -1128,6 +1275,7 @@ def update_demand_status(demand_id):
     
     history = DemandHistory(
         user_id=user_id,
+        workspace_id=workspace_id,
         work_group_id=demand.work_group_id,
         demand_id=demand.id,
         priority=demand.priority,
@@ -1140,7 +1288,7 @@ def update_demand_status(demand_id):
     )
     db.session.add(history)
 
-    status_config = StatusConfig.query.filter_by(user_id=user_id, key=new_status).first()
+    status_config = StatusConfig.query.filter_by(workspace_id=workspace_id, key=new_status).first()
     is_terminal = status_config.is_completed if status_config else (new_status == 'concluido')
 
     if is_terminal:
@@ -1247,7 +1395,7 @@ def send_reminder_notification(demand, user):
 @app.route('/api/reminders/check', methods=['POST'])
 @jwt_required()
 def check_reminders():
-    """Verifica lembretes vencidos do usuário, envia email e marca como enviados.
+    """Verifica lembretes vencidos do workspace, envia email e marca como enviados.
     Chamada pelo frontend ao abrir o app (verificação best-effort, sem cron)."""
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
@@ -1255,11 +1403,12 @@ def check_reminders():
     if not user:
         return jsonify({'error': 'Usuário não encontrado'}), 404
 
-    terminal_keys = [s.key for s in StatusConfig.query.filter_by(user_id=user_id, is_completed=True).all()]
+    workspace_id = get_user_workspace_id(user_id)
+    terminal_keys = [s.key for s in StatusConfig.query.filter_by(workspace_id=workspace_id, is_completed=True).all()]
 
     now = datetime.now()
     query = Demand.query.filter(
-        Demand.user_id == user_id,
+        Demand.workspace_id == workspace_id,
         Demand.reminder_at.isnot(None),
         Demand.reminder_at <= now,
         Demand.reminder_sent == False
@@ -1301,7 +1450,7 @@ def cron_check_all_reminders():
         if not user:
             continue
 
-        status_config = StatusConfig.query.filter_by(user_id=user.id, key=demand.status).first()
+        status_config = StatusConfig.query.filter_by(workspace_id=demand.workspace_id, key=demand.status).first()
         if status_config and status_config.is_completed:
             continue  # defesa extra: não deveria existir demanda ativa com status conclusivo
 
@@ -1367,6 +1516,7 @@ def merge_locations():
     """Renomeia todos os registros (ativos e histórico) de um local pro nome de outro.
     Útil pra unificar variações de digitação do mesmo local (ex: 'IBIAPINA 1' -> 'IBIAPINA 01')."""
     user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
     data = request.get_json()
 
     from_location = (data or {}).get('from', '').strip()
@@ -1377,10 +1527,10 @@ def merge_locations():
     if from_location == to_location:
         return jsonify({'error': 'Os locais devem ser diferentes'}), 400
 
-    demands_updated = Demand.query.filter_by(user_id=user_id, location=from_location).update(
+    demands_updated = Demand.query.filter_by(workspace_id=workspace_id, location=from_location).update(
         {Demand.location: to_location}
     )
-    history_updated = DemandHistory.query.filter_by(user_id=user_id, location=from_location).update(
+    history_updated = DemandHistory.query.filter_by(workspace_id=workspace_id, location=from_location).update(
         {DemandHistory.location: to_location}
     )
     db.session.commit()
@@ -1395,12 +1545,13 @@ def merge_locations():
 @app.route('/api/history', methods=['GET'])
 @jwt_required()
 def get_history():
-    """Listar histórico de demandas"""
+    """Listar histórico de demandas do workspace"""
     user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
     location = request.args.get('location', '')
     activity = request.args.get('activity', '')
     
-    query = DemandHistory.query.filter_by(user_id=user_id)
+    query = DemandHistory.query.filter_by(workspace_id=workspace_id)
     
     if location:
         query = query.filter(DemandHistory.location.ilike(f'%{location}%'))
@@ -1416,18 +1567,19 @@ def get_history():
 def get_whatsapp_text():
     """Gera texto formatado para WhatsApp"""
     user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
     today = date.today().strftime('%d/%m/%Y')
     output = f"_*{today}*_\n"
 
-    terminal_keys = [s.key for s in StatusConfig.query.filter_by(user_id=user_id, is_completed=True).all()]
+    terminal_keys = [s.key for s in StatusConfig.query.filter_by(workspace_id=workspace_id, is_completed=True).all()]
 
-    demands_query = Demand.query.filter(Demand.user_id == user_id)
+    demands_query = Demand.query.filter(Demand.workspace_id == workspace_id)
     if terminal_keys:
         demands_query = demands_query.filter(~Demand.status.in_(terminal_keys))
     demands = demands_query.all()
 
     history_query = DemandHistory.query.filter(
-        DemandHistory.user_id == user_id,
+        DemandHistory.workspace_id == workspace_id,
         DemandHistory.status_change_date == date.today()
     )
     if terminal_keys:
@@ -1436,13 +1588,13 @@ def get_whatsapp_text():
         history_query = history_query.filter(DemandHistory.status == 'concluido')
     history = history_query.all()
     
-    groups = WorkGroup.query.filter_by(user_id=user_id, is_active=True).order_by(WorkGroup.order).all()
+    groups = WorkGroup.query.filter_by(workspace_id=workspace_id, is_active=True).order_by(WorkGroup.order).all()
     
     STATUS_EMOJI = {
-        s.key: s.emoji for s in StatusConfig.query.filter_by(user_id=user_id).all()
+        s.key: s.emoji for s in StatusConfig.query.filter_by(workspace_id=workspace_id).all()
     }
     STATUS_LABEL = {
-        s.key: s.label for s in StatusConfig.query.filter_by(user_id=user_id).all()
+        s.key: s.label for s in StatusConfig.query.filter_by(workspace_id=workspace_id).all()
     }
     
     for group in groups:
@@ -1476,12 +1628,13 @@ def get_whatsapp_text():
 @app.route('/api/export', methods=['GET'])
 @jwt_required()
 def export_data():
-    """Exportar todos os dados do usuário"""
+    """Exportar todos os dados do workspace"""
     user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
     
-    demands = Demand.query.filter_by(user_id=user_id).all()
-    history = DemandHistory.query.filter_by(user_id=user_id).all()
-    groups = WorkGroup.query.filter_by(user_id=user_id).all()
+    demands = Demand.query.filter_by(workspace_id=workspace_id).all()
+    history = DemandHistory.query.filter_by(workspace_id=workspace_id).all()
+    groups = WorkGroup.query.filter_by(workspace_id=workspace_id).all()
     
     return jsonify({
         'demands': [d.to_dict() for d in demands],
@@ -1493,8 +1646,14 @@ def export_data():
 @app.route('/api/import', methods=['POST'])
 @jwt_required()
 def import_data():
-    """Importar dados do usuário"""
+    """Importar dados pro workspace (restaurar backup). Ação restrita a admin do
+    workspace, já que escreve em massa em dados compartilhados por todo o time."""
     user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Apenas administradores do workspace podem restaurar backup'}), 403
+
     data = request.get_json()
     
     try:
@@ -1502,6 +1661,7 @@ def import_data():
         for group_data in data.get('workGroups', []):
             group = WorkGroup(
                 user_id=user_id,
+                workspace_id=workspace_id,
                 name=group_data['name'],
                 emoji=group_data.get('emoji', '📌'),
                 color=group_data.get('color', '#3b82f6'),
@@ -1515,6 +1675,7 @@ def import_data():
         for demand_data in data.get('demands', []):
             demand = Demand(
                 user_id=user_id,
+                workspace_id=workspace_id,
                 work_group_id=group_mapping.get(demand_data.get('workGroupId')),
                 location=demand_data['location'],
                 activity=demand_data['activity'],
@@ -1529,6 +1690,7 @@ def import_data():
         for history_data in data.get('history', []):
             history = DemandHistory(
                 user_id=user_id,
+                workspace_id=workspace_id,
                 work_group_id=group_mapping.get(history_data.get('workGroupId')),
                 location=history_data['location'],
                 activity=history_data['activity'],
