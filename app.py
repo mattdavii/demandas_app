@@ -144,6 +144,19 @@ class WorkspaceMember(db.Model):
             'joinedAt': self.joined_at.isoformat() if self.joined_at else None
         }
 
+def ws_filter(model, user_id, workspace_id, extra=None):
+    """Filtro padrão que inclui registros do workspace E registros com workspace_id NULL
+    do próprio user (registros criados antes da migração de workspace). Aceita filtros
+    adicionais via dicionário `extra` (repassados como keyword args ao filter_by)."""
+    base = db.or_(
+        model.workspace_id == workspace_id,
+        db.and_(model.workspace_id == None, model.user_id == user_id)
+    )
+    q = model.query.filter(base)
+    if extra:
+        q = q.filter_by(**extra)
+    return q
+
 def get_user_workspace_id(user_id):
     """Resolve o workspace de uma conta. Hoje cada conta pertence a exatamente um
     workspace (o próprio, ou aquele pra que foi convidada) — não há troca de
@@ -432,7 +445,7 @@ def seed_default_status_and_priority(user_id, workspace_id):
     """Cria o conjunto padrão de status/prioridade pra um workspace (novo ou já
     existente sem nenhum configurado). user_id aqui é só quem fica registrado
     como criador do registro — o que importa pra escopo é workspace_id."""
-    if StatusConfig.query.filter_by(workspace_id=workspace_id).first() is None:
+    if StatusConfig.query.filter(db.or_(StatusConfig.workspace_id == workspace_id, db.and_(StatusConfig.workspace_id == None, StatusConfig.user_id == user_id))).first() is None:
         defaults = [
             {'key': 'agendado', 'label': 'Agendado', 'color': '#ff9f43', 'emoji': '🟠', 'order': 0, 'is_completed': False},
             {'key': 'nao-iniciado', 'label': 'Não Iniciado', 'color': '#9aa0a7', 'emoji': '⚪', 'order': 1, 'is_completed': False},
@@ -444,7 +457,7 @@ def seed_default_status_and_priority(user_id, workspace_id):
         for d in defaults:
             db.session.add(StatusConfig(user_id=user_id, workspace_id=workspace_id, **d))
 
-    if PriorityConfig.query.filter_by(workspace_id=workspace_id).first() is None:
+    if PriorityConfig.query.filter(db.or_(PriorityConfig.workspace_id == workspace_id, db.and_(PriorityConfig.workspace_id == None, PriorityConfig.user_id == user_id))).first() is None:
         defaults = [
             {'key': 'baixa', 'label': 'Baixa', 'color': '#5b6168', 'order': 0},
             {'key': 'media', 'label': 'Média', 'color': '#4fc3f7', 'order': 1},
@@ -1153,7 +1166,7 @@ def update_status_config(config_id):
         return jsonify({'error': 'Apenas administradores podem editar status'}), 403
     config = StatusConfig.query.get_or_404(config_id)
 
-    if config.workspace_id != workspace_id:
+    if config.workspace_id != workspace_id is not None and config.workspace_id.workspace_id != workspace_id:
         return jsonify({'error': 'Acesso negado'}), 403
 
     data = request.get_json()
@@ -1190,13 +1203,13 @@ def delete_status_config(config_id):
         return jsonify({'error': 'Apenas administradores podem remover status'}), 403
     config = StatusConfig.query.get_or_404(config_id)
 
-    if config.workspace_id != workspace_id:
+    if config.workspace_id != workspace_id is not None and config.workspace_id.workspace_id != workspace_id:
         return jsonify({'error': 'Acesso negado'}), 403
 
-    if StatusConfig.query.filter_by(workspace_id=workspace_id).count() <= 1:
+    if StatusConfig.query.filter(db.or_(StatusConfig.workspace_id == workspace_id, db.and_(StatusConfig.workspace_id == None, StatusConfig.user_id == user_id))).count() <= 1:
         return jsonify({'error': 'Não é possível remover o último status restante'}), 400
 
-    in_use = Demand.query.filter_by(workspace_id=workspace_id, status=config.key).first()
+    in_use = ws_filter(Demand, user_id, workspace_id, {'status': config.key}).first()
     if in_use:
         return jsonify({'error': 'Existem demandas usando esse status. Mude o status delas antes de remover.'}), 400
 
@@ -1277,7 +1290,7 @@ def update_priority_config(config_id):
         return jsonify({'error': 'Apenas administradores podem editar prioridades'}), 403
     config = PriorityConfig.query.get_or_404(config_id)
 
-    if config.workspace_id != workspace_id:
+    if config.workspace_id != workspace_id is not None and config.workspace_id.workspace_id != workspace_id:
         return jsonify({'error': 'Acesso negado'}), 403
 
     data = request.get_json()
@@ -1301,13 +1314,13 @@ def delete_priority_config(config_id):
         return jsonify({'error': 'Apenas administradores podem remover prioridades'}), 403
     config = PriorityConfig.query.get_or_404(config_id)
 
-    if config.workspace_id != workspace_id:
+    if config.workspace_id != workspace_id is not None and config.workspace_id.workspace_id != workspace_id:
         return jsonify({'error': 'Acesso negado'}), 403
 
-    if PriorityConfig.query.filter_by(workspace_id=workspace_id).count() <= 1:
+    if PriorityConfig.query.filter(db.or_(PriorityConfig.workspace_id == workspace_id, db.and_(PriorityConfig.workspace_id == None, PriorityConfig.user_id == user_id))).count() <= 1:
         return jsonify({'error': 'Não é possível remover a última prioridade restante'}), 400
 
-    in_use = Demand.query.filter_by(workspace_id=workspace_id, priority=config.key).first()
+    in_use = ws_filter(Demand, user_id, workspace_id, {'priority': config.key}).first()
     if in_use:
         return jsonify({'error': 'Existem demandas usando essa prioridade. Mude a prioridade delas antes de remover.'}), 400
 
@@ -1369,7 +1382,7 @@ def update_work_group(group_id):
         return jsonify({'error': 'Apenas administradores podem editar grupos'}), 403
     group = WorkGroup.query.get_or_404(group_id)
     
-    if group.workspace_id != workspace_id:
+    if group.workspace_id is not None and group.workspace_id != workspace_id:
         return jsonify({'error': 'Acesso negado'}), 403
     
     data = request.get_json()
@@ -1398,7 +1411,7 @@ def delete_work_group(group_id):
         return jsonify({'error': 'Apenas administradores podem remover grupos'}), 403
     group = WorkGroup.query.get_or_404(group_id)
     
-    if group.workspace_id != workspace_id:
+    if group.workspace_id is not None and group.workspace_id != workspace_id:
         return jsonify({'error': 'Acesso negado'}), 403
     
     group.is_active = False
@@ -1413,13 +1426,8 @@ def get_demands():
     """Listar demandas pendentes do workspace"""
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
-    terminal_keys = [s.key for s in StatusConfig.query.filter_by(workspace_id=workspace_id, is_completed=True).all()]
-    query = Demand.query.filter(
-        db.or_(
-            Demand.workspace_id == workspace_id,
-            db.and_(Demand.workspace_id == None, Demand.user_id == user_id)
-        )
-    )
+    terminal_keys = [s.key for s in ws_filter(StatusConfig, user_id, workspace_id, {'is_completed': True}).all()]
+    query = ws_filter(Demand, user_id, workspace_id)
     if terminal_keys:
         query = query.filter(~Demand.status.in_(terminal_keys))
     demands = query.all()
@@ -1437,21 +1445,21 @@ def create_demand():
         return jsonify({'error': 'Dados incompletos'}), 400
     
     group = WorkGroup.query.get(data['work_group_id'])
-    if not group or group.workspace_id != workspace_id:
+    if not group or (group.workspace_id is not None and group.workspace_id != workspace_id):
         return jsonify({'error': 'Grupo inválido'}), 403
 
     default_status = data.get('status')
     if not default_status:
-        first_status = StatusConfig.query.filter_by(workspace_id=workspace_id, is_completed=False).order_by(StatusConfig.order.asc()).first()
+        first_status = ws_filter(StatusConfig, user_id, workspace_id, {'is_completed': False}).order_by(StatusConfig.order.asc()).first()
         default_status = first_status.key if first_status else 'nao-iniciado'
 
     default_priority = data.get('priority')
     if not default_priority:
-        media_priority = PriorityConfig.query.filter_by(workspace_id=workspace_id, key='media').first()
+        media_priority = ws_filter(PriorityConfig, user_id, workspace_id, {'key': 'media'}).first()
         if media_priority:
             default_priority = media_priority.key
         else:
-            any_priority = PriorityConfig.query.filter_by(workspace_id=workspace_id).order_by(PriorityConfig.order.asc()).first()
+            any_priority = ws_filter(PriorityConfig, user_id, workspace_id).order_by(PriorityConfig.order.asc()).first()
             default_priority = any_priority.key if any_priority else 'media'
 
     assigned_to_user_id = data.get('assigned_to_user_id')
@@ -1490,7 +1498,7 @@ def update_demand(demand_id):
     workspace_id = get_user_workspace_id(user_id)
     demand = Demand.query.get_or_404(demand_id)
     
-    if demand.workspace_id != workspace_id:
+    if demand.workspace_id != workspace_id is not None and demand.workspace_id.workspace_id != workspace_id:
         return jsonify({'error': 'Acesso negado'}), 403
     
     data = request.get_json()
@@ -1538,7 +1546,7 @@ def delete_demand(demand_id):
     workspace_id = get_user_workspace_id(user_id)
     demand = Demand.query.get_or_404(demand_id)
     
-    if demand.workspace_id != workspace_id:
+    if demand.workspace_id != workspace_id is not None and demand.workspace_id.workspace_id != workspace_id:
         return jsonify({'error': 'Acesso negado'}), 403
     
     db.session.delete(demand)
@@ -1554,7 +1562,7 @@ def update_demand_status(demand_id):
     workspace_id = get_user_workspace_id(user_id)
     demand = Demand.query.get_or_404(demand_id)
     
-    if demand.workspace_id != workspace_id:
+    if demand.workspace_id != workspace_id is not None and demand.workspace_id.workspace_id != workspace_id:
         return jsonify({'error': 'Acesso negado'}), 403
     
     data = request.get_json()
@@ -1578,8 +1586,8 @@ def update_demand_status(demand_id):
     )
     db.session.add(history)
 
-    status_config = StatusConfig.query.filter_by(workspace_id=workspace_id, key=new_status).first()
-    is_terminal = status_config.is_completed if status_config else (new_status == 'concluido')
+    status_config = ws_filter(StatusConfig, user_id, workspace_id, {'key': new_status}).first()
+    is_terminal = status_config.is_completed if status_config else (new_status in ('concluido', 'concluído'))
 
     if is_terminal:
         db.session.delete(demand)
@@ -1725,11 +1733,10 @@ def check_reminders():
         return jsonify({'error': 'Usuário não encontrado'}), 404
 
     workspace_id = get_user_workspace_id(user_id)
-    terminal_keys = [s.key for s in StatusConfig.query.filter_by(workspace_id=workspace_id, is_completed=True).all()]
+    terminal_keys = [s.key for s in ws_filter(StatusConfig, user_id, workspace_id, {'is_completed': True}).all()]
 
     now = datetime.now()
-    query = Demand.query.filter(
-        Demand.workspace_id == workspace_id,
+    query = ws_filter(Demand, user_id, workspace_id).filter(
         Demand.reminder_at.isnot(None),
         Demand.reminder_at <= now,
         Demand.reminder_sent == False
@@ -1848,12 +1855,14 @@ def merge_locations():
     if from_location == to_location:
         return jsonify({'error': 'Os locais devem ser diferentes'}), 400
 
-    demands_updated = Demand.query.filter_by(workspace_id=workspace_id, location=from_location).update(
-        {Demand.location: to_location}
-    )
-    history_updated = DemandHistory.query.filter_by(workspace_id=workspace_id, location=from_location).update(
-        {DemandHistory.location: to_location}
-    )
+    demands_updated = Demand.query.filter(
+        db.or_(Demand.workspace_id == workspace_id, db.and_(Demand.workspace_id == None, Demand.user_id == user_id)),
+        Demand.location == from_location
+    ).update({Demand.location: to_location}, synchronize_session=False)
+    history_updated = DemandHistory.query.filter(
+        db.or_(DemandHistory.workspace_id == workspace_id, db.and_(DemandHistory.workspace_id == None, DemandHistory.user_id == user_id)),
+        DemandHistory.location == from_location
+    ).update({DemandHistory.location: to_location}, synchronize_session=False)
     db.session.commit()
 
     return jsonify({
@@ -1905,15 +1914,14 @@ def get_whatsapp_text():
     today = date.today().strftime('%d/%m/%Y')
     output = f"_*{today}*_\n"
 
-    terminal_keys = [s.key for s in StatusConfig.query.filter_by(workspace_id=workspace_id, is_completed=True).all()]
+    terminal_keys = [s.key for s in ws_filter(StatusConfig, user_id, workspace_id, {'is_completed': True}).all()]
 
-    demands_query = Demand.query.filter(Demand.workspace_id == workspace_id)
+    demands_query = ws_filter(Demand, user_id, workspace_id)
     if terminal_keys:
         demands_query = demands_query.filter(~Demand.status.in_(terminal_keys))
     demands = demands_query.all()
 
-    history_query = DemandHistory.query.filter(
-        DemandHistory.workspace_id == workspace_id,
+    history_query = ws_filter(DemandHistory, user_id, workspace_id).filter(
         DemandHistory.status_change_date == date.today()
     )
     if terminal_keys:
@@ -1922,13 +1930,13 @@ def get_whatsapp_text():
         history_query = history_query.filter(DemandHistory.status == 'concluido')
     history = history_query.all()
     
-    groups = WorkGroup.query.filter_by(workspace_id=workspace_id, is_active=True).order_by(WorkGroup.order).all()
+    groups = ws_filter(WorkGroup, user_id, workspace_id, {'is_active': True}).order_by(WorkGroup.order).all()
     
     STATUS_EMOJI = {
-        s.key: s.emoji for s in StatusConfig.query.filter_by(workspace_id=workspace_id).all()
+        s.key: s.emoji for s in ws_filter(StatusConfig, user_id, workspace_id).all()
     }
     STATUS_LABEL = {
-        s.key: s.label for s in StatusConfig.query.filter_by(workspace_id=workspace_id).all()
+        s.key: s.label for s in ws_filter(StatusConfig, user_id, workspace_id).all()
     }
     
     for group in groups:
@@ -1966,9 +1974,9 @@ def export_data():
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
     
-    demands = Demand.query.filter_by(workspace_id=workspace_id).all()
-    history = DemandHistory.query.filter_by(workspace_id=workspace_id).all()
-    groups = WorkGroup.query.filter_by(workspace_id=workspace_id).all()
+    demands = ws_filter(Demand, user_id, workspace_id).all()
+    history = ws_filter(DemandHistory, user_id, workspace_id).all()
+    groups = ws_filter(WorkGroup, user_id, workspace_id).all()
     
     return jsonify({
         'demands': [d.to_dict() for d in demands],
