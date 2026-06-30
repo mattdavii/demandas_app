@@ -63,8 +63,8 @@ class User(db.Model):
     theme = db.Column(db.String(30), default='bancada')
     
     # Relacionamentos
-    demands = db.relationship('Demand', backref='user', lazy=True, cascade='all, delete-orphan')
-    demand_history = db.relationship('DemandHistory', backref='user', lazy=True, cascade='all, delete-orphan')
+    demands = db.relationship('Demand', foreign_keys='Demand.user_id', backref='user', lazy=True, cascade='all, delete-orphan')
+    demand_history = db.relationship('DemandHistory', foreign_keys='DemandHistory.user_id', backref='user', lazy=True, cascade='all, delete-orphan')
     work_groups = db.relationship('WorkGroup', backref='owner', lazy=True, cascade='all, delete-orphan')
     
     def set_password(self, password):
