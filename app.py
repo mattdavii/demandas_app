@@ -1093,8 +1093,23 @@ def change_password():
 def get_status_configs():
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
-    seed_default_status_and_priority(user_id, workspace_id)  # garante que sempre haja pelo menos o padrão
-    configs = StatusConfig.query.filter_by(workspace_id=workspace_id).order_by(StatusConfig.order.asc()).all()
+
+    # Fallback: inclui registros com workspace_id NULL do próprio user (migração incompleta)
+    existing = StatusConfig.query.filter(
+        db.or_(
+            StatusConfig.workspace_id == workspace_id,
+            db.and_(StatusConfig.workspace_id == None, StatusConfig.user_id == user_id)
+        )
+    ).first()
+    if not existing:
+        seed_default_status_and_priority(user_id, workspace_id)
+
+    configs = StatusConfig.query.filter(
+        db.or_(
+            StatusConfig.workspace_id == workspace_id,
+            db.and_(StatusConfig.workspace_id == None, StatusConfig.user_id == user_id)
+        )
+    ).order_by(StatusConfig.order.asc()).all()
     return jsonify([c.to_dict() for c in configs]), 200
 
 @app.route('/api/status-configs', methods=['POST'])
@@ -1205,8 +1220,22 @@ def delete_status_config(config_id):
 def get_priority_configs():
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
-    seed_default_status_and_priority(user_id, workspace_id)
-    configs = PriorityConfig.query.filter_by(workspace_id=workspace_id).order_by(PriorityConfig.order.asc()).all()
+
+    existing = PriorityConfig.query.filter(
+        db.or_(
+            PriorityConfig.workspace_id == workspace_id,
+            db.and_(PriorityConfig.workspace_id == None, PriorityConfig.user_id == user_id)
+        )
+    ).first()
+    if not existing:
+        seed_default_status_and_priority(user_id, workspace_id)
+
+    configs = PriorityConfig.query.filter(
+        db.or_(
+            PriorityConfig.workspace_id == workspace_id,
+            db.and_(PriorityConfig.workspace_id == None, PriorityConfig.user_id == user_id)
+        )
+    ).order_by(PriorityConfig.order.asc()).all()
     return jsonify([c.to_dict() for c in configs]), 200
 
 @app.route('/api/priority-configs', methods=['POST'])
@@ -1294,7 +1323,12 @@ def get_work_groups():
     """Listar grupos de trabalho do workspace"""
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
-    groups = WorkGroup.query.filter_by(workspace_id=workspace_id, is_active=True).order_by(WorkGroup.order).all()
+    groups = WorkGroup.query.filter(
+        db.or_(
+            db.and_(WorkGroup.workspace_id == workspace_id, WorkGroup.is_active == True),
+            db.and_(WorkGroup.workspace_id == None, WorkGroup.user_id == user_id, WorkGroup.is_active == True)
+        )
+    ).order_by(WorkGroup.order).all()
     return jsonify([g.to_dict() for g in groups]), 200
 
 @app.route('/api/work-groups', methods=['POST'])
