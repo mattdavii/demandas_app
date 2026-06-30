@@ -1380,7 +1380,12 @@ def get_demands():
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
     terminal_keys = [s.key for s in StatusConfig.query.filter_by(workspace_id=workspace_id, is_completed=True).all()]
-    query = Demand.query.filter(Demand.workspace_id == workspace_id)
+    query = Demand.query.filter(
+        db.or_(
+            Demand.workspace_id == workspace_id,
+            db.and_(Demand.workspace_id == None, Demand.user_id == user_id)
+        )
+    )
     if terminal_keys:
         query = query.filter(~Demand.status.in_(terminal_keys))
     demands = query.all()
@@ -1832,14 +1837,27 @@ def get_history():
     workspace_id = get_user_workspace_id(user_id)
     location = request.args.get('location', '')
     activity = request.args.get('activity', '')
-    
-    query = DemandHistory.query.filter_by(workspace_id=workspace_id)
-    
+
+    # Inclui registros do workspace E registros ainda com workspace_id NULL mas
+    # pertencentes ao user_id — esses são registros antigos que a migração ainda não
+    # conseguiu popular (pode acontecer se o ALTER TABLE e o UPDATE rodaram em restarts
+    # diferentes). Isso garante que o histórico apareça mesmo antes do próximo restart
+    # reexecutar a migração e popular o workspace_id neles.
+    query = DemandHistory.query.filter(
+        db.or_(
+            DemandHistory.workspace_id == workspace_id,
+            db.and_(
+                DemandHistory.workspace_id == None,
+                DemandHistory.user_id == user_id
+            )
+        )
+    )
+
     if location:
         query = query.filter(DemandHistory.location.ilike(f'%{location}%'))
     if activity:
         query = query.filter(DemandHistory.activity.ilike(f'%{activity}%'))
-    
+
     history = query.order_by(DemandHistory.status_change_date.desc()).all()
     return jsonify([h.to_dict() for h in history]), 200
 
