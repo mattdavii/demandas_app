@@ -3188,6 +3188,22 @@
 
         function populateAssigneeDropdown(selectId, selectedValue = '') {
             const select = document.getElementById(selectId);
+            // Se ainda não carregou os membros (race condition no startup), popula com
+            // loading e re-tenta após fetch. Caso comum: abrir modal logo ao entrar no app.
+            if (currentTeamMembers.length === 0) {
+                select.innerHTML = '<option value="">Carregando membros...</option>';
+                fetchWithRetry(`${API_URL}/workspace/members`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1).then(async r => {
+                    if (r.ok) {
+                        currentTeamMembers = await r.json();
+                        populateAssigneeDropdown(selectId, selectedValue);
+                    }
+                }).catch(() => {
+                    select.innerHTML = '<option value="">Sem responsável</option>';
+                });
+                return;
+            }
             const sorted = [...currentTeamMembers].sort((a, b) => (a.fullName || a.username).localeCompare(b.fullName || b.username));
             select.innerHTML = '<option value="">Sem responsável</option>' +
                 sorted.map(m => `<option value="${m.userId}">${escapeHtml(m.fullName || m.username)}</option>`).join('');
