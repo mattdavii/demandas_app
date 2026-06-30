@@ -1,6 +1,7 @@
 import os
 import secrets
 import json
+import re
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
@@ -104,7 +105,7 @@ class Workspace(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False)
-    logo_url = db.Column(db.String(500), nullable=True)
+    logo_url = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
 
     def to_dict(self):
@@ -220,7 +221,8 @@ class Demand(db.Model):
     status = db.Column(db.String(20), default='nao-iniciado')
     priority = db.Column(db.String(20), default='media')
     due_date = db.Column(db.Date, nullable=True)
-    assigned_to = db.Column(db.String(100))
+    assigned_to = db.Column(db.String(100))  # legado: texto livre (mantido p/ registros antigos)
+    assigned_to_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # responsável real (membro do workspace)
     created_date = db.Column(db.Date, default=date.today)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
     reminder_at = db.Column(db.DateTime, nullable=True)
@@ -228,6 +230,7 @@ class Demand(db.Model):
     checklist = db.Column(db.JSON, default=list)  # [{"text": "...", "checked": false}, ...]
     
     def to_dict(self):
+        assigned_user = User.query.get(self.assigned_to_user_id) if self.assigned_to_user_id else None
         return {
             'id': self.id,
             'workGroupId': self.work_group_id,
@@ -239,6 +242,8 @@ class Demand(db.Model):
             'priority': self.priority,
             'dueDate': self.due_date.isoformat() if self.due_date else None,
             'assignedTo': self.assigned_to,
+            'assignedToUserId': self.assigned_to_user_id,
+            'assignedToName': (assigned_user.full_name or assigned_user.username) if assigned_user else None,
             'createdDate': self.created_date.isoformat() if self.created_date else None,
             'reminderAt': self.reminder_at.isoformat() if self.reminder_at else None,
             'checklist': self.checklist or []
@@ -473,6 +478,8 @@ with app.app_context():
         db.session.execute(text("ALTER TABLE priority_configs ADD COLUMN IF NOT EXISTS workspace_id INTEGER"))
         db.session.execute(text("ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS key_type VARCHAR(20) DEFAULT 'personal'"))
         db.session.execute(text("ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS workspace_id INTEGER"))
+        db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS assigned_to_user_id INTEGER"))
+        db.session.execute(text("ALTER TABLE workspaces ALTER COLUMN logo_url TYPE TEXT"))
         db.session.commit()
     except Exception as e:
         db.session.rollback()
@@ -608,13 +615,17 @@ def register():
 
 @app.route('/api/auth/login', methods=['POST'])
 def login():
-    """Login do usuário"""
+    """Login do usuário (aceita username ou e-mail no mesmo campo, já que quem é
+    convidado pro time só recebe o e-mail, nunca escolhe um username)"""
     data = request.get_json()
     
     if not data or not data.get('username') or not data.get('password'):
         return jsonify({'error': 'Usuário ou senha não fornecidos'}), 400
     
-    user = User.query.filter_by(username=data['username']).first()
+    login_input = data['username']
+    user = User.query.filter(
+        (User.username == login_input) | (User.email == login_input)
+    ).first()
     
     if not user or not user.check_password(data['password']):
         return jsonify({'error': 'Usuário ou senha incorretos'}), 401
@@ -694,7 +705,12 @@ def get_current_user():
     if not user:
         return jsonify({'error': 'Usuário não encontrado'}), 404
     
-    return jsonify(user.to_dict()), 200
+    result = user.to_dict()
+    if user.access_verified:
+        workspace_id = get_user_workspace_id(user_id)
+        result['workspaceId'] = workspace_id
+        result['workspaceRole'] = get_user_workspace_role(user_id, workspace_id)
+    return jsonify(result), 200
 
 @app.route('/api/auth/theme', methods=['POST'])
 @jwt_required()
@@ -844,6 +860,207 @@ def revoke_access_key(key_id):
 
     return jsonify({'message': 'Chave revogada'}), 200
 
+# ============= ROTAS DE WORKSPACE E MEMBROS =============
+def generate_unique_username(base_text):
+    """Gera um username único a partir de um nome ou e-mail (parte local), evitando colisão."""
+    base = re.sub(r'[^a-z0-9]+', '.', base_text.lower()).strip('.') or 'usuario'
+    candidate = base
+    counter = 2
+    while User.query.filter_by(username=candidate).first() is not None:
+        candidate = f"{base}{counter}"
+        counter += 1
+    return candidate
+
+@app.route('/api/workspace', methods=['GET'])
+@jwt_required()
+def get_workspace_info():
+    """Dados do workspace atual (nome, logo) — qualquer membro pode ver."""
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    workspace = Workspace.query.get(workspace_id) if workspace_id else None
+    if not workspace:
+        return jsonify({'error': 'Workspace não encontrado'}), 404
+    result = workspace.to_dict()
+    result['myRole'] = get_user_workspace_role(user_id, workspace_id)
+    return jsonify(result), 200
+
+@app.route('/api/workspace/logo', methods=['PUT'])
+@jwt_required()
+def set_workspace_logo():
+    """Define a logo do workspace (imagem em base64 data-URI, já redimensionada
+    no navegador). Restrito a admin do workspace."""
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Apenas administradores podem alterar a logo'}), 403
+
+    data = request.get_json()
+    logo_url = (data or {}).get('logoUrl')
+
+    if logo_url and len(logo_url) > 400000:  # ~300KB de imagem em base64
+        return jsonify({'error': 'Imagem muito grande. Use uma imagem menor.'}), 400
+
+    workspace = Workspace.query.get_or_404(workspace_id)
+    workspace.logo_url = logo_url or None
+    db.session.commit()
+
+    return jsonify(workspace.to_dict()), 200
+
+@app.route('/api/workspace/members', methods=['GET'])
+@jwt_required()
+def list_workspace_members():
+    """Lista os membros do workspace atual — qualquer membro pode ver o time."""
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    members = WorkspaceMember.query.filter_by(workspace_id=workspace_id).order_by(WorkspaceMember.joined_at.asc()).all()
+    return jsonify([m.to_dict() for m in members]), 200
+
+@app.route('/api/workspace/invite', methods=['POST'])
+@jwt_required()
+def invite_workspace_member():
+    """Convida uma pessoa nova pro workspace: cria a conta dela (ainda sem senha
+    utilizável), o vínculo de membro, e envia um e-mail com link de definição de
+    senha (reaproveita o mesmo mecanismo de token do reset de senha). Restrito a
+    admin do workspace."""
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Apenas administradores podem convidar membros'}), 403
+
+    data = request.get_json()
+    name = (data or {}).get('name', '').strip()
+    cargo = (data or {}).get('cargo', '').strip()
+    email = (data or {}).get('email', '').strip().lower()
+    role = (data or {}).get('role', 'member')
+
+    if not name or not email:
+        return jsonify({'error': 'Nome e e-mail são obrigatórios'}), 400
+    if role not in ('admin', 'member'):
+        role = 'member'
+
+    if User.query.filter_by(email=email).first():
+        return jsonify({'error': 'Já existe uma conta com esse e-mail'}), 409
+
+    username = generate_unique_username(email.split('@')[0])
+
+    new_user = User(
+        username=username,
+        email=email,
+        full_name=name,
+        access_verified=True  # convite direto do admin já libera o acesso, sem precisar de chave
+    )
+    new_user.set_password(secrets.token_urlsafe(24))  # senha provisória inutilizável; ela define a própria no 1º acesso
+    db.session.add(new_user)
+    db.session.flush()  # garante new_user.id antes de referenciar
+
+    db.session.add(WorkspaceMember(workspace_id=workspace_id, user_id=new_user.id, role=role, cargo=cargo or None))
+
+    reset_token = new_user.generate_reset_token()
+    frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5000')
+    reset_url = f"{frontend_url}/reset?token={reset_token}"
+
+    db.session.commit()
+
+    email_sent = False
+    if app.config['MAIL_USERNAME']:
+        try:
+            workspace = Workspace.query.get(workspace_id)
+            msg = Message(
+                f'Você foi convidado pro time no Painel de Bordo!',
+                recipients=[email],
+                html=f'''
+                <p>Olá {name},</p>
+                <p>Você foi adicionado ao workspace <strong>{workspace.name if workspace else "do time"}</strong> no Painel de Bordo{f" como {cargo}" if cargo else ""}.</p>
+                <p>Pra começar a usar, defina sua senha clicando no link abaixo:</p>
+                <p><a href="{reset_url}">Definir minha senha</a></p>
+                <p>Esse link expira em 24 horas. Depois de definir a senha, você já pode entrar com seu e-mail (<strong>{email}</strong>) normalmente.</p>
+                '''
+            )
+            mail.send(msg)
+            email_sent = True
+        except Exception as e:
+            print(f'Erro ao enviar email de convite: {e}')
+
+    return jsonify({
+        'message': 'Membro convidado com sucesso',
+        'emailSent': email_sent,
+        'resetUrl': reset_url,  # admin pode compartilhar manualmente se o e-mail falhar/não estiver configurado
+        'member': WorkspaceMember.query.filter_by(workspace_id=workspace_id, user_id=new_user.id).first().to_dict()
+    }), 201
+
+@app.route('/api/workspace/members/<int:member_id>', methods=['PUT'])
+@jwt_required()
+def update_workspace_member(member_id):
+    """Atualiza papel e/ou cargo de um membro. Restrito a admin do workspace."""
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Apenas administradores podem editar membros'}), 403
+
+    member = WorkspaceMember.query.get_or_404(member_id)
+    if member.workspace_id != workspace_id:
+        return jsonify({'error': 'Acesso negado'}), 403
+
+    data = request.get_json()
+
+    if 'role' in data:
+        if data['role'] not in ('admin', 'member'):
+            return jsonify({'error': 'Papel inválido'}), 400
+        if member.role == 'admin' and data['role'] != 'admin':
+            other_admin = WorkspaceMember.query.filter(
+                WorkspaceMember.workspace_id == workspace_id,
+                WorkspaceMember.role == 'admin',
+                WorkspaceMember.id != member.id
+            ).first()
+            if not other_admin:
+                return jsonify({'error': 'Precisa existir ao menos um administrador no workspace'}), 400
+        member.role = data['role']
+
+    if 'cargo' in data:
+        member.cargo = data['cargo'] or None
+
+    db.session.commit()
+    return jsonify(member.to_dict()), 200
+
+@app.route('/api/workspace/members/<int:member_id>', methods=['DELETE'])
+@jwt_required()
+def remove_workspace_member(member_id):
+    """Remove um membro do workspace. Restrito a admin. Demandas atribuídas a essa
+    pessoa ficam sem responsável (não são apagadas). A conta removida volta pra
+    tela de bloqueio de acesso, já que deixa de pertencer a qualquer workspace."""
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Apenas administradores podem remover membros'}), 403
+
+    member = WorkspaceMember.query.get_or_404(member_id)
+    if member.workspace_id != workspace_id:
+        return jsonify({'error': 'Acesso negado'}), 403
+
+    if member.role == 'admin':
+        other_admin = WorkspaceMember.query.filter(
+            WorkspaceMember.workspace_id == workspace_id,
+            WorkspaceMember.role == 'admin',
+            WorkspaceMember.id != member.id
+        ).first()
+        if not other_admin:
+            return jsonify({'error': 'Precisa existir ao menos um administrador no workspace'}), 400
+
+    Demand.query.filter_by(workspace_id=workspace_id, assigned_to_user_id=member.user_id).update({'assigned_to_user_id': None})
+
+    removed_user = User.query.get(member.user_id)
+    if removed_user:
+        removed_user.access_verified = False
+
+    db.session.delete(member)
+    db.session.commit()
+
+    return jsonify({'message': 'Membro removido'}), 200
+
 @app.route('/api/auth/change-password', methods=['POST'])
 @jwt_required()
 def change_password():
@@ -885,6 +1102,8 @@ def get_status_configs():
 def create_status_config():
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Apenas administradores podem criar status'}), 403
     data = request.get_json()
 
     if not data or not data.get('key') or not data.get('label'):
@@ -915,6 +1134,8 @@ def create_status_config():
 def update_status_config(config_id):
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Apenas administradores podem editar status'}), 403
     config = StatusConfig.query.get_or_404(config_id)
 
     if config.workspace_id != workspace_id:
@@ -950,6 +1171,8 @@ def update_status_config(config_id):
 def delete_status_config(config_id):
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Apenas administradores podem remover status'}), 403
     config = StatusConfig.query.get_or_404(config_id)
 
     if config.workspace_id != workspace_id:
@@ -991,6 +1214,8 @@ def get_priority_configs():
 def create_priority_config():
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Apenas administradores podem criar prioridades'}), 403
     data = request.get_json()
 
     if not data or not data.get('key') or not data.get('label'):
@@ -1019,6 +1244,8 @@ def create_priority_config():
 def update_priority_config(config_id):
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Apenas administradores podem editar prioridades'}), 403
     config = PriorityConfig.query.get_or_404(config_id)
 
     if config.workspace_id != workspace_id:
@@ -1041,6 +1268,8 @@ def update_priority_config(config_id):
 def delete_priority_config(config_id):
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Apenas administradores podem remover prioridades'}), 403
     config = PriorityConfig.query.get_or_404(config_id)
 
     if config.workspace_id != workspace_id:
@@ -1071,9 +1300,11 @@ def get_work_groups():
 @app.route('/api/work-groups', methods=['POST'])
 @jwt_required()
 def create_work_group():
-    """Criar novo grupo de trabalho"""
+    """Criar novo grupo de trabalho (restrito a admin)"""
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Apenas administradores podem criar grupos'}), 403
     data = request.get_json()
     
     if not data or not data.get('name'):
@@ -1097,9 +1328,11 @@ def create_work_group():
 @app.route('/api/work-groups/<int:group_id>', methods=['PUT'])
 @jwt_required()
 def update_work_group(group_id):
-    """Atualizar grupo de trabalho"""
+    """Atualizar grupo de trabalho (restrito a admin)"""
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Apenas administradores podem editar grupos'}), 403
     group = WorkGroup.query.get_or_404(group_id)
     
     if group.workspace_id != workspace_id:
@@ -1124,9 +1357,11 @@ def update_work_group(group_id):
 @app.route('/api/work-groups/<int:group_id>', methods=['DELETE'])
 @jwt_required()
 def delete_work_group(group_id):
-    """Deletar grupo de trabalho"""
+    """Deletar grupo de trabalho (restrito a admin)"""
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Apenas administradores podem remover grupos'}), 403
     group = WorkGroup.query.get_or_404(group_id)
     
     if group.workspace_id != workspace_id:
@@ -1180,6 +1415,10 @@ def create_demand():
             any_priority = PriorityConfig.query.filter_by(workspace_id=workspace_id).order_by(PriorityConfig.order.asc()).first()
             default_priority = any_priority.key if any_priority else 'media'
 
+    assigned_to_user_id = data.get('assigned_to_user_id')
+    if not is_workspace_member_user(workspace_id, assigned_to_user_id):
+        return jsonify({'error': 'Responsável inválido: precisa ser membro do workspace'}), 400
+
     demand = Demand(
         user_id=user_id,
         workspace_id=workspace_id,
@@ -1191,12 +1430,16 @@ def create_demand():
         priority=default_priority,
         due_date=datetime.strptime(data['due_date'], '%Y-%m-%d').date() if data.get('due_date') else None,
         assigned_to=data.get('assigned_to', ''),
+        assigned_to_user_id=assigned_to_user_id,
         reminder_at=datetime.strptime(data['reminder_at'], '%Y-%m-%dT%H:%M') if data.get('reminder_at') else None,
         checklist=data.get('checklist', [])
     )
     
     db.session.add(demand)
     db.session.commit()
+
+    if assigned_to_user_id:
+        notify_assignment(demand, User.query.get(assigned_to_user_id), user_id)
     
     return jsonify(demand.to_dict()), 201
 
@@ -1227,6 +1470,14 @@ def update_demand(demand_id):
         demand.due_date = datetime.strptime(data['due_date'], '%Y-%m-%d').date() if data['due_date'] else None
     if 'assigned_to' in data:
         demand.assigned_to = data['assigned_to']
+    if 'assigned_to_user_id' in data:
+        new_assignee_id = data['assigned_to_user_id']
+        if not is_workspace_member_user(workspace_id, new_assignee_id):
+            return jsonify({'error': 'Responsável inválido: precisa ser membro do workspace'}), 400
+        assignee_changed = new_assignee_id != demand.assigned_to_user_id
+        demand.assigned_to_user_id = new_assignee_id
+        if assignee_changed and new_assignee_id:
+            notify_assignment(demand, User.query.get(new_assignee_id), user_id)
     if 'reminder_at' in data:
         if data['reminder_at']:
             demand.reminder_at = datetime.strptime(data['reminder_at'], '%Y-%m-%dT%H:%M')
@@ -1391,6 +1642,37 @@ def send_reminder_notification(demand, user):
             print(f'Erro ao enviar email de lembrete: {e}')
 
     send_push_notification(user.id, f'🔔 {demand.location}', demand.activity, '/')
+
+def is_workspace_member_user(workspace_id, candidate_user_id):
+    """Confirma se candidate_user_id é de fato membro do workspace informado
+    (evita atribuir uma demanda a alguém de outro workspace)."""
+    if not candidate_user_id:
+        return True  # None é válido — significa "sem responsável"
+    return WorkspaceMember.query.filter_by(workspace_id=workspace_id, user_id=candidate_user_id).first() is not None
+
+def notify_assignment(demand, assigned_user, assigner_user_id):
+    """Avisa (push + e-mail) quando uma demanda é atribuída a alguém — só dispara
+    se a pessoa atribuída for diferente de quem fez a atribuição."""
+    if not assigned_user or assigned_user.id == assigner_user_id:
+        return
+
+    if app.config['MAIL_USERNAME']:
+        try:
+            msg = Message(
+                f'Nova demanda atribuída: {demand.activity}',
+                recipients=[assigned_user.email],
+                html=f'''
+                <p>Olá {assigned_user.full_name or assigned_user.username},</p>
+                <p>Uma demanda foi atribuída a você:</p>
+                <p><strong>{demand.location}:</strong> {demand.activity}</p>
+                {f"<p>{demand.context}</p>" if demand.context else ""}
+                '''
+            )
+            mail.send(msg)
+        except Exception as e:
+            print(f'Erro ao enviar email de atribuição: {e}')
+
+    send_push_notification(assigned_user.id, f'📋 Nova demanda atribuída', f'{demand.location}: {demand.activity}', '/')
 
 @app.route('/api/reminders/check', methods=['POST'])
 @jwt_required()
