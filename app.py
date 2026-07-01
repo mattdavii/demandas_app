@@ -241,6 +241,8 @@ class Demand(db.Model):
     reminder_at = db.Column(db.DateTime, nullable=True)
     reminder_sent = db.Column(db.Boolean, default=False)
     checklist = db.Column(db.JSON, default=list)  # [{"text": "...", "checked": false}, ...]
+    is_recurring = db.Column(db.Boolean, default=False)
+    recurrence_type = db.Column(db.String(20), nullable=True)  # 'weekly'|'biweekly'|'monthly'|'quarterly'|'semiannual'|'yearly'
     
     def to_dict(self):
         assigned_user = User.query.get(self.assigned_to_user_id) if self.assigned_to_user_id else None
@@ -260,7 +262,9 @@ class Demand(db.Model):
             'userId': self.user_id,
             'createdDate': self.created_date.isoformat() if self.created_date else None,
             'reminderAt': self.reminder_at.isoformat() if self.reminder_at else None,
-            'checklist': self.checklist or []
+            'checklist': self.checklist or [],
+            'isRecurring': self.is_recurring or False,
+            'recurrenceType': self.recurrence_type
         }
 
 class DemandHistory(db.Model):
@@ -508,6 +512,8 @@ with app.app_context():
         db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS assigned_to_user_id INTEGER"))
         db.session.execute(text("ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS assigned_to_user_id INTEGER"))
         db.session.execute(text("ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS checklist JSON"))
+        db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT FALSE"))
+        db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS recurrence_type VARCHAR(20)"))
         db.session.execute(text("ALTER TABLE workspaces ALTER COLUMN logo_url TYPE TEXT"))
         db.session.commit()
     except Exception as e:
@@ -1588,7 +1594,9 @@ def create_demand():
         assigned_to=data.get('assigned_to', ''),
         assigned_to_user_id=assigned_to_user_id,
         reminder_at=datetime.strptime(data['reminder_at'], '%Y-%m-%dT%H:%M') if data.get('reminder_at') else None,
-        checklist=data.get('checklist', [])
+        checklist=data.get('checklist', []),
+        is_recurring=bool(data.get('is_recurring', False)),
+        recurrence_type=data.get('recurrence_type') or None
     )
     
     db.session.add(demand)
@@ -1643,6 +1651,10 @@ def update_demand(demand_id):
             demand.reminder_sent = False
     if 'checklist' in data:
         demand.checklist = data['checklist']
+    if 'is_recurring' in data:
+        demand.is_recurring = bool(data['is_recurring'])
+    if 'recurrence_type' in data:
+        demand.recurrence_type = data['recurrence_type'] or None
     
     db.session.commit()
     return jsonify(demand.to_dict()), 200
@@ -1662,6 +1674,28 @@ def delete_demand(demand_id):
     db.session.commit()
     
     return jsonify({'message': 'Demanda deletada'}), 200
+
+
+def add_months(d, months):
+    """Desloca uma data por N meses sem depender de dateutil."""
+    month = d.month - 1 + months
+    year = d.year + month // 12
+    month = month % 12 + 1
+    import calendar
+    day = min(d.day, calendar.monthrange(year, month)[1])
+    return d.replace(year=year, month=month, day=day)
+
+def next_due_date(due_date, recurrence_type):
+    """Calcula a próxima data de vencimento deslocando pela periodicidade."""
+    from datetime import timedelta
+    base = due_date or date.today()
+    if recurrence_type == 'weekly':      return base + timedelta(weeks=1)
+    if recurrence_type == 'biweekly':    return base + timedelta(weeks=2)
+    if recurrence_type == 'monthly':     return add_months(base, 1)
+    if recurrence_type == 'quarterly':   return add_months(base, 3)
+    if recurrence_type == 'semiannual':  return add_months(base, 6)
+    if recurrence_type == 'yearly':      return add_months(base, 12)
+    return None
 
 @app.route('/api/demands/<int:demand_id>/status', methods=['POST'])
 @jwt_required()
@@ -1701,6 +1735,29 @@ def update_demand_status(demand_id):
     is_terminal = status_config.is_completed if status_config else (new_status in ('concluido', 'concluído'))
 
     if is_terminal:
+        if demand.is_recurring and demand.recurrence_type:
+            # Auto-cria a próxima ocorrência com mesmos dados, checklist resetado e nova data
+            new_due = next_due_date(demand.due_date, demand.recurrence_type)
+            first_status = ws_filter(StatusConfig, user_id, workspace_id, {'is_completed': False}).order_by(StatusConfig.order.asc()).first()
+            initial_status = first_status.key if first_status else 'nao-iniciado'
+            checklist_reset = [{'text': item['text'], 'checked': False} for item in (demand.checklist or [])]
+            next_demand = Demand(
+                user_id=demand.user_id,
+                workspace_id=demand.workspace_id,
+                work_group_id=demand.work_group_id,
+                location=demand.location,
+                activity=demand.activity,
+                context=demand.context,
+                status=initial_status,
+                priority=demand.priority,
+                due_date=new_due,
+                assigned_to=demand.assigned_to,
+                assigned_to_user_id=demand.assigned_to_user_id,
+                is_recurring=True,
+                recurrence_type=demand.recurrence_type,
+                checklist=checklist_reset
+            )
+            db.session.add(next_demand)
         db.session.delete(demand)
     else:
         demand.status = new_status
@@ -2076,6 +2133,44 @@ def get_whatsapp_text():
             output += "\n"
     
     return jsonify({'text': output}), 200
+
+
+# ============= FEED DE ATIVIDADE =============
+@app.route('/api/activity-feed', methods=['GET'])
+@jwt_required()
+def get_activity_feed():
+    """Feed de atividades recentes do workspace: quem moveu o quê pra qual status e quando.
+    Usa demand_history como fonte — user_id é quem fez a mudança, assigned_to_user_id é o responsável."""
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    limit = min(int(request.args.get('limit', 50)), 200)
+
+    history = ws_filter(DemandHistory, user_id, workspace_id)         .order_by(DemandHistory.timestamp.desc())         .limit(limit).all()
+
+    items = []
+    for h in history:
+        actor = User.query.get(h.user_id)
+        responsible = User.query.get(h.assigned_to_user_id) if h.assigned_to_user_id else None
+        group = WorkGroup.query.get(h.work_group_id) if h.work_group_id else None
+        items.append({
+            'id': h.id,
+            'actorId': h.user_id,
+            'actorName': (actor.full_name or actor.username) if actor else 'Alguém',
+            'responsibleName': (responsible.full_name or responsible.username) if responsible else None,
+            'action': 'status_change',
+            'status': h.status,
+            'demandId': h.demand_id,
+            'location': h.location,
+            'activity': h.activity,
+            'workGroupId': h.work_group_id,
+            'workGroupName': group.name if group else None,
+            'workGroupEmoji': group.emoji if group else None,
+            'workGroupColor': group.color if group else None,
+            'timestamp': h.timestamp.isoformat() if h.timestamp else None,
+            'statusChangeDate': h.status_change_date.isoformat() if h.status_change_date else None,
+        })
+
+    return jsonify(items), 200
 
 # ============= ROTAS DE BACKUP =============
 @app.route('/api/export', methods=['GET'])
