@@ -2189,31 +2189,92 @@ def set_weekly_feedback():
     return jsonify({'weeklyFeedbackEnabled': user.weekly_feedback_enabled}), 200
 
 
+def email_bar(label, count, max_count, color='#f5a623', total=None):
+    """Barra de progresso em HTML puro — funciona em qualquer cliente de email."""
+    if max_count == 0:
+        pct = 0
+    else:
+        pct = max(4, int((count / max_count) * 100))
+    pct_label = f'{round(count/total*100)}%' if total and total > 0 else str(count)
+    return f'''
+        <tr>
+            <td style="padding:4px 12px 4px 0; color:#9aa0a7; font-size:12px; white-space:nowrap; width:120px;">{label}</td>
+            <td style="padding:4px 0;">
+                <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                        <td style="background:{color}; width:{pct}%; height:14px; border-radius:3px 0 0 3px;">&nbsp;</td>
+                        <td style="background:#2a2a2a; height:14px; border-radius:0 3px 3px 0;">&nbsp;</td>
+                    </tr>
+                </table>
+            </td>
+            <td style="padding:4px 0 4px 10px; color:#e0e0e0; font-size:12px; font-weight:bold; white-space:nowrap; width:40px;">{count} <span style="color:#555; font-weight:normal; font-size:11px;">({pct_label})</span></td>
+        </tr>'''
+
 def build_feedback_email_personal(user, concluded, workspace, week_start, week_end):
     """HTML do email pessoal: resumo das demandas que a pessoa concluiu."""
     week_label = f"{week_start.strftime('%d/%m')} a {week_end.strftime('%d/%m/%Y')}"
+
+    # Agrupar por local e por grupo para os mini-gráficos
+    from collections import Counter as _Counter
+    by_location = _Counter(h.location for h in concluded)
+    by_group_id = _Counter(h.work_group_id for h in concluded)
+
+    # Barras por local (top 5)
+    top_locations = by_location.most_common(5)
+    max_loc = top_locations[0][1] if top_locations else 1
+    bars_location = ''.join(email_bar(loc[:22], cnt, max_loc, '#f5a623', len(concluded)) for loc, cnt in top_locations)
+    location_section = f"""
+        <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#9aa0a7; margin:20px 0 8px;">Por Local</h3>
+        <table width="100%" cellpadding="0" cellspacing="0" border="0">{bars_location}</table>
+    """ if top_locations else ''
+
+    # Lista de demandas concluídas
     rows = ''.join(f"""
         <tr>
-            <td style="padding:8px 12px; border-bottom:1px solid #2a2a2a; color:#e0e0e0;">{h.location}</td>
-            <td style="padding:8px 12px; border-bottom:1px solid #2a2a2a; color:#e0e0e0;">{h.activity}</td>
-            <td style="padding:8px 12px; border-bottom:1px solid #2a2a2a; color:#9aa0a7; font-size:12px;">{h.status_change_date.strftime('%d/%m') if h.status_change_date else ''}</td>
+            <td style="padding:8px 12px; border-bottom:1px solid #222; color:#e0e0e0; font-size:13px;">{h.location}</td>
+            <td style="padding:8px 12px; border-bottom:1px solid #222; color:#9aa0a7; font-size:12px;">{h.activity}</td>
+            <td style="padding:8px 12px; border-bottom:1px solid #222; color:#555; font-size:11px; white-space:nowrap;">{h.status_change_date.strftime('%d/%m') if h.status_change_date else ''}</td>
         </tr>""" for h in concluded)
-    empty = '<tr><td colspan="3" style="padding:16px 12px; color:#666; text-align:center;">Nenhuma demanda concluída no período</td></tr>' if not concluded else ''
+    empty_row = '<tr><td colspan="3" style="padding:16px 12px; color:#555; text-align:center; font-size:13px;">Nenhuma demanda concluída no período</td></tr>' if not concluded else ''
+
     return f"""
-    <div style="font-family:monospace; background:#111; color:#e0e0e0; padding:32px; max-width:600px; margin:auto;">
+    <div style="font-family:Arial,sans-serif; background:#111; color:#e0e0e0; padding:32px; max-width:600px; margin:auto;">
         <div style="border-left:4px solid #f5a623; padding-left:16px; margin-bottom:24px;">
             <div style="font-size:11px; text-transform:uppercase; letter-spacing:2px; color:#9aa0a7;">Painel de Bordo</div>
             <h1 style="color:#f5a623; font-size:20px; margin:4px 0;">Resumo Semanal</h1>
             <div style="font-size:13px; color:#9aa0a7;">Semana de {week_label}</div>
         </div>
-        <p style="color:#9aa0a7; margin-bottom:20px;">Olá, <strong style="color:#e0e0e0;">{user.full_name or user.username}</strong>! Aqui está o resumo das suas demandas concluídas na semana passada.</p>
-        <div style="background:#1a1a1a; border-radius:6px; padding:16px; margin-bottom:24px; text-align:center;">
-            <div style="font-size:36px; font-weight:800; color:#3ddc84;">{len(concluded)}</div>
-            <div style="font-size:12px; text-transform:uppercase; letter-spacing:1px; color:#9aa0a7;">Demanda{'s' if len(concluded) != 1 else ''} Concluída{'s' if len(concluded) != 1 else ''}</div>
-        </div>
-        {'<table style="width:100%; border-collapse:collapse; background:#1a1a1a; border-radius:6px; overflow:hidden;"><thead><tr><th style="padding:8px 12px; text-align:left; font-size:11px; text-transform:uppercase; color:#9aa0a7; border-bottom:1px solid #2a2a2a;">Local</th><th style="padding:8px 12px; text-align:left; font-size:11px; text-transform:uppercase; color:#9aa0a7; border-bottom:1px solid #2a2a2a;">Atividade</th><th style="padding:8px 12px; text-align:left; font-size:11px; text-transform:uppercase; color:#9aa0a7; border-bottom:1px solid #2a2a2a;">Data</th></tr></thead><tbody>' + rows + empty + '</tbody></table>' if concluded or True else ''}
-        <div style="margin-top:24px; padding-top:16px; border-top:1px solid #2a2a2a; font-size:11px; color:#555; text-align:center;">
-            Desenvolvido por MD Soluções Tecnológicas · <a href="{os.getenv('FRONTEND_URL', '')}" style="color:#f5a623;">Abrir Painel de Bordo</a>
+
+        <p style="color:#9aa0a7; margin-bottom:20px; font-size:14px;">Olá, <strong style="color:#e0e0e0;">{user.full_name or user.username}</strong>! Aqui está o resumo das suas demandas concluídas na semana passada.</p>
+
+        <!-- Card de total -->
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
+            <tr>
+                <td style="background:#1a1a1a; border-radius:6px; padding:20px; text-align:center;">
+                    <div style="font-size:48px; font-weight:800; color:#3ddc84; line-height:1;">{len(concluded)}</div>
+                    <div style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#9aa0a7; margin-top:4px;">Demanda{'s' if len(concluded) != 1 else ''} Concluída{'s' if len(concluded) != 1 else ''}</div>
+                </td>
+            </tr>
+        </table>
+
+        {location_section}
+
+        <!-- Lista de demandas -->
+        <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#9aa0a7; margin:20px 0 8px;">Detalhamento</h3>
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1a1a1a; border-radius:6px; overflow:hidden;">
+            <thead>
+                <tr>
+                    <th style="padding:8px 12px; text-align:left; font-size:11px; text-transform:uppercase; color:#9aa0a7; border-bottom:1px solid #2a2a2a;">Local</th>
+                    <th style="padding:8px 12px; text-align:left; font-size:11px; text-transform:uppercase; color:#9aa0a7; border-bottom:1px solid #2a2a2a;">Atividade</th>
+                    <th style="padding:8px 12px; text-align:left; font-size:11px; text-transform:uppercase; color:#9aa0a7; border-bottom:1px solid #2a2a2a;">Data</th>
+                </tr>
+            </thead>
+            <tbody>{rows}{empty_row}</tbody>
+        </table>
+
+        <div style="margin-top:28px; padding-top:16px; border-top:1px solid #222; font-size:11px; color:#555; text-align:center;">
+            Desenvolvido por <strong style="color:#9aa0a7;">MD Soluções Tecnológicas</strong> ·
+            <a href="{os.getenv('FRONTEND_URL', '')}" style="color:#f5a623; text-decoration:none;">Abrir Painel de Bordo</a>
         </div>
     </div>"""
 
@@ -2221,44 +2282,58 @@ def build_feedback_email_personal(user, concluded, workspace, week_start, week_e
 def build_feedback_email_admin(workspace, all_concluded, members, week_start, week_end):
     """HTML do email do admin: visão geral do time."""
     week_label = f"{week_start.strftime('%d/%m')} a {week_end.strftime('%d/%m/%Y')}"
+    from collections import Counter as _Counter
 
-    # Agrupar por responsável
+    # Por responsável
     by_member = {}
     for h in all_concluded:
         uid = h.assigned_to_user_id or h.user_id
         by_member.setdefault(uid, []).append(h)
 
-    member_rows = ''
-    for member in members:
-        count = len(by_member.get(member.user_id, []))
-        color = '#3ddc84' if count > 0 else '#555'
-        member_rows += f"""
-            <tr>
-                <td style="padding:8px 12px; border-bottom:1px solid #2a2a2a; color:#e0e0e0;">{member.fullName or member.userId}</td>
-                <td style="padding:8px 12px; border-bottom:1px solid #2a2a2a; color:{color}; font-weight:bold;">{count}</td>
-            </tr>"""
+    max_member_count = max((len(v) for v in by_member.values()), default=1)
+    member_bars = ''.join(
+        email_bar(m.fullName[:22] if m.fullName else str(m.user_id),
+                  len(by_member.get(m.user_id, [])),
+                  max_member_count, '#f5a623', len(all_concluded))
+        for m in sorted(members, key=lambda m: len(by_member.get(m.user_id, [])), reverse=True)
+    )
+
+    # Por local (top 6)
+    by_location = _Counter(h.location for h in all_concluded)
+    top_locs = by_location.most_common(6)
+    max_loc = top_locs[0][1] if top_locs else 1
+    location_bars = ''.join(email_bar(loc[:22], cnt, max_loc, '#4fc3f7', len(all_concluded)) for loc, cnt in top_locs)
 
     return f"""
-    <div style="font-family:monospace; background:#111; color:#e0e0e0; padding:32px; max-width:600px; margin:auto;">
+    <div style="font-family:Arial,sans-serif; background:#111; color:#e0e0e0; padding:32px; max-width:600px; margin:auto;">
         <div style="border-left:4px solid #f5a623; padding-left:16px; margin-bottom:24px;">
-            <div style="font-size:11px; text-transform:uppercase; letter-spacing:2px; color:#9aa0a7;">Painel de Bordo · Admin</div>
-            <h1 style="color:#f5a623; font-size:20px; margin:4px 0;">Resumo do Time</h1>
+            <div style="font-size:11px; text-transform:uppercase; letter-spacing:2px; color:#9aa0a7;">Painel de Bordo · Visão do Time</div>
+            <h1 style="color:#f5a623; font-size:20px; margin:4px 0;">Resumo Semanal</h1>
             <div style="font-size:13px; color:#9aa0a7;">Semana de {week_label} · {workspace.name}</div>
         </div>
-        <div style="background:#1a1a1a; border-radius:6px; padding:16px; margin-bottom:24px; text-align:center;">
-            <div style="font-size:36px; font-weight:800; color:#3ddc84;">{len(all_concluded)}</div>
-            <div style="font-size:12px; text-transform:uppercase; letter-spacing:1px; color:#9aa0a7;">Total de Demandas Concluídas</div>
-        </div>
-        <h3 style="font-size:12px; text-transform:uppercase; letter-spacing:1px; color:#9aa0a7; margin-bottom:12px;">Por Pessoa</h3>
-        <table style="width:100%; border-collapse:collapse; background:#1a1a1a; border-radius:6px; overflow:hidden;">
-            <thead><tr>
-                <th style="padding:8px 12px; text-align:left; font-size:11px; text-transform:uppercase; color:#9aa0a7; border-bottom:1px solid #2a2a2a;">Membro</th>
-                <th style="padding:8px 12px; text-align:left; font-size:11px; text-transform:uppercase; color:#9aa0a7; border-bottom:1px solid #2a2a2a;">Concluídas</th>
-            </tr></thead>
-            <tbody>{member_rows}</tbody>
+
+        <!-- Card de total -->
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
+            <tr>
+                <td style="background:#1a1a1a; border-radius:6px; padding:20px; text-align:center;">
+                    <div style="font-size:48px; font-weight:800; color:#3ddc84; line-height:1;">{len(all_concluded)}</div>
+                    <div style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#9aa0a7; margin-top:4px;">Demandas Concluídas pelo Time</div>
+                </td>
+            </tr>
         </table>
-        <div style="margin-top:24px; padding-top:16px; border-top:1px solid #2a2a2a; font-size:11px; color:#555; text-align:center;">
-            Desenvolvido por MD Soluções Tecnológicas · <a href="{os.getenv('FRONTEND_URL', '')}" style="color:#f5a623;">Abrir Painel de Bordo</a>
+
+        <!-- Gráfico por pessoa -->
+        <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#9aa0a7; margin:0 0 8px;">Por Pessoa</h3>
+        <table width="100%" cellpadding="0" cellspacing="4" border="0" style="background:#1a1a1a; border-radius:6px; padding:12px; margin-bottom:20px;">
+            {member_bars if member_bars else '<tr><td style="color:#555; padding:8px; font-size:12px;">Nenhum membro com atividade no período</td></tr>'}
+        </table>
+
+        <!-- Gráfico por local -->
+        {'<h3 style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#9aa0a7; margin:0 0 8px;">Por Local (Top ' + str(len(top_locs)) + ')</h3><table width="100%" cellpadding="0" cellspacing="4" border="0" style="background:#1a1a1a; border-radius:6px; padding:12px; margin-bottom:20px;">' + location_bars + '</table>' if top_locs else ''}
+
+        <div style="margin-top:28px; padding-top:16px; border-top:1px solid #222; font-size:11px; color:#555; text-align:center;">
+            Desenvolvido por <strong style="color:#9aa0a7;">MD Soluções Tecnológicas</strong> ·
+            <a href="{os.getenv('FRONTEND_URL', '')}" style="color:#f5a623; text-decoration:none;">Abrir Painel de Bordo</a>
         </div>
     </div>"""
 
