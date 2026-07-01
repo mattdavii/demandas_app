@@ -212,9 +212,7 @@ class WorkGroup(db.Model):
     
     __table_args__ = (db.UniqueConstraint('workspace_id', 'name', name='unique_workspace_group_name'),)
     
-    def to_dict(self):
-        completed_keys = {s.key for s in StatusConfig.query.filter_by(workspace_id=self.workspace_id, is_completed=True).all()}
-        active_demands = [d for d in self.demands if d.status not in completed_keys]
+    def to_dict(self, demands_count=None):
         return {
             'id': self.id,
             'name': self.name,
@@ -222,7 +220,7 @@ class WorkGroup(db.Model):
             'color': self.color,
             'description': self.description,
             'order': self.order,
-            'demandsCount': len(active_demands)
+            'demandsCount': demands_count if demands_count is not None else 0
         }
 
 class Demand(db.Model):
@@ -248,8 +246,11 @@ class Demand(db.Model):
     is_recurring = db.Column(db.Boolean, default=False)
     recurrence_type = db.Column(db.String(20), nullable=True)  # 'weekly'|'biweekly'|'monthly'|'quarterly'|'semiannual'|'yearly'
     
-    def to_dict(self):
-        assigned_user = User.query.get(self.assigned_to_user_id) if self.assigned_to_user_id else None
+    def to_dict(self, user_cache=None):
+        if self.assigned_to_user_id:
+            assigned_user = (user_cache or {}).get(self.assigned_to_user_id) or User.query.get(self.assigned_to_user_id)
+        else:
+            assigned_user = None
         return {
             'id': self.id,
             'workGroupId': self.work_group_id,
@@ -1480,7 +1481,17 @@ def get_work_groups():
             db.and_(WorkGroup.workspace_id == None, WorkGroup.user_id == user_id, WorkGroup.is_active == True)
         )
     ).order_by(WorkGroup.order).all()
-    return jsonify([g.to_dict() for g in groups]), 200
+
+    # Contar demandas ativas por grupo numa query só (evita N+1 lazy-load)
+    terminal_keys = [s.key for s in ws_filter(StatusConfig, user_id, workspace_id, {'is_completed': True}).all()]
+    q = db.session.query(Demand.work_group_id, db.func.count(Demand.id)).filter(
+        db.or_(Demand.workspace_id == workspace_id, db.and_(Demand.workspace_id == None, Demand.user_id == user_id))
+    )
+    if terminal_keys:
+        q = q.filter(~Demand.status.in_(terminal_keys))
+    counts = {row[0]: row[1] for row in q.group_by(Demand.work_group_id).all()}
+
+    return jsonify([g.to_dict(demands_count=counts.get(g.id, 0)) for g in groups]), 200
 
 @app.route('/api/work-groups', methods=['POST'])
 @jwt_required()
@@ -1569,7 +1580,12 @@ def get_demands():
     if terminal_keys:
         query = query.filter(~Demand.status.in_(terminal_keys))
     demands = query.all()
-    return jsonify([d.to_dict() for d in demands]), 200
+
+    # Preload de usuários responsáveis numa query só (evita N+1 por demanda)
+    assignee_ids = {d.assigned_to_user_id for d in demands if d.assigned_to_user_id}
+    user_cache = {u.id: u for u in User.query.filter(User.id.in_(assignee_ids)).all()} if assignee_ids else {}
+
+    return jsonify([d.to_dict(user_cache=user_cache) for d in demands]), 200
 
 @app.route('/api/demands', methods=['POST'])
 @jwt_required()
