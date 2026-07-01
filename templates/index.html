@@ -1230,12 +1230,12 @@
     <div id="accessKeyContainer" style="display:none; max-width: 420px; width: 100%; background: var(--panel); border: 1px solid var(--panel-border); border-radius: var(--radius); padding: 2.5rem; box-shadow: 0 20px 60px rgba(0,0,0,0.5);">
         <div class="auth-form">
             <h2>🔒 Acesso Restrito</h2>
-            <p>Sua conta foi criada, mas o acesso à plataforma precisa ser liberado com uma chave fornecida pelo administrador.</p>
+            <p id="accessKeyMsg">Sua conta foi criada, mas o acesso à plataforma precisa ser liberado com uma chave fornecida pelo administrador.</p>
         </div>
         <div class="alert" id="accessKeyAlert"></div>
         <div class="form-group">
             <label>Chave de Acesso</label>
-            <input type="text" id="accessKeyInput" placeholder="Cole sua chave aqui">
+            <input type="text" id="accessKeyInput" placeholder="Cole sua chave aqui" style="text-transform: uppercase; letter-spacing: 0.1em;">
         </div>
         <button class="btn btn-primary" onclick="submitAccessKey()">Liberar Acesso</button>
         <button class="btn btn-secondary" style="margin-top: 0.75rem;" onclick="doLogout()">Sair</button>
@@ -1498,10 +1498,21 @@
             <div class="card" style="margin-top: 1.5rem;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
                     <h3 style="margin-bottom:0;">👤 Equipe</h3>
-                    <button class="btn btn-sm btn-primary admin-only-section" style="width:auto; display:inline-flex;" onclick="showInviteMemberModal()">➕ Convidar Membro</button>
+                    <button class="btn btn-sm btn-primary admin-only-section" style="width:auto; display:inline-flex;" onclick="showInviteMemberModal()">✉️ Convidar por E-mail</button>
                 </div>
                 <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 1rem;">Quem tem acesso ao seu workspace.</p>
                 <div id="teamMembersList" class="scrollable-list"></div>
+            </div>
+
+            <div class="card admin-only-section" style="margin-top: 1.5rem;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
+                    <h3 style="margin-bottom:0;">🔗 Links de Convite</h3>
+                    <button class="btn btn-sm btn-primary" style="width:auto;" onclick="generateInviteKey()">➕ Gerar Novo Link</button>
+                </div>
+                <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                    Compartilhe o link com quem quiser convidar. A pessoa acessa, cria a conta e já entra no seu workspace automaticamente. Links multi-uso: o mesmo link funciona pra várias pessoas. Revogue quando quiser encerrar o acesso.
+                </p>
+                <div id="inviteKeysList" class="scrollable-list"></div>
             </div>
 
             <div class="card admin-only-section" style="margin-top: 1.5rem;">
@@ -2460,6 +2471,16 @@
             document.getElementById('authContainer').style.display = 'none';
             document.getElementById('appContainer').classList.remove('show');
             document.getElementById('accessKeyContainer').style.display = 'block';
+
+            // Se veio via link de convite (?invite=CHAVE), preenche automaticamente
+            // e ajusta a mensagem pra deixar claro que é um convite de equipe.
+            const urlParams = new URLSearchParams(window.location.search);
+            const inviteKey = urlParams.get('invite');
+            if (inviteKey) {
+                document.getElementById('accessKeyInput').value = inviteKey.toUpperCase();
+                document.getElementById('accessKeyMsg').textContent =
+                    'Você foi convidado para um workspace. Clique em "Liberar Acesso" para entrar.';
+            }
         }
 
         async function submitAccessKey() {
@@ -2895,6 +2916,129 @@
             } catch (e) {
                 console.error('Erro:', e);
                 alert('Erro de conexão ao salvar logo');
+            }
+        }
+
+        // ============= LINKS DE CONVITE (TEAM INVITE KEYS) =============
+        async function loadInviteKeys() {
+            const container = document.getElementById('inviteKeysList');
+            if (!container) return;
+            container.innerHTML = '<div style="text-align:center; padding:1rem; color:var(--text-secondary);">Carregando...</div>';
+
+            try {
+                const response = await fetchWithRetry(`${API_URL}/workspace/invite-keys`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+
+                if (!response.ok) throw new Error('Erro ao carregar chaves');
+                const keys = await response.json();
+                renderInviteKeys(keys);
+            } catch (e) {
+                container.innerHTML = '<div class="kanban-empty">Erro ao carregar links de convite</div>';
+            }
+        }
+
+        function getInviteLink(keyValue) {
+            const base = window.location.origin + window.location.pathname;
+            return `${base}?invite=${keyValue}`;
+        }
+
+        function renderInviteKeys(keys) {
+            const container = document.getElementById('inviteKeysList');
+            const active = keys.filter(k => k.status === 'available');
+            const revoked = keys.filter(k => k.status === 'revoked');
+
+            if (keys.length === 0) {
+                container.innerHTML = '<div class="kanban-empty">Nenhum link gerado ainda. Clique em "Gerar Novo Link".</div>';
+                return;
+            }
+
+            const renderKey = (k) => {
+                const link = getInviteLink(k.key);
+                const isActive = k.status === 'available';
+                return `
+                    <div class="config-list-row" style="opacity:${isActive ? 1 : 0.5};">
+                        <div class="config-list-info" style="flex-direction:column; align-items:flex-start; gap:0.3rem;">
+                            <div style="display:flex; align-items:center; gap:0.5rem;">
+                                <code style="font-size:0.85rem; color:var(--amber-bright); letter-spacing:0.1em;">${escapeHtml(k.key)}</code>
+                                ${isActive ? `<span class="config-completed-tag" style="color:var(--led-green); border-color:var(--led-green);">ativo</span>` : `<span class="config-completed-tag" style="color:var(--text-secondary); border-color:var(--border);">revogado</span>`}
+                            </div>
+                            <div style="font-size:0.7rem; color:var(--text-secondary);">
+                                Gerado em ${k.createdAt ? new Date(k.createdAt).toLocaleDateString('pt-BR') : '—'}
+                                ${k.usedBy ? ` · Primeiro uso: ${escapeHtml(k.usedBy)}` : ''}
+                            </div>
+                        </div>
+                        <div class="config-list-actions" style="gap:0.4rem;">
+                            ${isActive ? `
+                                <button class="btn-edit btn-sm" onclick="copyInviteLink('${escapeHtml(link)}', this)" title="Copiar link">📋 Copiar</button>
+                                <button class="btn-delete btn-sm" onclick="revokeInviteKey(${k.id})" title="Revogar">Revogar</button>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            };
+
+            container.innerHTML = active.map(renderKey).join('') +
+                (revoked.length ? `<div style="font-size:0.72rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.04em; padding:0.75rem 0 0.25rem;">Revogados</div>` + revoked.map(renderKey).join('') : '');
+        }
+
+        function copyInviteLink(link, btn) {
+            navigator.clipboard.writeText(link).then(() => {
+                const original = btn.textContent;
+                btn.textContent = '✅ Copiado!';
+                btn.style.color = 'var(--led-green)';
+                setTimeout(() => {
+                    btn.textContent = original;
+                    btn.style.color = '';
+                }, 2000);
+            }).catch(() => {
+                // Fallback para browsers sem clipboard API
+                const ta = document.createElement('textarea');
+                ta.value = link;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                btn.textContent = '✅ Copiado!';
+                setTimeout(() => { btn.textContent = '📋 Copiar'; }, 2000);
+            });
+        }
+
+        async function generateInviteKey() {
+            try {
+                const response = await fetchWithRetry(`${API_URL}/workspace/invite-keys`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+
+                if (response.ok) {
+                    loadInviteKeys();
+                } else {
+                    const data = await response.json().catch(() => ({}));
+                    alert(data.error || 'Erro ao gerar link de convite');
+                }
+            } catch (e) {
+                alert('Erro de conexão ao gerar link de convite');
+            }
+        }
+
+        async function revokeInviteKey(keyId) {
+            if (!confirm('Revogar este link? Ele deixará de funcionar imediatamente. Quem já entrou não perde o acesso.')) return;
+
+            try {
+                const response = await fetchWithRetry(`${API_URL}/workspace/invite-keys/${keyId}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+
+                if (response.ok) {
+                    loadInviteKeys();
+                } else {
+                    const data = await response.json().catch(() => ({}));
+                    alert(data.error || 'Erro ao revogar link');
+                }
+            } catch (e) {
+                alert('Erro de conexão ao revogar link');
             }
         }
 
@@ -5948,6 +6092,7 @@
                 renderThemeGrid();
                 refreshPushStatus();
                 loadTeamMembers();
+                loadInviteKeys();
                 applyRoleBasedUI();
             }
             if (tab === 'calendar') {
