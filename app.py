@@ -497,37 +497,51 @@ with app.app_context():
     # Cada ALTER TABLE roda em transação própria e isolada: se uma falhar por deadlock
     # ou coluna já existente, as outras continuam. Isso evita o deadlock que acontecia
     # quando o Render reiniciava com uma conexão antiga ainda ativa no Neon.
-    _migrations = [
-        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS reminder_at TIMESTAMP",
-        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN DEFAULT FALSE",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS access_verified BOOLEAN DEFAULT TRUE",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE",
-        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS demand_id INTEGER",
-        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS priority VARCHAR(20)",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS theme VARCHAR(30) DEFAULT 'bancada'",
-        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS checklist JSON",
-        "ALTER TABLE work_groups ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
-        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
-        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
-        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
-        "ALTER TABLE priority_configs ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
-        "ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS key_type VARCHAR(20) DEFAULT 'personal'",
-        "ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
-        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS assigned_to_user_id INTEGER",
-        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS assigned_to_user_id INTEGER",
-        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS checklist JSON",
-        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT FALSE",
-        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS recurrence_type VARCHAR(20)",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS weekly_feedback_enabled BOOLEAN DEFAULT TRUE",
-        "ALTER TABLE workspaces ALTER COLUMN logo_url TYPE TEXT",
+    # Agrupa ALTER TABLE por tabela: cada grupo numa transação só,
+    # reduz de 22 para 7 round-trips e evita deadlock entre elas.
+    _migration_groups = [
+        [
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS access_verified BOOLEAN DEFAULT TRUE",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS theme VARCHAR(30) DEFAULT 'bancada'",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS weekly_feedback_enabled BOOLEAN DEFAULT TRUE",
+        ],
+        [
+            "ALTER TABLE demands ADD COLUMN IF NOT EXISTS reminder_at TIMESTAMP",
+            "ALTER TABLE demands ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE demands ADD COLUMN IF NOT EXISTS checklist JSON",
+            "ALTER TABLE demands ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
+            "ALTER TABLE demands ADD COLUMN IF NOT EXISTS assigned_to_user_id INTEGER",
+            "ALTER TABLE demands ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE demands ADD COLUMN IF NOT EXISTS recurrence_type VARCHAR(20)",
+        ],
+        [
+            "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS demand_id INTEGER",
+            "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS priority VARCHAR(20)",
+            "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
+            "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS assigned_to_user_id INTEGER",
+            "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS checklist JSON",
+        ],
+        [
+            "ALTER TABLE work_groups ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
+            "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
+            "ALTER TABLE priority_configs ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
+        ],
+        [
+            "ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS key_type VARCHAR(20) DEFAULT 'personal'",
+            "ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
+        ],
+        [
+            "ALTER TABLE workspaces ALTER COLUMN logo_url TYPE TEXT",
+        ],
     ]
-    for _stmt in _migrations:
+    for _group in _migration_groups:
         try:
-            db.session.execute(text(_stmt))
+            for _stmt in _group:
+                db.session.execute(text(_stmt))
             db.session.commit()
         except Exception as _e:
             db.session.rollback()
-            # Silencioso — coluna já existe ou lock temporário; próximo restart pega o que falhou
 
     # Promove automaticamente a conta mais antiga a administrador, caso ainda não haja nenhum
     # (garante que o sistema de chaves tenha um admin de partida, sem passo manual)
