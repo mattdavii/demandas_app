@@ -61,6 +61,7 @@ class User(db.Model):
     access_verified = db.Column(db.Boolean, default=True)
     is_admin = db.Column(db.Boolean, default=False)
     theme = db.Column(db.String(30), default='bancada')
+    weekly_feedback_enabled = db.Column(db.Boolean, default=True)
     
     # Relacionamentos
     demands = db.relationship('Demand', foreign_keys='Demand.user_id', backref='user', lazy=True, cascade='all, delete-orphan')
@@ -93,7 +94,8 @@ class User(db.Model):
             'createdAt': self.created_at.isoformat() if self.created_at else None,
             'accessVerified': self.access_verified,
             'isAdmin': self.is_admin,
-            'theme': self.theme or 'bancada'
+            'theme': self.theme or 'bancada',
+            'weeklyFeedbackEnabled': self.weekly_feedback_enabled if self.weekly_feedback_enabled is not None else True
         }
 
 class Workspace(db.Model):
@@ -513,6 +515,7 @@ with app.app_context():
         db.session.execute(text("ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS assigned_to_user_id INTEGER"))
         db.session.execute(text("ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS checklist JSON"))
         db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT FALSE"))
+        db.session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS weekly_feedback_enabled BOOLEAN DEFAULT TRUE"))
         db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS recurrence_type VARCHAR(20)"))
         db.session.execute(text("ALTER TABLE workspaces ALTER COLUMN logo_url TYPE TEXT"))
         db.session.commit()
@@ -2171,6 +2174,196 @@ def get_activity_feed():
         })
 
     return jsonify(items), 200
+
+
+# ============= FEEDBACK SEMANAL =============
+@app.route('/api/auth/weekly-feedback', methods=['POST'])
+@jwt_required()
+def set_weekly_feedback():
+    """Ativa ou desativa o email de feedback semanal para o usuário atual."""
+    user_id = int(get_jwt_identity())
+    user = User.query.get_or_404(user_id)
+    data = request.get_json()
+    user.weekly_feedback_enabled = bool(data.get('enabled', True))
+    db.session.commit()
+    return jsonify({'weeklyFeedbackEnabled': user.weekly_feedback_enabled}), 200
+
+
+def build_feedback_email_personal(user, concluded, workspace, week_start, week_end):
+    """HTML do email pessoal: resumo das demandas que a pessoa concluiu."""
+    week_label = f"{week_start.strftime('%d/%m')} a {week_end.strftime('%d/%m/%Y')}"
+    rows = ''.join(f"""
+        <tr>
+            <td style="padding:8px 12px; border-bottom:1px solid #2a2a2a; color:#e0e0e0;">{h.location}</td>
+            <td style="padding:8px 12px; border-bottom:1px solid #2a2a2a; color:#e0e0e0;">{h.activity}</td>
+            <td style="padding:8px 12px; border-bottom:1px solid #2a2a2a; color:#9aa0a7; font-size:12px;">{h.status_change_date.strftime('%d/%m') if h.status_change_date else ''}</td>
+        </tr>""" for h in concluded)
+    empty = '<tr><td colspan="3" style="padding:16px 12px; color:#666; text-align:center;">Nenhuma demanda concluída no período</td></tr>' if not concluded else ''
+    return f"""
+    <div style="font-family:monospace; background:#111; color:#e0e0e0; padding:32px; max-width:600px; margin:auto;">
+        <div style="border-left:4px solid #f5a623; padding-left:16px; margin-bottom:24px;">
+            <div style="font-size:11px; text-transform:uppercase; letter-spacing:2px; color:#9aa0a7;">Painel de Bordo</div>
+            <h1 style="color:#f5a623; font-size:20px; margin:4px 0;">Resumo Semanal</h1>
+            <div style="font-size:13px; color:#9aa0a7;">Semana de {week_label}</div>
+        </div>
+        <p style="color:#9aa0a7; margin-bottom:20px;">Olá, <strong style="color:#e0e0e0;">{user.full_name or user.username}</strong>! Aqui está o resumo das suas demandas concluídas na semana passada.</p>
+        <div style="background:#1a1a1a; border-radius:6px; padding:16px; margin-bottom:24px; text-align:center;">
+            <div style="font-size:36px; font-weight:800; color:#3ddc84;">{len(concluded)}</div>
+            <div style="font-size:12px; text-transform:uppercase; letter-spacing:1px; color:#9aa0a7;">Demanda{'s' if len(concluded) != 1 else ''} Concluída{'s' if len(concluded) != 1 else ''}</div>
+        </div>
+        {'<table style="width:100%; border-collapse:collapse; background:#1a1a1a; border-radius:6px; overflow:hidden;"><thead><tr><th style="padding:8px 12px; text-align:left; font-size:11px; text-transform:uppercase; color:#9aa0a7; border-bottom:1px solid #2a2a2a;">Local</th><th style="padding:8px 12px; text-align:left; font-size:11px; text-transform:uppercase; color:#9aa0a7; border-bottom:1px solid #2a2a2a;">Atividade</th><th style="padding:8px 12px; text-align:left; font-size:11px; text-transform:uppercase; color:#9aa0a7; border-bottom:1px solid #2a2a2a;">Data</th></tr></thead><tbody>' + rows + empty + '</tbody></table>' if concluded or True else ''}
+        <div style="margin-top:24px; padding-top:16px; border-top:1px solid #2a2a2a; font-size:11px; color:#555; text-align:center;">
+            Desenvolvido por MD Soluções Tecnológicas · <a href="{os.getenv('FRONTEND_URL', '')}" style="color:#f5a623;">Abrir Painel de Bordo</a>
+        </div>
+    </div>"""
+
+
+def build_feedback_email_admin(workspace, all_concluded, members, week_start, week_end):
+    """HTML do email do admin: visão geral do time."""
+    week_label = f"{week_start.strftime('%d/%m')} a {week_end.strftime('%d/%m/%Y')}"
+
+    # Agrupar por responsável
+    by_member = {}
+    for h in all_concluded:
+        uid = h.assigned_to_user_id or h.user_id
+        by_member.setdefault(uid, []).append(h)
+
+    member_rows = ''
+    for member in members:
+        count = len(by_member.get(member.user_id, []))
+        color = '#3ddc84' if count > 0 else '#555'
+        member_rows += f"""
+            <tr>
+                <td style="padding:8px 12px; border-bottom:1px solid #2a2a2a; color:#e0e0e0;">{member.fullName or member.userId}</td>
+                <td style="padding:8px 12px; border-bottom:1px solid #2a2a2a; color:{color}; font-weight:bold;">{count}</td>
+            </tr>"""
+
+    return f"""
+    <div style="font-family:monospace; background:#111; color:#e0e0e0; padding:32px; max-width:600px; margin:auto;">
+        <div style="border-left:4px solid #f5a623; padding-left:16px; margin-bottom:24px;">
+            <div style="font-size:11px; text-transform:uppercase; letter-spacing:2px; color:#9aa0a7;">Painel de Bordo · Admin</div>
+            <h1 style="color:#f5a623; font-size:20px; margin:4px 0;">Resumo do Time</h1>
+            <div style="font-size:13px; color:#9aa0a7;">Semana de {week_label} · {workspace.name}</div>
+        </div>
+        <div style="background:#1a1a1a; border-radius:6px; padding:16px; margin-bottom:24px; text-align:center;">
+            <div style="font-size:36px; font-weight:800; color:#3ddc84;">{len(all_concluded)}</div>
+            <div style="font-size:12px; text-transform:uppercase; letter-spacing:1px; color:#9aa0a7;">Total de Demandas Concluídas</div>
+        </div>
+        <h3 style="font-size:12px; text-transform:uppercase; letter-spacing:1px; color:#9aa0a7; margin-bottom:12px;">Por Pessoa</h3>
+        <table style="width:100%; border-collapse:collapse; background:#1a1a1a; border-radius:6px; overflow:hidden;">
+            <thead><tr>
+                <th style="padding:8px 12px; text-align:left; font-size:11px; text-transform:uppercase; color:#9aa0a7; border-bottom:1px solid #2a2a2a;">Membro</th>
+                <th style="padding:8px 12px; text-align:left; font-size:11px; text-transform:uppercase; color:#9aa0a7; border-bottom:1px solid #2a2a2a;">Concluídas</th>
+            </tr></thead>
+            <tbody>{member_rows}</tbody>
+        </table>
+        <div style="margin-top:24px; padding-top:16px; border-top:1px solid #2a2a2a; font-size:11px; color:#555; text-align:center;">
+            Desenvolvido por MD Soluções Tecnológicas · <a href="{os.getenv('FRONTEND_URL', '')}" style="color:#f5a623;">Abrir Painel de Bordo</a>
+        </div>
+    </div>"""
+
+
+@app.route('/api/cron/weekly-feedback', methods=['GET', 'POST'])
+def cron_weekly_feedback():
+    """Envia emails de feedback semanal. Deve ser chamado toda segunda-feira às 08:00
+    por um serviço externo (ex: cron-job.org). Protegido pela mesma CRON_SECRET_KEY."""
+    secret = request.args.get('key') or request.headers.get('X-Cron-Key')
+    if not secret or secret != os.getenv('CRON_SECRET_KEY'):
+        return jsonify({'error': 'Não autorizado'}), 403
+
+    today = date.today()
+    # Semana anterior: segunda a domingo
+    days_since_monday = today.weekday()
+    last_monday = today - timedelta(days=days_since_monday + 7)
+    last_sunday = last_monday + timedelta(days=6)
+
+    sent_personal = 0
+    sent_admin = 0
+    errors = []
+
+    for workspace in Workspace.query.all():
+        try:
+            members_raw = WorkspaceMember.query.filter_by(workspace_id=workspace.id).all()
+            if not members_raw:
+                continue
+
+            # Todas as demandas concluídas da semana no workspace
+            terminal_keys = [s.key for s in StatusConfig.query.filter_by(workspace_id=workspace.id, is_completed=True).all()]
+            if not terminal_keys:
+                continue
+
+            all_concluded = DemandHistory.query.filter(
+                DemandHistory.workspace_id == workspace.id,
+                DemandHistory.status.in_(terminal_keys),
+                DemandHistory.status_change_date >= last_monday,
+                DemandHistory.status_change_date <= last_sunday
+            ).all()
+
+            # Email pessoal pra cada membro com feedback ativo
+            for member_row in members_raw:
+                user = User.query.get(member_row.user_id)
+                if not user or not user.email:
+                    continue
+                if user.weekly_feedback_enabled is False:
+                    continue
+                if not app.config.get('MAIL_USERNAME'):
+                    continue
+
+                personal_concluded = [
+                    h for h in all_concluded
+                    if (h.assigned_to_user_id or h.user_id) == user.id
+                ]
+
+                try:
+                    html = build_feedback_email_personal(user, personal_concluded, workspace, last_monday, last_sunday)
+                    msg = Message(
+                        f'📊 Seu resumo semanal — {last_monday.strftime("%d/%m")} a {last_sunday.strftime("%d/%m")}',
+                        recipients=[user.email],
+                        html=html
+                    )
+                    mail.send(msg)
+                    sent_personal += 1
+                except Exception as e:
+                    errors.append(f'personal {user.email}: {e}')
+
+            # Email de visão geral pro admin do workspace
+            admins = [m for m in members_raw if m.role == 'admin']
+            for admin_member in admins:
+                admin_user = User.query.get(admin_member.user_id)
+                if not admin_user or not admin_user.email:
+                    continue
+                if admin_user.weekly_feedback_enabled is False:
+                    continue
+                if not app.config.get('MAIL_USERNAME'):
+                    continue
+                try:
+                    # Enriquecer members com nome pra o template
+                    class MemberInfo:
+                        def __init__(self, m):
+                            u = User.query.get(m.user_id)
+                            self.user_id = m.user_id
+                            self.fullName = (u.full_name or u.username) if u else str(m.user_id)
+                    members_info = [MemberInfo(m) for m in members_raw]
+
+                    html = build_feedback_email_admin(workspace, all_concluded, members_info, last_monday, last_sunday)
+                    msg = Message(
+                        f'📊 Resumo do time — {last_monday.strftime("%d/%m")} a {last_sunday.strftime("%d/%m")}',
+                        recipients=[admin_user.email],
+                        html=html
+                    )
+                    mail.send(msg)
+                    sent_admin += 1
+                except Exception as e:
+                    errors.append(f'admin {admin_user.email}: {e}')
+
+        except Exception as e:
+            errors.append(f'workspace {workspace.id}: {e}')
+
+    return jsonify({
+        'message': f'{sent_personal} emails pessoais + {sent_admin} emails de admin enviados',
+        'period': f'{last_monday} a {last_sunday}',
+        'errors': errors
+    }), 200
 
 # ============= ROTAS DE BACKUP =============
 @app.route('/api/export', methods=['GET'])
