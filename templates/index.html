@@ -523,6 +523,9 @@
         }
 
         .modal.show { display: flex; }
+
+        /* Popup de detalhe do card de histórico precisa ficar acima do modal do dia */
+        #historyCardDetailModal { z-index: 1100; }
         .modal-content {
             background: var(--panel);
             border: 1px solid var(--border);
