@@ -41,7 +41,6 @@ app.config['MAIL_USE_TLS'] = os.getenv('MAIL_USE_TLS', True)
 app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
 app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
 app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_DEFAULT_SENDER', 'noreply@demandasapp.com')
-app.config['MAIL_TIMEOUT'] = 10  # 10s máx por operação SMTP — evita travar a requisição
 
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_pre_ping': True,     # testa a conexão antes de usar — reconecta se morta
@@ -69,7 +68,6 @@ class User(db.Model):
     access_verified = db.Column(db.Boolean, default=True)
     is_admin = db.Column(db.Boolean, default=False)
     theme = db.Column(db.String(30), default='bancada')
-    weekly_feedback_enabled = db.Column(db.Boolean, default=True)
     
     # Relacionamentos
     demands = db.relationship('Demand', foreign_keys='Demand.user_id', backref='user', lazy=True, cascade='all, delete-orphan')
@@ -102,8 +100,7 @@ class User(db.Model):
             'createdAt': self.created_at.isoformat() if self.created_at else None,
             'accessVerified': self.access_verified,
             'isAdmin': self.is_admin,
-            'theme': self.theme or 'bancada',
-            'weeklyFeedbackEnabled': self.weekly_feedback_enabled if self.weekly_feedback_enabled is not None else True
+            'theme': self.theme or 'bancada'
         }
 
 class Workspace(db.Model):
@@ -575,25 +572,6 @@ def get_init_data():
         'demands': [d.to_dict(user_cache=user_cache) for d in demands],
     }), 200
 
-@app.route('/api/cron/test-email')
-def test_email_simple():
-    """Envia UM email de teste pro admin pra confirmar que SMTP está funcionando.
-    Não precisa de chave — só funciona se o servidor de email estiver configurado."""
-    if not app.config.get('MAIL_USERNAME'):
-        return jsonify({'error': 'MAIL_USERNAME não configurado'}), 400
-    secret = request.args.get('key') or request.headers.get('X-Cron-Key')
-    if not secret or secret != os.getenv('CRON_SECRET_KEY'):
-        return jsonify({'error': 'Não autorizado'}), 403
-    recipient = request.args.get('to') or app.config.get('MAIL_USERNAME')
-    try:
-        mail.send(Message(
-            '✅ Teste de Email — Painel de Bordo',
-            recipients=[recipient],
-            html='<p style="font-family:monospace; background:#111; color:#3ddc84; padding:2rem;">Email funcionando! O feedback semanal está configurado corretamente.</p>'
-        ))
-        return jsonify({'ok': True, 'sent_to': recipient}), 200
-    except Exception as e:
-        return jsonify({'ok': False, 'error': str(e)}), 500
 
 @app.route('/reset')
 def reset_page():
@@ -2204,268 +2182,6 @@ def get_activity_feed():
 
     return jsonify(items), 200
 
-
-# ============= FEEDBACK SEMANAL =============
-@app.route('/api/auth/weekly-feedback', methods=['POST'])
-@jwt_required()
-def set_weekly_feedback():
-    """Ativa ou desativa o email de feedback semanal para o usuário atual."""
-    user_id = int(get_jwt_identity())
-    user = User.query.get_or_404(user_id)
-    data = request.get_json()
-    user.weekly_feedback_enabled = bool(data.get('enabled', True))
-    db.session.commit()
-    return jsonify({'weeklyFeedbackEnabled': user.weekly_feedback_enabled}), 200
-
-
-def email_bar(label, count, max_count, color='#f5a623', total=None):
-    """Barra de progresso em HTML puro — funciona em qualquer cliente de email."""
-    if max_count == 0:
-        pct = 0
-    else:
-        pct = max(4, int((count / max_count) * 100))
-    pct_label = f'{round(count/total*100)}%' if total and total > 0 else str(count)
-    return f'''
-        <tr>
-            <td style="padding:4px 12px 4px 0; color:#9aa0a7; font-size:12px; white-space:nowrap; width:120px;">{label}</td>
-            <td style="padding:4px 0;">
-                <table width="100%" cellpadding="0" cellspacing="0" border="0">
-                    <tr>
-                        <td style="background:{color}; width:{pct}%; height:14px; border-radius:3px 0 0 3px;">&nbsp;</td>
-                        <td style="background:#2a2a2a; height:14px; border-radius:0 3px 3px 0;">&nbsp;</td>
-                    </tr>
-                </table>
-            </td>
-            <td style="padding:4px 0 4px 10px; color:#e0e0e0; font-size:12px; font-weight:bold; white-space:nowrap; width:40px;">{count} <span style="color:#555; font-weight:normal; font-size:11px;">({pct_label})</span></td>
-        </tr>'''
-
-def build_feedback_email_personal(user, concluded, workspace, week_start, week_end):
-    """HTML do email pessoal: resumo das demandas que a pessoa concluiu."""
-    week_label = f"{week_start.strftime('%d/%m')} a {week_end.strftime('%d/%m/%Y')}"
-
-    # Agrupar por local e por grupo para os mini-gráficos
-    from collections import Counter as _Counter
-    by_location = _Counter(h.location for h in concluded)
-    by_group_id = _Counter(h.work_group_id for h in concluded)
-
-    # Barras por local (top 5)
-    top_locations = by_location.most_common(5)
-    max_loc = top_locations[0][1] if top_locations else 1
-    bars_location = ''.join(email_bar(loc[:22], cnt, max_loc, '#f5a623', len(concluded)) for loc, cnt in top_locations)
-    location_section = f"""
-        <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#9aa0a7; margin:20px 0 8px;">Por Local</h3>
-        <table width="100%" cellpadding="0" cellspacing="0" border="0">{bars_location}</table>
-    """ if top_locations else ''
-
-    # Lista de demandas concluídas
-    rows = ''.join(f"""
-        <tr>
-            <td style="padding:8px 12px; border-bottom:1px solid #222; color:#e0e0e0; font-size:13px;">{h.location}</td>
-            <td style="padding:8px 12px; border-bottom:1px solid #222; color:#9aa0a7; font-size:12px;">{h.activity}</td>
-            <td style="padding:8px 12px; border-bottom:1px solid #222; color:#555; font-size:11px; white-space:nowrap;">{h.status_change_date.strftime('%d/%m') if h.status_change_date else ''}</td>
-        </tr>""" for h in concluded)
-    empty_row = '<tr><td colspan="3" style="padding:16px 12px; color:#555; text-align:center; font-size:13px;">Nenhuma demanda concluída no período</td></tr>' if not concluded else ''
-
-    return f"""
-    <div style="font-family:Arial,sans-serif; background:#111; color:#e0e0e0; padding:32px; max-width:600px; margin:auto;">
-        <div style="border-left:4px solid #f5a623; padding-left:16px; margin-bottom:24px;">
-            <div style="font-size:11px; text-transform:uppercase; letter-spacing:2px; color:#9aa0a7;">Painel de Bordo</div>
-            <h1 style="color:#f5a623; font-size:20px; margin:4px 0;">Resumo Semanal</h1>
-            <div style="font-size:13px; color:#9aa0a7;">Semana de {week_label}</div>
-        </div>
-
-        <p style="color:#9aa0a7; margin-bottom:20px; font-size:14px;">Olá, <strong style="color:#e0e0e0;">{user.full_name or user.username}</strong>! Aqui está o resumo das suas demandas concluídas na semana passada.</p>
-
-        <!-- Card de total -->
-        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
-            <tr>
-                <td style="background:#1a1a1a; border-radius:6px; padding:20px; text-align:center;">
-                    <div style="font-size:48px; font-weight:800; color:#3ddc84; line-height:1;">{len(concluded)}</div>
-                    <div style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#9aa0a7; margin-top:4px;">Demanda{'s' if len(concluded) != 1 else ''} Concluída{'s' if len(concluded) != 1 else ''}</div>
-                </td>
-            </tr>
-        </table>
-
-        {location_section}
-
-        <!-- Lista de demandas -->
-        <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#9aa0a7; margin:20px 0 8px;">Detalhamento</h3>
-        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1a1a1a; border-radius:6px; overflow:hidden;">
-            <thead>
-                <tr>
-                    <th style="padding:8px 12px; text-align:left; font-size:11px; text-transform:uppercase; color:#9aa0a7; border-bottom:1px solid #2a2a2a;">Local</th>
-                    <th style="padding:8px 12px; text-align:left; font-size:11px; text-transform:uppercase; color:#9aa0a7; border-bottom:1px solid #2a2a2a;">Atividade</th>
-                    <th style="padding:8px 12px; text-align:left; font-size:11px; text-transform:uppercase; color:#9aa0a7; border-bottom:1px solid #2a2a2a;">Data</th>
-                </tr>
-            </thead>
-            <tbody>{rows}{empty_row}</tbody>
-        </table>
-
-        <div style="margin-top:28px; padding-top:16px; border-top:1px solid #222; font-size:11px; color:#555; text-align:center;">
-            Desenvolvido por <strong style="color:#9aa0a7;">MD Soluções Tecnológicas</strong> ·
-            <a href="{os.getenv('FRONTEND_URL', '')}" style="color:#f5a623; text-decoration:none;">Abrir Painel de Bordo</a>
-        </div>
-    </div>"""
-
-
-def build_feedback_email_admin(workspace, all_concluded, members, week_start, week_end):
-    """HTML do email do admin: visão geral do time."""
-    week_label = f"{week_start.strftime('%d/%m')} a {week_end.strftime('%d/%m/%Y')}"
-    from collections import Counter as _Counter
-
-    # Por responsável
-    by_member = {}
-    for h in all_concluded:
-        uid = h.assigned_to_user_id or h.user_id
-        by_member.setdefault(uid, []).append(h)
-
-    max_member_count = max((len(v) for v in by_member.values()), default=1)
-    member_bars = ''.join(
-        email_bar(m.fullName[:22] if m.fullName else str(m.user_id),
-                  len(by_member.get(m.user_id, [])),
-                  max_member_count, '#f5a623', len(all_concluded))
-        for m in sorted(members, key=lambda m: len(by_member.get(m.user_id, [])), reverse=True)
-    )
-
-    # Por local (top 6)
-    by_location = _Counter(h.location for h in all_concluded)
-    top_locs = by_location.most_common(6)
-    max_loc = top_locs[0][1] if top_locs else 1
-    location_bars = ''.join(email_bar(loc[:22], cnt, max_loc, '#4fc3f7', len(all_concluded)) for loc, cnt in top_locs)
-
-    return f"""
-    <div style="font-family:Arial,sans-serif; background:#111; color:#e0e0e0; padding:32px; max-width:600px; margin:auto;">
-        <div style="border-left:4px solid #f5a623; padding-left:16px; margin-bottom:24px;">
-            <div style="font-size:11px; text-transform:uppercase; letter-spacing:2px; color:#9aa0a7;">Painel de Bordo · Visão do Time</div>
-            <h1 style="color:#f5a623; font-size:20px; margin:4px 0;">Resumo Semanal</h1>
-            <div style="font-size:13px; color:#9aa0a7;">Semana de {week_label} · {workspace.name}</div>
-        </div>
-
-        <!-- Card de total -->
-        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
-            <tr>
-                <td style="background:#1a1a1a; border-radius:6px; padding:20px; text-align:center;">
-                    <div style="font-size:48px; font-weight:800; color:#3ddc84; line-height:1;">{len(all_concluded)}</div>
-                    <div style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#9aa0a7; margin-top:4px;">Demandas Concluídas pelo Time</div>
-                </td>
-            </tr>
-        </table>
-
-        <!-- Gráfico por pessoa -->
-        <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#9aa0a7; margin:0 0 8px;">Por Pessoa</h3>
-        <table width="100%" cellpadding="0" cellspacing="4" border="0" style="background:#1a1a1a; border-radius:6px; padding:12px; margin-bottom:20px;">
-            {member_bars if member_bars else '<tr><td style="color:#555; padding:8px; font-size:12px;">Nenhum membro com atividade no período</td></tr>'}
-        </table>
-
-        <!-- Gráfico por local -->
-        {'<h3 style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#9aa0a7; margin:0 0 8px;">Por Local (Top ' + str(len(top_locs)) + ')</h3><table width="100%" cellpadding="0" cellspacing="4" border="0" style="background:#1a1a1a; border-radius:6px; padding:12px; margin-bottom:20px;">' + location_bars + '</table>' if top_locs else ''}
-
-        <div style="margin-top:28px; padding-top:16px; border-top:1px solid #222; font-size:11px; color:#555; text-align:center;">
-            Desenvolvido por <strong style="color:#9aa0a7;">MD Soluções Tecnológicas</strong> ·
-            <a href="{os.getenv('FRONTEND_URL', '')}" style="color:#f5a623; text-decoration:none;">Abrir Painel de Bordo</a>
-        </div>
-    </div>"""
-
-
-@app.route('/api/cron/weekly-feedback', methods=['GET', 'POST'])
-def cron_weekly_feedback():
-    """Envia emails de feedback semanal de forma SÍNCRONA.
-    O gunicorn.conf.py define timeout=120s, suficiente para envio de emails.
-    Adicione &test=1 para usar a semana atual (diagnóstico)."""
-    secret = request.args.get('key') or request.headers.get('X-Cron-Key')
-    if not secret or secret != os.getenv('CRON_SECRET_KEY'):
-        return jsonify({'error': 'Não autorizado'}), 403
-
-    if not app.config.get('MAIL_USERNAME'):
-        return jsonify({'message': 'Email não configurado'}), 200
-
-    today = date.today()
-    days_since_monday = today.weekday()
-
-    # ?test=1 usa a semana ATUAL (para diagnóstico); sem o parâmetro usa a semana passada
-    if request.args.get('test') == '1':
-        last_monday = today - timedelta(days=days_since_monday)
-        last_sunday = today
-    else:
-        last_monday = today - timedelta(days=days_since_monday + 7)
-        last_sunday  = last_monday + timedelta(days=6)
-
-    sent_personal = sent_admin = 0
-    errors = []
-
-    try:
-        all_users = {u.id: u for u in User.query.all()}
-
-        for workspace in Workspace.query.all():
-            try:
-                members_raw = WorkspaceMember.query.filter_by(workspace_id=workspace.id).all()
-                if not members_raw:
-                    continue
-
-                ws_users = {m.user_id: all_users.get(m.user_id) for m in members_raw}
-
-                terminal_keys = [s.key for s in StatusConfig.query.filter_by(
-                    workspace_id=workspace.id, is_completed=True).all()]
-                if not terminal_keys:
-                    continue
-
-                all_concluded = DemandHistory.query.filter(
-                    DemandHistory.workspace_id == workspace.id,
-                    DemandHistory.status.in_(terminal_keys),
-                    DemandHistory.status_change_date >= last_monday,
-                    DemandHistory.status_change_date <= last_sunday
-                ).all()
-
-                class MemberInfo:
-                    __slots__ = ('user_id', 'fullName')
-                    def __init__(self, uid, u):
-                        self.user_id = uid
-                        self.fullName = (u.full_name or u.username) if u else str(uid)
-                members_info = [MemberInfo(m.user_id, ws_users.get(m.user_id)) for m in members_raw]
-
-                for member_row in members_raw:
-                    user = ws_users.get(member_row.user_id)
-                    if not user or not user.email or user.weekly_feedback_enabled is False:
-                        continue
-                    personal = [h for h in all_concluded
-                                if (h.assigned_to_user_id or h.user_id) == user.id]
-                    try:
-                        html = build_feedback_email_personal(user, personal, workspace, last_monday, last_sunday)
-                        prefix = '[TESTE] ' if request.args.get('test') == '1' else ''
-                        mail.send(Message(
-                            f'{prefix}📊 Seu resumo semanal — {last_monday.strftime("%d/%m")} a {last_sunday.strftime("%d/%m")}',
-                            recipients=[user.email], html=html))
-                        sent_personal += 1
-                    except Exception as e:
-                        errors.append(f'personal {user.email}: {str(e)[:120]}')
-
-                for admin_member in [m for m in members_raw if m.role == 'admin']:
-                    admin_user = ws_users.get(admin_member.user_id)
-                    if not admin_user or not admin_user.email or admin_user.weekly_feedback_enabled is False:
-                        continue
-                    try:
-                        html = build_feedback_email_admin(workspace, all_concluded, members_info, last_monday, last_sunday)
-                        prefix = '[TESTE] ' if request.args.get('test') == '1' else ''
-                        mail.send(Message(
-                            f'{prefix}📊 Resumo do time — {last_monday.strftime("%d/%m")} a {last_sunday.strftime("%d/%m")}',
-                            recipients=[admin_user.email], html=html))
-                        sent_admin += 1
-                    except Exception as e:
-                        errors.append(f'admin {admin_user.email}: {str(e)[:120]}')
-
-            except Exception as e:
-                errors.append(f'workspace {workspace.id}: {str(e)[:120]}')
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-    print(f'[weekly-feedback] {sent_personal} pessoais + {sent_admin} admin. Período: {last_monday} a {last_sunday}. Erros: {errors}')
-    return jsonify({
-        'sent_personal': sent_personal,
-        'sent_admin': sent_admin,
-        'period': f'{last_monday} a {last_sunday}',
-        'errors': errors
-    }), 200
 
 
 # ============= ROTAS DE BACKUP =============
