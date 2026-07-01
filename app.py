@@ -2363,7 +2363,8 @@ def cron_weekly_feedback():
 
     def _send_all():
         """Processa e envia os emails em background, dentro do contexto da app."""
-        with app.app_context():
+        try:
+          with app.app_context():
             sent_personal = sent_admin = 0
             errors = []
             all_users = {u.id: u for u in User.query.all()}
@@ -2429,6 +2430,42 @@ def cron_weekly_feedback():
                     errors.append(f'workspace {workspace.id}: {str(e)[:100]}')
 
             print(f'[weekly-feedback] {sent_personal} pessoais + {sent_admin} admin enviados. Erros: {errors}')
+        except Exception as _thread_err:
+            print(f'[weekly-feedback] ERRO no thread: {_thread_err}')
+
+    # Modo de teste (?test=1): roda de forma síncrona e retorna o resultado direto
+    # Útil pra debugar sem depender dos logs — nunca usar em produção real
+    if request.args.get('test') == '1':
+        try:
+            with app.app_context():
+                sent_personal = sent_admin = 0
+                errors = []
+                all_users = {u.id: u for u in User.query.all()}
+                for workspace in Workspace.query.all():
+                    members_raw = WorkspaceMember.query.filter_by(workspace_id=workspace.id).all()
+                    ws_users = {m.user_id: all_users.get(m.user_id) for m in members_raw}
+                    terminal_keys = [s.key for s in StatusConfig.query.filter_by(workspace_id=workspace.id, is_completed=True).all()]
+                    all_concluded = DemandHistory.query.filter(
+                        DemandHistory.workspace_id == workspace.id,
+                        DemandHistory.status.in_(terminal_keys) if terminal_keys else text('1=0'),
+                        DemandHistory.status_change_date >= last_monday,
+                        DemandHistory.status_change_date <= last_sunday
+                    ).all() if terminal_keys else []
+                    for member_row in members_raw:
+                        user = ws_users.get(member_row.user_id)
+                        if not user or not user.email or user.weekly_feedback_enabled is False:
+                            continue
+                        personal = [h for h in all_concluded if (h.assigned_to_user_id or h.user_id) == user.id]
+                        try:
+                            html = build_feedback_email_personal(user, personal, workspace, last_monday, last_sunday)
+                            mail.send(Message(f'[TESTE] 📊 Resumo semanal', recipients=[user.email], html=html))
+                            sent_personal += 1
+                        except Exception as e:
+                            errors.append(f'personal {user.email}: {str(e)}')
+                return jsonify({'sent_personal': sent_personal, 'sent_admin': sent_admin,
+                                'period': f'{last_monday} a {last_sunday}', 'errors': errors}), 200
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
 
     # Dispara em background e responde imediatamente (evita timeout do cron-job.org)
     threading.Thread(target=_send_all, daemon=True).start()
