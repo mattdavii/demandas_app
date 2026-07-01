@@ -825,6 +825,20 @@
         .role-badge-admin { color: var(--amber-bright); border: 1px solid var(--amber); }
         .role-badge-member { color: var(--text-secondary); border: 1px solid var(--border); }
 
+        /* Toggle switch reutilizável (push, feedback semanal, etc.) */
+        .toggle-switch { position:relative; display:inline-block; width:44px; height:24px; flex-shrink:0; }
+        .toggle-switch input { opacity:0; width:0; height:0; }
+        .toggle-slider {
+            position:absolute; inset:0; background:var(--border); border-radius:24px; cursor:pointer;
+            transition:background 0.2s;
+        }
+        .toggle-slider::before {
+            content:''; position:absolute; width:18px; height:18px; left:3px; top:3px;
+            background:#fff; border-radius:50%; transition:transform 0.2s;
+        }
+        .toggle-switch input:checked + .toggle-slider { background:var(--amber); }
+        .toggle-switch input:checked + .toggle-slider::before { transform:translateX(20px); }
+
         .scope-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
         .scope-toggle-btn {
             background: var(--panel);
@@ -1570,6 +1584,21 @@
             </div>
 
             <div class="card" style="margin-top: 1.5rem;">
+                <h3>📊 Feedback Semanal por E-mail</h3>
+                <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                    Toda segunda-feira às 08h você recebe um email com o resumo das demandas que concluiu na semana anterior.
+                    Admins também recebem a visão geral do time.
+                </p>
+                <div style="display:flex; align-items:center; gap:1rem;">
+                    <label class="toggle-switch" title="Ativar/desativar feedback semanal">
+                        <input type="checkbox" id="weeklyFeedbackToggle" onchange="setWeeklyFeedback(this.checked)">
+                        <span class="toggle-slider"></span>
+                    </label>
+                    <span id="weeklyFeedbackLabel" style="font-size:0.82rem; color:var(--text-secondary);">Carregando...</span>
+                </div>
+            </div>
+
+            <div class="card" style="margin-top: 1.5rem;">
                 <h3>🔐 Segurança</h3>
                 <button class="btn btn-secondary" onclick="showChangePasswordModal()">Alterar Senha</button>
             </div>
@@ -2086,6 +2115,36 @@
                 outputArray[i] = rawData.charCodeAt(i);
             }
             return outputArray;
+        }
+
+        // ============= FEEDBACK SEMANAL =============
+        function renderWeeklyFeedbackToggle(enabled) {
+            const toggle = document.getElementById('weeklyFeedbackToggle');
+            const label  = document.getElementById('weeklyFeedbackLabel');
+            if (!toggle || !label) return;
+            toggle.checked = enabled;
+            label.textContent = enabled
+                ? 'Ativado — você receberá o resumo toda segunda-feira às 08h'
+                : 'Desativado';
+            label.style.color = enabled ? 'var(--led-green)' : 'var(--text-secondary)';
+        }
+
+        async function setWeeklyFeedback(enabled) {
+            document.getElementById('weeklyFeedbackLabel').textContent = 'Salvando...';
+            try {
+                const response = await fetchWithRetry(`${API_URL}/auth/weekly-feedback`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ enabled })
+                }, 1);
+                if (response.ok) {
+                    renderWeeklyFeedbackToggle(enabled);
+                } else {
+                    renderWeeklyFeedbackToggle(!enabled); // reverte se falhou
+                }
+            } catch (e) {
+                renderWeeklyFeedbackToggle(!enabled);
+            }
         }
 
         async function refreshPushStatus() {
@@ -6345,6 +6404,7 @@
                 loadTeamMembers();
                 loadInviteKeys();
                 applyRoleBasedUI();
+                renderWeeklyFeedbackToggle(currentUser && currentUser.weeklyFeedbackEnabled !== false);
             }
             if (tab === 'calendar') {
                 initCalendar();
