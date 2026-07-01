@@ -1742,6 +1742,14 @@
         </div>
     </div>
 
+    <!-- MODAL DETALHE DO CARD DE HISTÓRICO (Locais) -->
+    <div id="historyCardDetailModal" class="modal">
+        <div class="modal-content" style="max-width: 560px; max-height: 90vh; overflow-y: auto;">
+            <span class="close-modal" onclick="closeHistoryCardDetailModal()" style="position:sticky; top:0; float:right;">&times;</span>
+            <div id="historyCardDetailContent"></div>
+        </div>
+    </div>
+
     <div id="historyDayModal" class="modal">
         <div class="modal-content" style="max-width: 600px;">
             <span class="close-modal" onclick="closeHistoryDayModal()">&times;</span>
@@ -2573,10 +2581,13 @@
 
         function filterByViewScope(items) {
             if (viewScope !== 'mine' || !currentUser) return items;
-            // Filtra demandas atribuídas ao usuário OU criadas por ele (user_id).
-            // Usa == em vez de === porque o id pode vir como número ou string dependendo do contexto.
+            // Prioriza o responsável explícito; se não houver, usa o criador (userId).
+            // A migração já popula assigned_to_user_id = user_id nos registros antigos,
+            // mas mantemos o fallback aqui como defesa pra qualquer registro que escapou.
             return items.filter(item =>
-                (item.assignedToUserId != null && item.assignedToUserId == currentUser.id)
+                (item.assignedToUserId != null
+                    ? item.assignedToUserId == currentUser.id
+                    : item.userId == currentUser.id)
             );
         }
 
@@ -4461,8 +4472,9 @@
                 .filter(d => !isOverdue(d.dueDate))
                 .sort((a, b) => (PRIORITY_RANK[b.priority] || 0) - (PRIORITY_RANK[a.priority] || 0));
 
-            // "Concluídas Hoje" sempre mostra o time todo: o histórico ainda não guarda
-            // o responsável de cada mudança de status, então não dá pra filtrar por pessoa aqui.
+            // Agora que o histórico guarda assigned_to_user_id, o toggle Minhas/Time
+            // funciona também em "Concluídas Hoje". Fallback: se não tiver assignedToUserId
+            // (registros muito antigos anteriores à migração), usa user_id do histórico.
             let concludedToday = [];
             try {
                 const response = await fetch(`${API_URL}/history`, {
@@ -4470,7 +4482,10 @@
                 });
                 if (response.ok) {
                     const history = await response.json();
-                    concludedToday = history.filter(h => isStatusCompleted(h.status) && h.statusChangeDate === todayIso);
+                    const allConcludedToday = history.filter(h => isStatusCompleted(h.status) && h.statusChangeDate === todayIso);
+                    concludedToday = viewScope === 'mine' && currentUser
+                        ? allConcludedToday.filter(h => (h.assignedToUserId || h.userId) == currentUser.id)
+                        : allConcludedToday;
                 }
             } catch (e) {
                 console.error('Erro ao buscar concluídas de hoje:', e);
@@ -4956,11 +4971,16 @@
             `;
         }
 
+        const _historyCardCache = {};
+        let _historyCardIdx = 0;
+
         function renderLocationHistoryCard(entries) {
             const last = entries[entries.length - 1];
             const chain = entries.map(e => getStatusLabel(e.status));
+            const key = 'hc' + (_historyCardIdx++);
+            _historyCardCache[key] = entries;
             return `
-                <div class="demand-card" style="border-left-color: ${getStatusColor(last.status)}; margin-bottom: 0.75rem;">
+                <div class="demand-card" style="border-left-color: ${getStatusColor(last.status)}; margin-bottom: 0.75rem; cursor: pointer;" onclick="showHistoryCardDetail('${key}')">
                     <div class="demand-header">
                         <div>
                             <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(last.workGroupId)}</div>
@@ -4970,8 +4990,71 @@
                     </div>
                     <div style="font-size:0.7rem; color: var(--text-secondary); margin-bottom:0.4rem;">📅 ${formatDateBR(last.statusChangeDate)}${chain.length > 1 ? ` · ${chain.join(' → ')}` : ''}</div>
                     ${last.context ? `<p style="font-size:0.8rem; color: var(--text-secondary);">📌 ${escapeHtml(last.context)}</p>` : ''}
+                    ${last.checklist && last.checklist.length > 0 ? getChecklistProgressHtml(last.checklist) : ''}
                 </div>
             `;
+        }
+
+        function showHistoryCardDetail(key) {
+            const entries = _historyCardCache[key];
+            if (!entries) return;
+            const last = entries[entries.length - 1];
+            const chain = entries.map(e => getStatusLabel(e.status));
+            const checklist = last.checklist || [];
+            const borderColor = getStatusColor(last.status);
+
+            let checklistHtml = '';
+            if (checklist.length > 0) {
+                const done = checklist.filter(i => i.checked).length;
+                checklistHtml = `
+                    <div style="margin-top: 1rem;">
+                        <div style="font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); margin-bottom: 0.5rem;">
+                            ✅ Checklist (${done}/${checklist.length})
+                        </div>
+                        ${checklist.map(item => `
+                            <div style="display:flex; align-items:flex-start; gap:0.5rem; font-size:0.82rem; margin-bottom:0.4rem; ${item.checked ? 'opacity:0.6;' : ''}">
+                                <span style="color:${item.checked ? 'var(--led-green)' : 'var(--border)'}; flex-shrink:0; margin-top:1px;">
+                                    ${item.checked ? '☑' : '☐'}
+                                </span>
+                                <span style="${item.checked ? 'text-decoration:line-through; color:var(--text-secondary);' : ''}">${escapeHtml(item.text)}</span>
+                            </div>
+                        `).join('')}
+                    </div>`;
+            }
+
+            let chainHtml = '';
+            if (chain.length > 1) {
+                chainHtml = `
+                    <div style="margin-top: 0.75rem; padding: 0.6rem 0.75rem; background: var(--panel-raised); border-radius: var(--radius); font-size: 0.72rem; color: var(--text-secondary);">
+                        ${chain.join(' → ')}
+                    </div>`;
+            }
+
+            const priorityBadge = last.priority ? getPriorityBadge(last.priority) : '';
+            const groupBadge = getGroupBadge(last.workGroupId);
+
+            document.getElementById('historyCardDetailContent').innerHTML = `
+                <div style="border-left: 4px solid ${borderColor}; padding-left: 1rem; margin-bottom: 1.25rem; margin-top: 0.5rem;">
+                    <div style="margin-bottom: 0.5rem;">${groupBadge}</div>
+                    <div style="font-size: 1rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.4rem;">${escapeHtml(last.activity)}</div>
+                    <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                        ${getStatusBadgeHtml(last.status)}
+                        ${priorityBadge}
+                    </div>
+                </div>
+                <div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
+                    📅 ${last.createdDate ? `Criada em ${formatDateBR(last.createdDate)} · ` : ''}Concluída em ${formatDateBR(last.statusChangeDate)}
+                </div>
+                ${last.context ? `<p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem; white-space: pre-wrap;">📌 ${escapeHtml(last.context)}</p>` : ''}
+                ${chainHtml}
+                ${checklistHtml}
+                ${checklist.length === 0 ? `<p style="font-size:0.75rem; color:var(--text-secondary); margin-top:1rem; opacity:0.6;">Sem checklist registrado para esta demanda.</p>` : ''}
+            `;
+            document.getElementById('historyCardDetailModal').classList.add('show');
+        }
+
+        function closeHistoryCardDetailModal() {
+            document.getElementById('historyCardDetailModal').classList.remove('show');
         }
 
         function closeLocationModal() {
@@ -5268,12 +5351,16 @@
                 : currentDemands;
             filteredDemands = filterByViewScope(filteredDemands);
 
-            // Os números de "concluídas" (periodHistory) sempre refletem o time todo: o
-            // histórico ainda não guarda o responsável de cada mudança de status, então
-            // o toggle Minhas/Time não consegue filtrar essa parte ainda.
             let periodHistory = (history || []).filter(h => h.statusChangeDate && h.statusChangeDate >= startIso && h.statusChangeDate <= endIso);
             if (groupFilterId) {
                 periodHistory = periodHistory.filter(h => String(h.workGroupId) === groupFilterId);
+            }
+            // Agora que o histórico guarda assigned_to_user_id, o toggle Minhas/Time
+            // filtra as concluídas por responsável. Fallback: user_id (criador) pra registros antigos.
+            if (viewScope === 'mine' && currentUser) {
+                periodHistory = periodHistory.filter(h =>
+                    (h.assignedToUserId || h.userId) == currentUser.id
+                );
             }
 
             const firstStatusKey = STATUS_COLUMNS.length > 0 ? STATUS_COLUMNS[0].key : null;
