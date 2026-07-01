@@ -1262,6 +1262,7 @@
                 <button class="sidebar-link" data-tab="locations" onclick="switchTab('locations')">📍 <span>Locais</span></button>
                 <button class="sidebar-link" data-tab="dashboard" onclick="switchTab('dashboard')">📊 <span>Dashboard</span></button>
                 <button class="sidebar-link" data-tab="notes" onclick="switchTab('notes')">📝 <span>Notas</span></button>
+                <button class="sidebar-link" data-tab="activity" onclick="switchTab('activity')">📣 <span>Atividade</span></button>
                 <button class="sidebar-link" id="adminKeysTabBtn" data-tab="adminkeys" style="display:none;" onclick="switchTab('adminkeys')">🔑 <span>Chaves</span></button>
                 <button class="sidebar-link" data-tab="settings" onclick="switchTab('settings')">⚙️ <span>Configurações</span></button>
             </div>
@@ -1452,6 +1453,20 @@
             </div>
             <div id="notesList" class="notes-grid">
                 <div>Carregando...</div>
+            </div>
+        </div>
+
+        <!-- TAB: FEED DE ATIVIDADE -->
+        <div id="tab-activity" class="tab-content">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem; margin-bottom:1rem;">
+                <h3 style="margin-bottom:0;">📣 Atividade</h3>
+            </div>
+            <div class="scope-toggle" style="margin-bottom: 1.5rem;">
+                <button class="scope-toggle-btn" id="activityScopeMine" onclick="setViewScope('mine', loadActivityFeed)">👤 Minhas</button>
+                <button class="scope-toggle-btn" id="activityScopeTeam" onclick="setViewScope('team', loadActivityFeed)">👥 Time Todo</button>
+            </div>
+            <div id="activityFeedContent">
+                <div style="text-align:center; padding:2rem; color:var(--text-secondary);">Carregando...</div>
             </div>
         </div>
 
@@ -1859,6 +1874,19 @@
                 <input type="datetime-local" id="newReminderAt">
             </div>
             <div class="form-group">
+                <label>🔄 Recorrência (opcional)</label>
+                <select id="newRecurrenceType">
+                    <option value="">Não se repete</option>
+                    <option value="weekly">Semanal</option>
+                    <option value="biweekly">Quinzenal</option>
+                    <option value="monthly">Mensal</option>
+                    <option value="quarterly">Trimestral</option>
+                    <option value="semiannual">Semestral</option>
+                    <option value="yearly">Anual</option>
+                </select>
+                <p style="font-size:0.7rem; color:var(--text-secondary); margin-top:0.35rem;">Ao ser concluída, a próxima ocorrência será criada automaticamente.</p>
+            </div>
+            <div class="form-group">
                 <label>Checklist (opcional)</label>
                 <div id="newDemandChecklistItems"></div>
                 <button class="btn btn-sm btn-secondary" style="width:auto; margin-top:0.5rem;" onclick="addDemandChecklistItemField(false)">➕ Adicionar item</button>
@@ -1905,6 +1933,18 @@
             <div class="form-group">
                 <label>🔔 Lembrete - data e hora (opcional)</label>
                 <input type="datetime-local" id="editDemandReminderAt">
+            </div>
+            <div class="form-group">
+                <label>🔄 Recorrência (opcional)</label>
+                <select id="editDemandRecurrenceType">
+                    <option value="">Não se repete</option>
+                    <option value="weekly">Semanal</option>
+                    <option value="biweekly">Quinzenal</option>
+                    <option value="monthly">Mensal</option>
+                    <option value="quarterly">Trimestral</option>
+                    <option value="semiannual">Semestral</option>
+                    <option value="yearly">Anual</option>
+                </select>
             </div>
             <div class="form-group">
                 <label>Checklist (opcional)</label>
@@ -3755,6 +3795,7 @@
             populateAssigneeDropdown('newAssignedToUserId');
             document.getElementById('newDueDate').value = '';
             document.getElementById('newReminderAt').value = '';
+            document.getElementById('newRecurrenceType').value = '';
             newDemandChecklistDraft = [];
             renderDemandChecklistDraftEditor(false);
             document.getElementById('newDemandModal').classList.add('show');
@@ -3783,6 +3824,7 @@
             const btn = event.target;
             btn.disabled = true;
             try {
+                const recurrenceType = document.getElementById('newRecurrenceType').value;
                 const response = await fetch(`${API_URL}/demands`, {
                     method: 'POST',
                     headers: {
@@ -3799,6 +3841,8 @@
                         reminder_at: reminder_at || null,
                         status,
                         assigned_to_user_id: assigned_to_user_id ? parseInt(assigned_to_user_id) : null,
+                        is_recurring: !!recurrenceType,
+                        recurrence_type: recurrenceType || null,
                         checklist: newDemandChecklistDraft.filter(item => item.text.trim() !== '')
                     })
                 });
@@ -3907,6 +3951,7 @@
             populatePriorityDropdown('editDemandPriority', { selectedValue: demand.priority });
             populateStatusDropdown('editDemandStatus', { includeCompleted: true, selectedValue: demand.status });
             populateAssigneeDropdown('editDemandAssignedToUserId', demand.assignedToUserId || '');
+            document.getElementById('editDemandRecurrenceType').value = demand.recurrenceType || '';
             document.getElementById('editDemandDueDate').value = demand.dueDate || '';
             document.getElementById('editDemandReminderAt').value = demand.reminderAt ? demand.reminderAt.slice(0, 16) : '';
             editDemandChecklistDraft = (demand.checklist || []).map(item => ({ text: item.text, checked: !!item.checked }));
@@ -3933,6 +3978,7 @@
             const btn = event.target;
             btn.disabled = true;
             try {
+                const editRecurrenceType = document.getElementById('editDemandRecurrenceType').value;
                 const putResponse = await fetch(`${API_URL}/demands/${id}`, {
                     method: 'PUT',
                     headers: {
@@ -3947,6 +3993,8 @@
                         due_date: dueDate || null,
                         reminder_at: reminderAt || null,
                         assigned_to_user_id: assignedToUserId ? parseInt(assignedToUserId) : null,
+                        is_recurring: !!editRecurrenceType,
+                        recurrence_type: editRecurrenceType || null,
                         checklist: editDemandChecklistDraft.filter(item => item.text.trim() !== '')
                     })
                 });
@@ -4175,8 +4223,21 @@
                     ...entries.map(e => getStatusLabel(e.status))
                 ];
 
+                // Cachear pra clique
+                const key = 'hc' + (_historyCardIdx++);
+                _historyCardCache[key] = entries;
+
+                // Responsável no histórico
+                const responsibleHtml = last.assignedToUserId
+                    ? (() => {
+                        const member = currentTeamMembers.find(m => m.userId == last.assignedToUserId);
+                        const name = member ? (member.fullName || member.username) : null;
+                        return name ? `<div style="font-size:0.72rem; color:var(--text-secondary); display:flex; align-items:center; gap:0.35rem; margin-top:0.2rem;"><span class="member-avatar sm">${getInitials(name)}</span>${escapeHtml(name)}</div>` : '';
+                      })()
+                    : '';
+
                 return `
-                    <div class="demand-card" style="border-left-color: ${getStatusColor(last.status)}; margin-bottom: 0.75rem;">
+                    <div class="demand-card" style="border-left-color: ${getStatusColor(last.status)}; margin-bottom: 0.75rem; cursor:pointer;" onclick="showHistoryCardDetail('${key}')">
                         <div class="demand-header">
                             <div>
                                 <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(last.workGroupId)}</div>
@@ -4186,6 +4247,7 @@
                         </div>
                         ${chain.length > 1 ? `<div class="history-chain">${chain.join(' → ')}</div>` : ''}
                         ${last.context ? `<p style="font-size: 0.8rem; color: var(--text-secondary);">📌 ${escapeHtml(last.context)}</p>` : ''}
+                        ${responsibleHtml}
                     </div>
                 `;
             }).join('');
@@ -5068,6 +5130,75 @@
             document.getElementById('historyCardDetailModal').classList.remove('show');
         }
 
+        // ============= FEED DE ATIVIDADE =============
+        function timeAgo(isoString) {
+            if (!isoString) return '';
+            const diff = Math.floor((Date.now() - new Date(isoString)) / 1000);
+            if (diff < 60)    return 'agora';
+            if (diff < 3600)  return `há ${Math.floor(diff / 60)} min`;
+            if (diff < 86400) return `há ${Math.floor(diff / 3600)}h`;
+            if (diff < 604800) return `há ${Math.floor(diff / 86400)} dia${Math.floor(diff / 86400) > 1 ? 's' : ''}`;
+            return `há ${Math.floor(diff / 604800)} sem.`;
+        }
+
+        async function loadActivityFeed() {
+            const container = document.getElementById('activityFeedContent');
+            container.innerHTML = '<div style="text-align:center; padding:2rem; color:var(--text-secondary);">Carregando...</div>';
+            updateScopeToggleButtons();
+
+            try {
+                const response = await fetchWithRetry(`${API_URL}/activity-feed?limit=80`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+
+                if (!response.ok) throw new Error();
+                let items = await response.json();
+
+                if (viewScope === 'mine' && currentUser) {
+                    items = items.filter(item =>
+                        item.actorId == currentUser.id ||
+                        (item.responsibleName && currentUser.id && item.responsibleId == currentUser.id)
+                    );
+                }
+
+                if (items.length === 0) {
+                    container.innerHTML = '<div class="kanban-empty">Nenhuma atividade encontrada.</div>';
+                    return;
+                }
+
+                container.innerHTML = items.map(item => {
+                    const groupBadge = item.workGroupId
+                        ? `<span style="font-size:0.65rem; font-weight:700; text-transform:uppercase; padding:1px 6px; border-radius:3px; background:${item.workGroupColor || 'var(--border)'}22; color:${item.workGroupColor || 'var(--amber-bright)'}; border:1px solid ${item.workGroupColor || 'var(--border)'}; margin-right:0.4rem;">${item.workGroupEmoji || ''} ${escapeHtml(item.workGroupName || '')}</span>`
+                        : '';
+                    const statusBadge = getStatusBadgeHtml(item.status);
+                    const responsible = item.responsibleName
+                        ? `<span style="color:var(--text-secondary); font-size:0.72rem;"> · ${escapeHtml(item.responsibleName)}</span>`
+                        : '';
+
+                    return `
+                        <div style="display:flex; gap:0.75rem; padding:0.75rem 0; border-bottom:1px solid var(--border);">
+                            <div class="member-avatar" style="flex-shrink:0; margin-top:0.1rem;">${getInitials(item.actorName)}</div>
+                            <div style="flex:1; min-width:0;">
+                                <div style="font-size:0.82rem; margin-bottom:0.25rem;">
+                                    <strong>${escapeHtml(item.actorName)}</strong>
+                                    moveu pra ${statusBadge}
+                                    ${responsible}
+                                </div>
+                                <div style="font-size:0.78rem; color:var(--text-secondary); margin-bottom:0.2rem;">
+                                    ${groupBadge}${escapeHtml(item.location)} · ${escapeHtml(item.activity)}
+                                </div>
+                                <div style="font-size:0.68rem; color:var(--text-secondary); opacity:0.7;">${timeAgo(item.timestamp)}</div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (e) {
+                container.innerHTML = '<div class="kanban-empty">Erro ao carregar atividades</div>';
+            }
+        }
+
+
+
         function closeLocationModal() {
             document.getElementById('locationModal').classList.remove('show');
         }
@@ -5876,6 +6007,11 @@
 
         // Card compacto e clicável, reaproveitado em todo lugar que mostra demandas ativas
         // (kanban, página Hoje, calendário). Detalhes completos ficam no modal, não no card.
+        const RECURRENCE_LABELS = {
+            weekly: 'Semanal', biweekly: 'Quinzenal', monthly: 'Mensal',
+            quarterly: 'Trimestral', semiannual: 'Semestral', yearly: 'Anual'
+        };
+
         function renderDemandCardCompact(d, borderColor) {
             const isPendingCreate = typeof d.id === 'string';
             const idArg = isPendingCreate ? `'${d.id}'` : d.id;
@@ -5885,6 +6021,9 @@
                 : (d._pendingComplete ? 'Sincronizando conclusão' : 'Edição pendente de sincronização');
             const assigneeAvatar = d.assignedToName
                 ? `<span class="member-avatar sm" title="${escapeHtml(d.assignedToName)}">${getInitials(d.assignedToName)}</span>`
+                : '';
+            const recurringBadge = d.isRecurring && d.recurrenceType
+                ? `<span style="font-size:0.6rem; color:var(--led-blue); border:1px solid var(--led-blue); border-radius:3px; padding:1px 5px; white-space:nowrap;">🔄 ${RECURRENCE_LABELS[d.recurrenceType] || d.recurrenceType}</span>`
                 : '';
 
             return `
@@ -5897,6 +6036,7 @@
                         </div>
                         <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.4rem;">
                             ${getPriorityBadge(d.priority)}
+                            ${recurringBadge}
                             ${assigneeAvatar}
                         </div>
                     </div>
@@ -5930,6 +6070,9 @@
             }
             if (demand.reminderAt) {
                 html += `<div style="font-size:0.85rem; margin-bottom:0.6rem; color:${new Date(demand.reminderAt) <= new Date() ? 'var(--amber-bright)' : 'var(--text-secondary)'};">🔔 Lembrete: ${formatDateTimeBR(demand.reminderAt)}</div>`;
+            }
+            if (demand.isRecurring && demand.recurrenceType) {
+                html += `<div style="font-size:0.8rem; margin-bottom:0.6rem; color:var(--led-blue);">🔄 Recorrente · ${RECURRENCE_LABELS[demand.recurrenceType] || demand.recurrenceType}</div>`;
             }
             if (demand.assignedToName) {
                 html += `<div style="font-size:0.85rem; margin-bottom:0.6rem; display:flex; align-items:center; gap:0.5rem;"><span class="member-avatar sm">${getInitials(demand.assignedToName)}</span> ${escapeHtml(demand.assignedToName)}</div>`;
@@ -6181,6 +6324,10 @@
             }
             if (tab === 'notes') {
                 loadNotes();
+            }
+            if (tab === 'activity') {
+                updateScopeToggleButtons();
+                loadActivityFeed();
             }
             if (tab === 'adminkeys') {
                 loadAccessKeys();
