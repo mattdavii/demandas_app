@@ -2,6 +2,7 @@ import os
 import secrets
 import json
 import re
+import threading
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
@@ -492,36 +493,41 @@ def seed_default_status_and_priority(user_id, workspace_id):
 # ============= CRIAR TABELAS NA INICIALIZAÇÃO =============
 with app.app_context():
     db.create_all()
-    # Migração leve para colunas novas em bancos já existentes
-    # (db.create_all() só cria tabelas que não existem, não altera as existentes)
-    try:
-        db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS reminder_at TIMESTAMP"))
-        db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN DEFAULT FALSE"))
-        db.session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS access_verified BOOLEAN DEFAULT TRUE"))
-        db.session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE"))
-        db.session.execute(text("ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS demand_id INTEGER"))
-        db.session.execute(text("ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS priority VARCHAR(20)"))
-        db.session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS theme VARCHAR(30) DEFAULT 'bancada'"))
-        db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS checklist JSON"))
-        # Colunas de workspace (feature de Time) em tabelas que já existiam antes dela
-        db.session.execute(text("ALTER TABLE work_groups ADD COLUMN IF NOT EXISTS workspace_id INTEGER"))
-        db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS workspace_id INTEGER"))
-        db.session.execute(text("ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS workspace_id INTEGER"))
-        db.session.execute(text("ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS workspace_id INTEGER"))
-        db.session.execute(text("ALTER TABLE priority_configs ADD COLUMN IF NOT EXISTS workspace_id INTEGER"))
-        db.session.execute(text("ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS key_type VARCHAR(20) DEFAULT 'personal'"))
-        db.session.execute(text("ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS workspace_id INTEGER"))
-        db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS assigned_to_user_id INTEGER"))
-        db.session.execute(text("ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS assigned_to_user_id INTEGER"))
-        db.session.execute(text("ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS checklist JSON"))
-        db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT FALSE"))
-        db.session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS weekly_feedback_enabled BOOLEAN DEFAULT TRUE"))
-        db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS recurrence_type VARCHAR(20)"))
-        db.session.execute(text("ALTER TABLE workspaces ALTER COLUMN logo_url TYPE TEXT"))
-        db.session.commit()
-    except Exception as e:
-        db.session.rollback()
-        print(f"Aviso: migração de colunas não aplicada (provável SQLite local, ignorar): {e}")
+    # Migração leve para colunas novas em bancos já existentes.
+    # Cada ALTER TABLE roda em transação própria e isolada: se uma falhar por deadlock
+    # ou coluna já existente, as outras continuam. Isso evita o deadlock que acontecia
+    # quando o Render reiniciava com uma conexão antiga ainda ativa no Neon.
+    _migrations = [
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS reminder_at TIMESTAMP",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS access_verified BOOLEAN DEFAULT TRUE",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS demand_id INTEGER",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS priority VARCHAR(20)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS theme VARCHAR(30) DEFAULT 'bancada'",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS checklist JSON",
+        "ALTER TABLE work_groups ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
+        "ALTER TABLE priority_configs ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
+        "ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS key_type VARCHAR(20) DEFAULT 'personal'",
+        "ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS assigned_to_user_id INTEGER",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS assigned_to_user_id INTEGER",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS checklist JSON",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS recurrence_type VARCHAR(20)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS weekly_feedback_enabled BOOLEAN DEFAULT TRUE",
+        "ALTER TABLE workspaces ALTER COLUMN logo_url TYPE TEXT",
+    ]
+    for _stmt in _migrations:
+        try:
+            db.session.execute(text(_stmt))
+            db.session.commit()
+        except Exception as _e:
+            db.session.rollback()
+            # Silencioso — coluna já existe ou lock temporário; próximo restart pega o que falhou
 
     # Promove automaticamente a conta mais antiga a administrador, caso ainda não haja nenhum
     # (garante que o sistema de chaves tenha um admin de partida, sem passo manual)
@@ -2340,8 +2346,9 @@ def build_feedback_email_admin(workspace, all_concluded, members, week_start, we
 
 @app.route('/api/cron/weekly-feedback', methods=['GET', 'POST'])
 def cron_weekly_feedback():
-    """Envia emails de feedback semanal. Deve ser chamado toda segunda-feira às 08:00
-    por um serviço externo (ex: cron-job.org). Protegido pela mesma CRON_SECRET_KEY."""
+    """Envia emails de feedback semanal via background thread — responde 202 imediatamente
+    para não deixar o cron-job.org (que tem timeout de ~30s) sem resposta enquanto
+    os emails são enviados. Protegido pela mesma CRON_SECRET_KEY."""
     secret = request.args.get('key') or request.headers.get('X-Cron-Key')
     if not secret or secret != os.getenv('CRON_SECRET_KEY'):
         return jsonify({'error': 'Não autorizado'}), 403
@@ -2352,100 +2359,84 @@ def cron_weekly_feedback():
     today = date.today()
     days_since_monday = today.weekday()
     last_monday = today - timedelta(days=days_since_monday + 7)
-    last_sunday = last_monday + timedelta(days=6)
+    last_sunday  = last_monday + timedelta(days=6)
 
-    sent_personal = 0
-    sent_admin = 0
-    errors = []
+    def _send_all():
+        """Processa e envia os emails em background, dentro do contexto da app."""
+        with app.app_context():
+            sent_personal = sent_admin = 0
+            errors = []
+            all_users = {u.id: u for u in User.query.all()}
 
-    # ── Pré-carregar TODOS os usuários numa query só (evita N+1) ──────
-    all_users = {u.id: u for u in User.query.all()}
-
-    for workspace in Workspace.query.all():
-        try:
-            members_raw = WorkspaceMember.query.filter_by(workspace_id=workspace.id).all()
-            if not members_raw:
-                continue
-
-            # Usuários do workspace já no dict — sem query extra por membro
-            ws_users = {m.user_id: all_users.get(m.user_id) for m in members_raw}
-
-            # Status conclusivos do workspace
-            terminal_keys = [s.key for s in StatusConfig.query.filter_by(
-                workspace_id=workspace.id, is_completed=True).all()]
-            if not terminal_keys:
-                continue
-
-            # Histórico da semana — uma query só pro workspace inteiro
-            all_concluded = DemandHistory.query.filter(
-                DemandHistory.workspace_id == workspace.id,
-                DemandHistory.status.in_(terminal_keys),
-                DemandHistory.status_change_date >= last_monday,
-                DemandHistory.status_change_date <= last_sunday
-            ).all()
-
-            # Enriquecer membros com nome uma vez só, sem query adicional
-            class MemberInfo:
-                __slots__ = ('user_id', 'fullName')
-                def __init__(self, user_id, user_obj):
-                    self.user_id = user_id
-                    self.fullName = (user_obj.full_name or user_obj.username) if user_obj else str(user_id)
-            members_info = [MemberInfo(m.user_id, ws_users.get(m.user_id)) for m in members_raw]
-
-            # ── Email pessoal ─────────────────────────────────────────
-            for member_row in members_raw:
-                user = ws_users.get(member_row.user_id)
-                if not user or not user.email:
-                    continue
-                if user.weekly_feedback_enabled is False:
-                    continue
-
-                personal_concluded = [
-                    h for h in all_concluded
-                    if (h.assigned_to_user_id or h.user_id) == user.id
-                ]
-
+            for workspace in Workspace.query.all():
                 try:
-                    html = build_feedback_email_personal(user, personal_concluded, workspace, last_monday, last_sunday)
-                    msg = Message(
-                        f'📊 Seu resumo semanal — {last_monday.strftime("%d/%m")} a {last_sunday.strftime("%d/%m")}',
-                        recipients=[user.email],
-                        html=html
-                    )
-                    mail.send(msg)
-                    sent_personal += 1
+                    members_raw = WorkspaceMember.query.filter_by(workspace_id=workspace.id).all()
+                    if not members_raw:
+                        continue
+
+                    ws_users = {m.user_id: all_users.get(m.user_id) for m in members_raw}
+
+                    terminal_keys = [s.key for s in StatusConfig.query.filter_by(
+                        workspace_id=workspace.id, is_completed=True).all()]
+                    if not terminal_keys:
+                        continue
+
+                    all_concluded = DemandHistory.query.filter(
+                        DemandHistory.workspace_id == workspace.id,
+                        DemandHistory.status.in_(terminal_keys),
+                        DemandHistory.status_change_date >= last_monday,
+                        DemandHistory.status_change_date <= last_sunday
+                    ).all()
+
+                    class MemberInfo:
+                        __slots__ = ('user_id', 'fullName')
+                        def __init__(self, uid, u):
+                            self.user_id = uid
+                            self.fullName = (u.full_name or u.username) if u else str(uid)
+                    members_info = [MemberInfo(m.user_id, ws_users.get(m.user_id)) for m in members_raw]
+
+                    # Email pessoal
+                    for member_row in members_raw:
+                        user = ws_users.get(member_row.user_id)
+                        if not user or not user.email or user.weekly_feedback_enabled is False:
+                            continue
+                        personal = [h for h in all_concluded
+                                    if (h.assigned_to_user_id or h.user_id) == user.id]
+                        try:
+                            html = build_feedback_email_personal(user, personal, workspace, last_monday, last_sunday)
+                            mail.send(Message(
+                                f'📊 Seu resumo semanal — {last_monday.strftime("%d/%m")} a {last_sunday.strftime("%d/%m")}',
+                                recipients=[user.email], html=html))
+                            sent_personal += 1
+                        except Exception as e:
+                            errors.append(f'personal {user.email}: {str(e)[:100]}')
+
+                    # Email do admin
+                    for admin_member in [m for m in members_raw if m.role == 'admin']:
+                        admin_user = ws_users.get(admin_member.user_id)
+                        if not admin_user or not admin_user.email or admin_user.weekly_feedback_enabled is False:
+                            continue
+                        try:
+                            html = build_feedback_email_admin(workspace, all_concluded, members_info, last_monday, last_sunday)
+                            mail.send(Message(
+                                f'📊 Resumo do time — {last_monday.strftime("%d/%m")} a {last_sunday.strftime("%d/%m")}',
+                                recipients=[admin_user.email], html=html))
+                            sent_admin += 1
+                        except Exception as e:
+                            errors.append(f'admin {admin_user.email}: {str(e)[:100]}')
+
                 except Exception as e:
-                    errors.append(f'personal {user.email}: {str(e)[:120]}')
+                    errors.append(f'workspace {workspace.id}: {str(e)[:100]}')
 
-            # ── Email do admin (visão do time) ────────────────────────
-            admins = [m for m in members_raw if m.role == 'admin']
-            for admin_member in admins:
-                admin_user = ws_users.get(admin_member.user_id)
-                if not admin_user or not admin_user.email:
-                    continue
-                if admin_user.weekly_feedback_enabled is False:
-                    continue
+            print(f'[weekly-feedback] {sent_personal} pessoais + {sent_admin} admin enviados. Erros: {errors}')
 
-                try:
-                    html = build_feedback_email_admin(workspace, all_concluded, members_info, last_monday, last_sunday)
-                    msg = Message(
-                        f'📊 Resumo do time — {last_monday.strftime("%d/%m")} a {last_sunday.strftime("%d/%m")}',
-                        recipients=[admin_user.email],
-                        html=html
-                    )
-                    mail.send(msg)
-                    sent_admin += 1
-                except Exception as e:
-                    errors.append(f'admin {admin_user.email}: {str(e)[:120]}')
-
-        except Exception as e:
-            errors.append(f'workspace {workspace.id}: {e}')
+    # Dispara em background e responde imediatamente (evita timeout do cron-job.org)
+    threading.Thread(target=_send_all, daemon=True).start()
 
     return jsonify({
-        'message': f'{sent_personal} emails pessoais + {sent_admin} emails de admin enviados',
-        'period': f'{last_monday} a {last_sunday}',
-        'errors': errors
-    }), 200
+        'message': 'Feedback semanal iniciado em background',
+        'period': f'{last_monday} a {last_sunday}'
+    }), 202
 
 # ============= ROTAS DE BACKUP =============
 @app.route('/api/export', methods=['GET'])
