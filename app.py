@@ -296,7 +296,7 @@ class DemandHistory(db.Model):
             'status': self.status,
             'statusChangeDate': self.status_change_date.isoformat() if self.status_change_date else None,
             'createdDate': self.created_date.isoformat() if self.created_date else None,
-            'checklist': self.checklist or []
+            'checklist': self.checklist  # None = dado não disponível (registro antigo); [] = nova demanda sem checklist
         }
 
 class Note(db.Model):
