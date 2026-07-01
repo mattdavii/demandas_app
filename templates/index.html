@@ -2629,14 +2629,12 @@
             document.getElementById('userName').textContent = currentUser.full_name || currentUser.username;
             document.getElementById('userEmail').textContent = `Email: ${currentUser.email}`;
 
-            // Se a conta tem um tema salvo diferente do aplicado localmente (ex: trocou de dispositivo),
-            // a conta é a fonte da verdade.
             if (currentUser.theme && currentUser.theme !== currentTheme) {
                 applyTheme(currentUser.theme, false);
             }
 
             currentWorkspaceRole = currentUser.workspaceRole || 'admin';
-            viewScope = currentWorkspaceRole === 'admin' ? 'team' : 'mine'; // padrão por papel, reseta a cada login
+            viewScope = currentWorkspaceRole === 'admin' ? 'team' : 'mine';
             updateScopeToggleButtons();
 
             document.getElementById('authContainer').style.display = 'none';
@@ -2650,10 +2648,57 @@
             }
 
             applyRoleBasedUI();
-            await loadWorkspaceInfo();
-            await loadTeamMembersBackground();
-            await loadStatusAndPriorityConfigs();
-            await Promise.all([loadGroups(), loadDemands()]);
+
+            // ── UMA chamada busca todos os dados de startup (workspace, membros,
+            //    configs, grupos e demandas) — reduz 7 round-trips pro Neon em 1. ──
+            try {
+                const initResp = await fetchWithRetry(`${API_URL}/init`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 2);
+                if (initResp.ok) {
+                    const init = await initResp.json();
+
+                    // Workspace
+                    if (init.workspace) {
+                        currentWorkspace = init.workspace;
+                        loadWorkspaceInfo(init.workspace);
+                    }
+
+                    // Membros
+                    if (init.members) {
+                        currentTeamMembers = init.members;
+                    }
+
+                    // Status e prioridades
+                    if (init.statusConfigs) applyStatusConfigs(init.statusConfigs);
+                    if (init.priorityConfigs) applyPriorityConfigs(init.priorityConfigs);
+
+                    // Grupos
+                    if (init.workGroups) {
+                        currentGroups = init.workGroups;
+                        renderKanban();
+                    }
+
+                    // Demandas
+                    if (init.demands) {
+                        currentDemands = init.demands;
+                        renderKanban();
+                    }
+                } else {
+                    // Fallback: chamadas individuais se /api/init falhar
+                    await loadWorkspaceInfo();
+                    await loadTeamMembersBackground();
+                    await loadStatusAndPriorityConfigs();
+                    await Promise.all([loadGroups(), loadDemands()]);
+                }
+            } catch (e) {
+                // Fallback em caso de erro de rede
+                await loadWorkspaceInfo();
+                await loadTeamMembersBackground();
+                await loadStatusAndPriorityConfigs();
+                await Promise.all([loadGroups(), loadDemands()]);
+            }
+
             if (isOnline) {
                 checkReminders();
                 processSyncQueue();
@@ -2696,8 +2741,13 @@
             );
         }
 
-        async function loadWorkspaceInfo() {
+        async function loadWorkspaceInfo(preloaded) {
             try {
+                if (preloaded) {
+                    currentWorkspace = preloaded;
+                    applyWorkspaceLogo();
+                    return;
+                }
                 const response = await fetchWithRetry(`${API_URL}/workspace`, {
                     headers: { 'Authorization': `Bearer ${token}` }
                 }, 1);
