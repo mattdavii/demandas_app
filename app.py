@@ -493,107 +493,80 @@ def seed_default_status_and_priority(user_id, workspace_id):
 # ============= CRIAR TABELAS NA INICIALIZAÇÃO =============
 with app.app_context():
     db.create_all()
-    # Migração leve para colunas novas em bancos já existentes.
-    # Cada ALTER TABLE roda em transação própria e isolada: se uma falhar por deadlock
-    # ou coluna já existente, as outras continuam. Isso evita o deadlock que acontecia
-    # quando o Render reiniciava com uma conexão antiga ainda ativa no Neon.
-    # Agrupa ALTER TABLE por tabela: cada grupo numa transação só,
-    # reduz de 22 para 7 round-trips e evita deadlock entre elas.
-    _migration_groups = [
-        [
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS access_verified BOOLEAN DEFAULT TRUE",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS theme VARCHAR(30) DEFAULT 'bancada'",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS weekly_feedback_enabled BOOLEAN DEFAULT TRUE",
-        ],
-        [
-            "ALTER TABLE demands ADD COLUMN IF NOT EXISTS reminder_at TIMESTAMP",
-            "ALTER TABLE demands ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN DEFAULT FALSE",
-            "ALTER TABLE demands ADD COLUMN IF NOT EXISTS checklist JSON",
-            "ALTER TABLE demands ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
-            "ALTER TABLE demands ADD COLUMN IF NOT EXISTS assigned_to_user_id INTEGER",
-            "ALTER TABLE demands ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT FALSE",
-            "ALTER TABLE demands ADD COLUMN IF NOT EXISTS recurrence_type VARCHAR(20)",
-        ],
-        [
-            "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS demand_id INTEGER",
-            "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS priority VARCHAR(20)",
-            "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
-            "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS assigned_to_user_id INTEGER",
-            "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS checklist JSON",
-        ],
-        [
-            "ALTER TABLE work_groups ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
-            "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
-            "ALTER TABLE priority_configs ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
-        ],
-        [
-            "ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS key_type VARCHAR(20) DEFAULT 'personal'",
-            "ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
-        ],
-        [
-            "ALTER TABLE workspaces ALTER COLUMN logo_url TYPE TEXT",
-        ],
+
+_migrations_done = False
+
+@app.before_request
+def run_migrations_once():
+    """Migrations rodam na PRIMEIRA requisição — depois que o Gunicorn já vinculou
+    a porta e o app está servindo. Isso evita travar o startup esperando locks do banco."""
+    global _migrations_done
+    if _migrations_done:
+        return
+    _migrations_done = True
+
+    _groups = [
+        ["ALTER TABLE users ADD COLUMN IF NOT EXISTS access_verified BOOLEAN DEFAULT TRUE",
+         "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE",
+         "ALTER TABLE users ADD COLUMN IF NOT EXISTS theme VARCHAR(30) DEFAULT 'bancada'",
+         "ALTER TABLE users ADD COLUMN IF NOT EXISTS weekly_feedback_enabled BOOLEAN DEFAULT TRUE"],
+        ["ALTER TABLE demands ADD COLUMN IF NOT EXISTS reminder_at TIMESTAMP",
+         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN DEFAULT FALSE",
+         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS checklist JSON",
+         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
+         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS assigned_to_user_id INTEGER",
+         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT FALSE",
+         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS recurrence_type VARCHAR(20)"],
+        ["ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS demand_id INTEGER",
+         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS priority VARCHAR(20)",
+         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
+         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS assigned_to_user_id INTEGER",
+         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS checklist JSON"],
+        ["ALTER TABLE work_groups ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
+         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS workspace_id INTEGER",
+         "ALTER TABLE priority_configs ADD COLUMN IF NOT EXISTS workspace_id INTEGER"],
+        ["ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS key_type VARCHAR(20) DEFAULT 'personal'",
+         "ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS workspace_id INTEGER"],
+        ["ALTER TABLE workspaces ALTER COLUMN logo_url TYPE TEXT"],
     ]
-    for _group in _migration_groups:
+    for _g in _groups:
         try:
-            for _stmt in _group:
-                db.session.execute(text(_stmt))
+            db.session.execute(text("SET LOCAL lock_timeout = '3s'"))
+            for _s in _g:
+                db.session.execute(text(_s))
             db.session.commit()
-        except Exception as _e:
+        except Exception:
             db.session.rollback()
 
-    # Promove automaticamente a conta mais antiga a administrador, caso ainda não haja nenhum
-    # (garante que o sistema de chaves tenha um admin de partida, sem passo manual)
     try:
         if User.query.filter_by(is_admin=True).first() is None:
-            first_user = User.query.order_by(User.id.asc()).first()
-            if first_user:
-                first_user.is_admin = True
-                first_user.access_verified = True
+            u = User.query.order_by(User.id.asc()).first()
+            if u:
+                u.is_admin = True
+                u.access_verified = True
                 db.session.commit()
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        print(f"Aviso: não foi possível definir admin automático: {e}")
 
-    # Feature de Time: garante que toda conta já existente (criada antes dessa atualização)
-    # tenha um workspace próprio e que todos os seus dados apontem pra ele.
-    # Cada bloco roda em try/except separado: a falha de um não cancela os outros.
-    for existing_user in User.query.all():
-        try:
-            workspace_id = get_user_workspace_id(existing_user.id)
-            if workspace_id is None:
-                workspace = create_personal_workspace(existing_user)
-                workspace_id = workspace.id
-
-            # Popula workspace_id nos registros antigos (NULL = migração pendente)
-            WorkGroup.query.filter_by(user_id=existing_user.id, workspace_id=None).update({'workspace_id': workspace_id})
-            Demand.query.filter_by(user_id=existing_user.id, workspace_id=None).update({'workspace_id': workspace_id})
-            DemandHistory.query.filter_by(user_id=existing_user.id, workspace_id=None).update({'workspace_id': workspace_id})
-            StatusConfig.query.filter_by(user_id=existing_user.id, workspace_id=None).update({'workspace_id': workspace_id})
-            PriorityConfig.query.filter_by(user_id=existing_user.id, workspace_id=None).update({'workspace_id': workspace_id})
-
-            # FIX "Minhas Demandas": demandas sem responsável explícito recebem o criador
-            # como responsável padrão — isso faz o toggle "Minhas" funcionar pra dados antigos.
-            Demand.query.filter_by(
-                user_id=existing_user.id,
-                workspace_id=workspace_id,
-                assigned_to_user_id=None
-            ).update({'assigned_to_user_id': existing_user.id})
-
-            # FIX "Concluídas" sem filtro: popula assigned_to_user_id no histórico
-            # com o criador (user_id) nos registros sem responsável explícito.
-            DemandHistory.query.filter_by(
-                user_id=existing_user.id,
-                workspace_id=workspace_id,
-                assigned_to_user_id=None
-            ).update({'assigned_to_user_id': existing_user.id})
-
-            db.session.commit()
-            seed_default_status_and_priority(existing_user.id, workspace_id)
-        except Exception as e:
-            db.session.rollback()
-            print(f"Aviso: migração parcial para user {existing_user.id}: {e}")
+    try:
+        for eu in User.query.all():
+            try:
+                wid = get_user_workspace_id(eu.id)
+                if wid is None:
+                    wid = create_personal_workspace(eu).id
+                for model, kw in [
+                    (WorkGroup, {}), (Demand, {}), (DemandHistory, {}),
+                    (StatusConfig, {}), (PriorityConfig, {})
+                ]:
+                    model.query.filter_by(user_id=eu.id, workspace_id=None).update({'workspace_id': wid})
+                Demand.query.filter_by(user_id=eu.id, workspace_id=wid, assigned_to_user_id=None).update({'assigned_to_user_id': eu.id})
+                DemandHistory.query.filter_by(user_id=eu.id, workspace_id=wid, assigned_to_user_id=None).update({'assigned_to_user_id': eu.id})
+                db.session.commit()
+                seed_default_status_and_priority(eu.id, wid)
+            except Exception:
+                db.session.rollback()
+    except Exception:
+        db.session.rollback()
 
 # ============= ROTAS DE PÁGINA =============
 @app.route('/')
