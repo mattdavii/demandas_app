@@ -43,6 +43,12 @@ app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
 app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_DEFAULT_SENDER', 'noreply@demandasapp.com')
 app.config['MAIL_TIMEOUT'] = 10  # 10s máx por operação SMTP — evita travar a requisição
 
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'pool_pre_ping': True,     # testa a conexão antes de usar — reconecta se morta
+    'pool_recycle': 280,       # recicla conexões a cada 280s (Neon fecha ociosas em 300s)
+    'pool_timeout': 10,        # desiste de esperar conexão após 10s
+    'connect_args': {'connect_timeout': 10},
+}
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
 mail = Mail(app)
@@ -504,9 +510,70 @@ def index():
 
 @app.route('/ping')
 def ping():
-    """Health check leve — também serve pra disparar o before_request de migrations
-    sem travar o usuário esperando. Chamar /ping uma vez após deploy antes de testar emails."""
+    """Health check leve."""
     return 'pong', 200
+
+@app.route('/api/init')
+@jwt_required()
+def get_init_data():
+    """Retorna todos os dados de startup em UMA requisição.
+    Reduz de 10+ chamadas sequenciais para 1, eliminando latência cumulativa com o Neon."""
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+
+    user = User.query.get(user_id)
+    workspace = Workspace.query.get(workspace_id) if workspace_id else None
+    members_raw = WorkspaceMember.query.filter_by(workspace_id=workspace_id).all() if workspace_id else []
+
+    status_configs = ws_filter(StatusConfig, user_id, workspace_id).order_by(StatusConfig.order.asc()).all()
+    priority_configs = ws_filter(PriorityConfig, user_id, workspace_id).order_by(PriorityConfig.order.asc()).all()
+
+    groups = WorkGroup.query.filter(
+        db.or_(
+            db.and_(WorkGroup.workspace_id == workspace_id, WorkGroup.is_active == True),
+            db.and_(WorkGroup.workspace_id == None, WorkGroup.user_id == user_id, WorkGroup.is_active == True)
+        )
+    ).order_by(WorkGroup.order).all()
+
+    terminal_keys = [s.key for s in status_configs if s.is_completed]
+    count_q = db.session.query(Demand.work_group_id, db.func.count(Demand.id)).filter(
+        db.or_(Demand.workspace_id == workspace_id, db.and_(Demand.workspace_id == None, Demand.user_id == user_id))
+    )
+    if terminal_keys:
+        count_q = count_q.filter(~Demand.status.in_(terminal_keys))
+    counts = {row[0]: row[1] for row in count_q.group_by(Demand.work_group_id).all()}
+
+    demand_query = ws_filter(Demand, user_id, workspace_id)
+    if terminal_keys:
+        demand_query = demand_query.filter(~Demand.status.in_(terminal_keys))
+    demands = demand_query.all()
+
+    assignee_ids = {d.assigned_to_user_id for d in demands if d.assigned_to_user_id}
+    user_cache = {u.id: u for u in User.query.filter(User.id.in_(assignee_ids)).all()} if assignee_ids else {}
+
+    member_users = {u.id: u for u in User.query.filter(
+        User.id.in_([m.user_id for m in members_raw])
+    ).all()} if members_raw else {}
+
+    def member_dict(m):
+        u = member_users.get(m.user_id)
+        return {
+            'userId': m.user_id,
+            'role': m.role,
+            'cargo': getattr(m, 'cargo', None),
+            'fullName': (u.full_name or u.username) if u else str(m.user_id),
+            'email': u.email if u else None,
+        }
+
+    return jsonify({
+        'user': user.to_dict() if user else None,
+        'workspace': {'id': workspace.id, 'name': workspace.name, 'logoUrl': workspace.logo_url} if workspace else None,
+        'members': [member_dict(m) for m in members_raw],
+        'statusConfigs': [s.to_dict() for s in status_configs],
+        'priorityConfigs': [p.to_dict() for p in priority_configs],
+        'workGroups': [g.to_dict(demands_count=counts.get(g.id, 0)) for g in groups],
+        'demands': [d.to_dict(user_cache=user_cache) for d in demands],
+    }), 200
 
 @app.route('/api/cron/test-email')
 def test_email_simple():
