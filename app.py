@@ -329,12 +329,19 @@ class AccessKey(db.Model):
 
     def to_dict(self):
         used_by_user = User.query.get(self.used_by) if self.used_by else None
-        if self.used_by:
-            status = 'used'
-        elif not self.is_active:
+        # Para team_invite multi-uso, conta quantos membros entraram via esta chave
+        if self.key_type == 'team_invite' and self.workspace_id:
+            uses_count = WorkspaceMember.query.filter_by(workspace_id=self.workspace_id).count()
+        else:
+            uses_count = 1 if self.used_by else 0
+
+        if not self.is_active:
             status = 'revoked'
+        elif self.key_type == 'personal' and self.used_by:
+            status = 'used'
         else:
             status = 'available'
+
         return {
             'id': self.id,
             'key': self.key_value,
@@ -343,6 +350,7 @@ class AccessKey(db.Model):
             'createdAt': self.created_at.isoformat() if self.created_at else None,
             'usedBy': used_by_user.username if used_by_user else None,
             'usedAt': self.used_at.isoformat() if self.used_at else None,
+            'usesCount': uses_count,
             'status': status
         }
 
@@ -772,11 +780,18 @@ def verify_access_key():
         return jsonify({'error': 'Chave inválida'}), 404
     if not access_key.is_active:
         return jsonify({'error': 'Chave revogada'}), 403
-    if access_key.used_by is not None:
+
+    # Chaves pessoais são de uso único — chaves de convite são multi-uso (vários
+    # colegas podem usar o mesmo link) e só ficam com used_by do primeiro usuário
+    # pra rastreabilidade, mas continuam ativas pra novos usos.
+    if access_key.key_type == 'personal' and access_key.used_by is not None:
         return jsonify({'error': 'Chave já utilizada'}), 409
 
-    access_key.used_by = user.id
-    access_key.used_at = datetime.now()
+    # Registra quem usou (primeiro uso) e quando, mas não bloqueia reuso em team_invite
+    if access_key.used_by is None:
+        access_key.used_by = user.id
+        access_key.used_at = datetime.now()
+
     user.access_verified = True
     db.session.commit()
 
@@ -1073,6 +1088,77 @@ def remove_workspace_member(member_id):
     db.session.commit()
 
     return jsonify({'message': 'Membro removido'}), 200
+
+
+# ============= ROTAS DE CHAVES DE CONVITE (WORKSPACE ADMIN) =============
+@app.route('/api/workspace/invite-keys', methods=['GET'])
+@jwt_required()
+def list_invite_keys():
+    """Lista as chaves de convite do workspace. Restrito a admin do workspace."""
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Apenas administradores podem ver as chaves de convite'}), 403
+
+    keys = AccessKey.query.filter_by(
+        workspace_id=workspace_id,
+        key_type='team_invite'
+    ).order_by(AccessKey.created_at.desc()).all()
+
+    return jsonify([k.to_dict() for k in keys]), 200
+
+
+@app.route('/api/workspace/invite-keys', methods=['POST'])
+@jwt_required()
+def create_invite_key():
+    """Gera uma nova chave de convite para o workspace. Restrito a admin do workspace.
+    Chaves de convite são reutilizáveis (multi-uso) até serem revogadas — diferentes
+    das chaves pessoais que são de uso único."""
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Apenas administradores podem gerar chaves de convite'}), 403
+
+    # Gera chave legível (6 chars hex), única no banco
+    while True:
+        key_value = secrets.token_hex(4).upper()  # ex: A3F9C2E1
+        if not AccessKey.query.filter_by(key_value=key_value).first():
+            break
+
+    new_key = AccessKey(
+        key_value=key_value,
+        key_type='team_invite',
+        workspace_id=workspace_id,
+        created_by=user_id,
+        is_active=True
+    )
+    db.session.add(new_key)
+    db.session.commit()
+
+    return jsonify(new_key.to_dict()), 201
+
+
+@app.route('/api/workspace/invite-keys/<int:key_id>', methods=['DELETE'])
+@jwt_required()
+def revoke_invite_key(key_id):
+    """Revoga (desativa) uma chave de convite do workspace. Restrito a admin."""
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Apenas administradores podem revogar chaves de convite'}), 403
+
+    key = AccessKey.query.get_or_404(key_id)
+
+    if key.workspace_id != workspace_id or key.key_type != 'team_invite':
+        return jsonify({'error': 'Chave não encontrada neste workspace'}), 404
+
+    key.is_active = False
+    db.session.commit()
+
+    return jsonify({'message': 'Chave revogada com sucesso'}), 200
 
 @app.route('/api/auth/change-password', methods=['POST'])
 @jwt_required()
