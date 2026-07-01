@@ -41,6 +41,7 @@ app.config['MAIL_USE_TLS'] = os.getenv('MAIL_USE_TLS', True)
 app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
 app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
 app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_DEFAULT_SENDER', 'noreply@demandasapp.com')
+app.config['MAIL_TIMEOUT'] = 10  # 10s máx por operação SMTP — evita travar a requisição
 
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
@@ -573,6 +574,32 @@ def run_migrations_once():
 def index():
     """Servir página principal"""
     return render_template('index.html')
+
+@app.route('/ping')
+def ping():
+    """Health check leve — também serve pra disparar o before_request de migrations
+    sem travar o usuário esperando. Chamar /ping uma vez após deploy antes de testar emails."""
+    return 'pong', 200
+
+@app.route('/api/cron/test-email')
+def test_email_simple():
+    """Envia UM email de teste pro admin pra confirmar que SMTP está funcionando.
+    Não precisa de chave — só funciona se o servidor de email estiver configurado."""
+    if not app.config.get('MAIL_USERNAME'):
+        return jsonify({'error': 'MAIL_USERNAME não configurado'}), 400
+    secret = request.args.get('key') or request.headers.get('X-Cron-Key')
+    if not secret or secret != os.getenv('CRON_SECRET_KEY'):
+        return jsonify({'error': 'Não autorizado'}), 403
+    recipient = request.args.get('to') or app.config.get('MAIL_USERNAME')
+    try:
+        mail.send(Message(
+            '✅ Teste de Email — Painel de Bordo',
+            recipients=[recipient],
+            html='<p style="font-family:monospace; background:#111; color:#3ddc84; padding:2rem;">Email funcionando! O feedback semanal está configurado corretamente.</p>'
+        ))
+        return jsonify({'ok': True, 'sent_to': recipient}), 200
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
 
 @app.route('/reset')
 def reset_page():
