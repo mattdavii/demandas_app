@@ -2346,8 +2346,10 @@ def cron_weekly_feedback():
     if not secret or secret != os.getenv('CRON_SECRET_KEY'):
         return jsonify({'error': 'Não autorizado'}), 403
 
+    if not app.config.get('MAIL_USERNAME'):
+        return jsonify({'message': 'Email não configurado — nenhum envio realizado'}), 200
+
     today = date.today()
-    # Semana anterior: segunda a domingo
     days_since_monday = today.weekday()
     last_monday = today - timedelta(days=days_since_monday + 7)
     last_sunday = last_monday + timedelta(days=6)
@@ -2356,17 +2358,25 @@ def cron_weekly_feedback():
     sent_admin = 0
     errors = []
 
+    # ── Pré-carregar TODOS os usuários numa query só (evita N+1) ──────
+    all_users = {u.id: u for u in User.query.all()}
+
     for workspace in Workspace.query.all():
         try:
             members_raw = WorkspaceMember.query.filter_by(workspace_id=workspace.id).all()
             if not members_raw:
                 continue
 
-            # Todas as demandas concluídas da semana no workspace
-            terminal_keys = [s.key for s in StatusConfig.query.filter_by(workspace_id=workspace.id, is_completed=True).all()]
+            # Usuários do workspace já no dict — sem query extra por membro
+            ws_users = {m.user_id: all_users.get(m.user_id) for m in members_raw}
+
+            # Status conclusivos do workspace
+            terminal_keys = [s.key for s in StatusConfig.query.filter_by(
+                workspace_id=workspace.id, is_completed=True).all()]
             if not terminal_keys:
                 continue
 
+            # Histórico da semana — uma query só pro workspace inteiro
             all_concluded = DemandHistory.query.filter(
                 DemandHistory.workspace_id == workspace.id,
                 DemandHistory.status.in_(terminal_keys),
@@ -2374,14 +2384,20 @@ def cron_weekly_feedback():
                 DemandHistory.status_change_date <= last_sunday
             ).all()
 
-            # Email pessoal pra cada membro com feedback ativo
+            # Enriquecer membros com nome uma vez só, sem query adicional
+            class MemberInfo:
+                __slots__ = ('user_id', 'fullName')
+                def __init__(self, user_id, user_obj):
+                    self.user_id = user_id
+                    self.fullName = (user_obj.full_name or user_obj.username) if user_obj else str(user_id)
+            members_info = [MemberInfo(m.user_id, ws_users.get(m.user_id)) for m in members_raw]
+
+            # ── Email pessoal ─────────────────────────────────────────
             for member_row in members_raw:
-                user = User.query.get(member_row.user_id)
+                user = ws_users.get(member_row.user_id)
                 if not user or not user.email:
                     continue
                 if user.weekly_feedback_enabled is False:
-                    continue
-                if not app.config.get('MAIL_USERNAME'):
                     continue
 
                 personal_concluded = [
@@ -2399,27 +2415,18 @@ def cron_weekly_feedback():
                     mail.send(msg)
                     sent_personal += 1
                 except Exception as e:
-                    errors.append(f'personal {user.email}: {e}')
+                    errors.append(f'personal {user.email}: {str(e)[:120]}')
 
-            # Email de visão geral pro admin do workspace
+            # ── Email do admin (visão do time) ────────────────────────
             admins = [m for m in members_raw if m.role == 'admin']
             for admin_member in admins:
-                admin_user = User.query.get(admin_member.user_id)
+                admin_user = ws_users.get(admin_member.user_id)
                 if not admin_user or not admin_user.email:
                     continue
                 if admin_user.weekly_feedback_enabled is False:
                     continue
-                if not app.config.get('MAIL_USERNAME'):
-                    continue
-                try:
-                    # Enriquecer members com nome pra o template
-                    class MemberInfo:
-                        def __init__(self, m):
-                            u = User.query.get(m.user_id)
-                            self.user_id = m.user_id
-                            self.fullName = (u.full_name or u.username) if u else str(m.user_id)
-                    members_info = [MemberInfo(m) for m in members_raw]
 
+                try:
                     html = build_feedback_email_admin(workspace, all_concluded, members_info, last_monday, last_sunday)
                     msg = Message(
                         f'📊 Resumo do time — {last_monday.strftime("%d/%m")} a {last_sunday.strftime("%d/%m")}',
@@ -2429,7 +2436,7 @@ def cron_weekly_feedback():
                     mail.send(msg)
                     sent_admin += 1
                 except Exception as e:
-                    errors.append(f'admin {admin_user.email}: {e}')
+                    errors.append(f'admin {admin_user.email}: {str(e)[:120]}')
 
         except Exception as e:
             errors.append(f'workspace {workspace.id}: {e}')
