@@ -257,6 +257,7 @@ class Demand(db.Model):
             'assignedTo': self.assigned_to,
             'assignedToUserId': self.assigned_to_user_id,
             'assignedToName': (assigned_user.full_name or assigned_user.username) if assigned_user else None,
+            'userId': self.user_id,
             'createdDate': self.created_date.isoformat() if self.created_date else None,
             'reminderAt': self.reminder_at.isoformat() if self.reminder_at else None,
             'checklist': self.checklist or []
@@ -270,11 +271,13 @@ class DemandHistory(db.Model):
     workspace_id = db.Column(db.Integer, db.ForeignKey('workspaces.id'), nullable=True)
     work_group_id = db.Column(db.Integer, db.ForeignKey('work_groups.id'), nullable=True)
     demand_id = db.Column(db.Integer, nullable=True)  # vínculo real com a demanda de origem (registros novos)
+    assigned_to_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # snapshot de quem era responsável ao concluir
     location = db.Column(db.String(100), nullable=False)
     activity = db.Column(db.String(255), nullable=False)
     context = db.Column(db.Text, nullable=True)
     status = db.Column(db.String(20), nullable=False)
     priority = db.Column(db.String(20), nullable=True)  # snapshot da prioridade no momento da mudança (registros novos)
+    checklist = db.Column(db.JSON, nullable=True)  # snapshot do checklist da demanda ao concluir
     status_change_date = db.Column(db.Date, nullable=False)
     created_date = db.Column(db.Date, nullable=True)
     timestamp = db.Column(db.DateTime, default=datetime.now)
@@ -284,13 +287,16 @@ class DemandHistory(db.Model):
             'id': self.id,
             'demandId': self.demand_id,
             'workGroupId': self.work_group_id,
+            'assignedToUserId': self.assigned_to_user_id,
+            'userId': self.user_id,
             'priority': self.priority,
             'location': self.location,
             'activity': self.activity,
             'context': self.context,
             'status': self.status,
             'statusChangeDate': self.status_change_date.isoformat() if self.status_change_date else None,
-            'createdDate': self.created_date.isoformat() if self.created_date else None
+            'createdDate': self.created_date.isoformat() if self.created_date else None,
+            'checklist': self.checklist or []
         }
 
 class Note(db.Model):
@@ -500,11 +506,13 @@ with app.app_context():
         db.session.execute(text("ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS key_type VARCHAR(20) DEFAULT 'personal'"))
         db.session.execute(text("ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS workspace_id INTEGER"))
         db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS assigned_to_user_id INTEGER"))
+        db.session.execute(text("ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS assigned_to_user_id INTEGER"))
+        db.session.execute(text("ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS checklist JSON"))
         db.session.execute(text("ALTER TABLE workspaces ALTER COLUMN logo_url TYPE TEXT"))
         db.session.commit()
     except Exception as e:
         db.session.rollback()
-        print(f"Aviso: migração de colunas de lembrete não aplicada (provável SQLite local, ignorar): {e}")
+        print(f"Aviso: migração de colunas não aplicada (provável SQLite local, ignorar): {e}")
 
     # Promove automaticamente a conta mais antiga a administrador, caso ainda não haja nenhum
     # (garante que o sistema de chaves tenha um admin de partida, sem passo manual)
@@ -520,28 +528,43 @@ with app.app_context():
         print(f"Aviso: não foi possível definir admin automático: {e}")
 
     # Feature de Time: garante que toda conta já existente (criada antes dessa atualização)
-    # tenha um workspace próprio, virando admin dele, e que todos os dados que ela já tinha
-    # (grupos, demandas, histórico, status, prioridades) passem a apontar pra esse workspace.
-    # Isso é o que torna essa mudança invisível pra quem já usa a plataforma — nada muda na
-    # prática, só passa a existir um "espaço" formal por trás do que já era dela.
-    try:
-        for existing_user in User.query.all():
+    # tenha um workspace próprio e que todos os seus dados apontem pra ele.
+    # Cada bloco roda em try/except separado: a falha de um não cancela os outros.
+    for existing_user in User.query.all():
+        try:
             workspace_id = get_user_workspace_id(existing_user.id)
             if workspace_id is None:
                 workspace = create_personal_workspace(existing_user)
                 workspace_id = workspace.id
 
+            # Popula workspace_id nos registros antigos (NULL = migração pendente)
             WorkGroup.query.filter_by(user_id=existing_user.id, workspace_id=None).update({'workspace_id': workspace_id})
             Demand.query.filter_by(user_id=existing_user.id, workspace_id=None).update({'workspace_id': workspace_id})
             DemandHistory.query.filter_by(user_id=existing_user.id, workspace_id=None).update({'workspace_id': workspace_id})
             StatusConfig.query.filter_by(user_id=existing_user.id, workspace_id=None).update({'workspace_id': workspace_id})
             PriorityConfig.query.filter_by(user_id=existing_user.id, workspace_id=None).update({'workspace_id': workspace_id})
-            db.session.commit()
 
+            # FIX "Minhas Demandas": demandas sem responsável explícito recebem o criador
+            # como responsável padrão — isso faz o toggle "Minhas" funcionar pra dados antigos.
+            Demand.query.filter_by(
+                user_id=existing_user.id,
+                workspace_id=workspace_id,
+                assigned_to_user_id=None
+            ).update({'assigned_to_user_id': existing_user.id})
+
+            # FIX "Concluídas" sem filtro: popula assigned_to_user_id no histórico
+            # com o criador (user_id) nos registros sem responsável explícito.
+            DemandHistory.query.filter_by(
+                user_id=existing_user.id,
+                workspace_id=workspace_id,
+                assigned_to_user_id=None
+            ).update({'assigned_to_user_id': existing_user.id})
+
+            db.session.commit()
             seed_default_status_and_priority(existing_user.id, workspace_id)
-    except Exception as e:
-        db.session.rollback()
-        print(f"Aviso: não foi possível concluir a migração de workspaces: {e}")
+        except Exception as e:
+            db.session.rollback()
+            print(f"Aviso: migração parcial para user {existing_user.id}: {e}")
 
 # ============= ROTAS DE PÁGINA =============
 @app.route('/')
@@ -1662,7 +1685,9 @@ def update_demand_status(demand_id):
         workspace_id=workspace_id,
         work_group_id=demand.work_group_id,
         demand_id=demand.id,
+        assigned_to_user_id=demand.assigned_to_user_id or demand.user_id,  # snapshot do responsável (ou criador se sem responsável)
         priority=demand.priority,
+        checklist=demand.checklist or [],  # snapshot do checklist — preservado mesmo após deletar a demanda
         location=demand.location,
         activity=demand.activity,
         context=demand.context,
