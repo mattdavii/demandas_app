@@ -822,6 +822,24 @@
             flex-shrink: 0;
         }
         .member-avatar.sm { width: 20px; height: 20px; font-size: 0.6rem; }
+        /* Chips de localização no Dashboard */
+        .location-chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 3px 10px;
+            border-radius: 20px;
+            border: 1px solid var(--border);
+            background: var(--panel);
+            color: var(--text-secondary);
+            font-size: 0.7rem;
+            font-family: inherit;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s, border-color 0.15s;
+            white-space: nowrap;
+        }
+        .location-chip:hover { border-color: var(--amber); color: var(--amber); }
+        .location-chip.active { background: var(--amber); color: #1a1305; border-color: var(--amber); font-weight: 700; }
+
         .role-badge-admin { color: var(--amber-bright); border: 1px solid var(--amber); }
         .role-badge-member { color: var(--text-secondary); border: 1px solid var(--border); }
 
@@ -1442,6 +1460,13 @@
                         <select id="dashboardGroupFilter" onchange="loadDashboardStats()">
                             <option value="">Todos os grupos</option>
                         </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0; flex-basis:100%; width:100%;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
+                            <label style="margin-bottom:0;">📍 Locais</label>
+                            <span id="locationChipsClear" onclick="clearLocationChips()" style="font-size:0.68rem; color:var(--amber-bright); cursor:pointer; display:none;">Limpar seleção</span>
+                        </div>
+                        <div id="locationChipsContainer" style="display:flex; flex-wrap:wrap; gap:0.35rem; max-height:90px; overflow-y:auto; padding:2px 0;"></div>
                     </div>
                     <button class="btn btn-sm" style="width:auto; background:transparent; color:var(--led-blue); border:1px solid var(--led-blue);" onclick="downloadDashboardHtml()">📊 Exportar Dashboard (HTML)</button>
                 </div>
@@ -5465,6 +5490,54 @@
             }
         }
 
+        // Set de locais selecionados no dashboard (multi-seleção)
+        const _selectedLocations = new Set();
+
+        function populateDashboardLocationFilter() {
+            const container = document.getElementById('locationChipsContainer');
+            if (!container) return;
+
+            // Coleta locais únicos de demandas ativas + histórico
+            const locs = new Set();
+            currentDemands.forEach(d => { if (d.location) locs.add(d.location.trim()); });
+            if (window._cachedHistory) {
+                window._cachedHistory.forEach(h => { if (h.location) locs.add(h.location.trim()); });
+            }
+            const sorted = [...locs].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+
+            container.innerHTML = sorted.map(loc => `
+                <button class="location-chip${_selectedLocations.has(loc) ? ' active' : ''}"
+                    onclick="toggleLocationChip('${escapeForAttr(loc)}')"
+                    title="${escapeHtml(loc)}">
+                    ${escapeHtml(loc.length > 28 ? loc.slice(0, 26) + '…' : loc)}
+                </button>
+            `).join('');
+
+            // Mostrar/ocultar botão de limpar
+            const clearBtn = document.getElementById('locationChipsClear');
+            if (clearBtn) clearBtn.style.display = _selectedLocations.size > 0 ? '' : 'none';
+        }
+
+        function escapeForAttr(str) {
+            return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        }
+
+        function toggleLocationChip(loc) {
+            if (_selectedLocations.has(loc)) {
+                _selectedLocations.delete(loc);
+            } else {
+                _selectedLocations.add(loc);
+            }
+            populateDashboardLocationFilter();
+            loadDashboardStats();
+        }
+
+        function clearLocationChips() {
+            _selectedLocations.clear();
+            populateDashboardLocationFilter();
+            loadDashboardStats();
+        }
+
         function onDashboardPeriodChange() {
             const isCustom = document.getElementById('dashboardPeriod').value === 'custom';
             document.getElementById('dashboardCustomDateRange').style.display = isCustom ? 'flex' : 'none';
@@ -5488,6 +5561,11 @@
         function getDashboardFilters() {
             const periodValue = document.getElementById('dashboardPeriod').value;
             const groupFilterId = document.getElementById('dashboardGroupFilter').value;
+            const locationFilter = document.getElementById('dashboardLocationFilter')
+                ? document.getElementById('dashboardLocationFilter').value
+                : null;
+            // Chips de localização têm prioridade sobre o select legado
+            const activeLocations = _selectedLocations.size > 0 ? [..._selectedLocations] : (locationFilter ? [locationFilter] : []);
             const scope = document.getElementById('dashboardScope').value;
             const todayIso = toLocalISODate(new Date());
             const now = new Date();
@@ -5522,7 +5600,7 @@
                 rangeLabel = 'Este Mês';
             }
 
-            return { startIso, endIso, rangeLabel, groupFilterId, scope };
+            return { startIso, endIso, rangeLabel, groupFilterId, locationFilter: activeLocations, scope };
         }
 
         async function loadDashboardStats() {
@@ -5536,6 +5614,8 @@
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
                 const history = await response.json();
+                window._cachedHistory = history;  // cache pra popular filtro de locais
+                populateDashboardLocationFilter(); // popula com locais do histórico tb
                 renderDashboard(history);
             } catch (e) {
                 console.error('Erro:', e);
@@ -5545,15 +5625,25 @@
 
         // Calcula todos os números/gráficos do dashboard a partir do histórico e dos filtros atuais.
         // Usado tanto pela tela viva quanto pelo exportador de HTML (mesma fonte de verdade).
-        function computeDashboardData(history, startIso, endIso, groupFilterId, scope) {
+        function computeDashboardData(history, startIso, endIso, groupFilterId, scope, locationFilter) {
+            // locationFilter agora é um array de locais selecionados (vazio = todos)
+            const hasLocFilter = Array.isArray(locationFilter) && locationFilter.length > 0;
+            const locSet = hasLocFilter ? new Set(locationFilter.map(l => l.toLowerCase())) : null;
+
             let filteredDemands = groupFilterId
                 ? currentDemands.filter(d => String(d.workGroupId) === groupFilterId)
                 : currentDemands;
+            if (locSet) {
+                filteredDemands = filteredDemands.filter(d => d.location && locSet.has(d.location.trim().toLowerCase()));
+            }
             filteredDemands = filterByViewScope(filteredDemands);
 
             let periodHistory = (history || []).filter(h => h.statusChangeDate && h.statusChangeDate >= startIso && h.statusChangeDate <= endIso);
             if (groupFilterId) {
                 periodHistory = periodHistory.filter(h => String(h.workGroupId) === groupFilterId);
+            }
+            if (locSet) {
+                periodHistory = periodHistory.filter(h => h.location && locSet.has(h.location.trim().toLowerCase()));
             }
             // Agora que o histórico guarda assigned_to_user_id, o toggle Minhas/Time
             // filtra as concluídas por responsável. Fallback: user_id (criador) pra registros antigos.
@@ -5791,8 +5881,8 @@
 
         function renderDashboard(history) {
             const container = document.getElementById('dashboardContent');
-            const { startIso, endIso, rangeLabel, groupFilterId, scope } = getDashboardFilters();
-            const d = computeDashboardData(history, startIso, endIso, groupFilterId, scope);
+            const { startIso, endIso, rangeLabel, groupFilterId, locationFilter, scope } = getDashboardFilters();
+            const d = computeDashboardData(history, startIso, endIso, groupFilterId, scope, locationFilter);
             const trendLabel = d.daysSpan <= 30 ? 'por Dia' : 'por Semana';
             const isMineEmpty = viewScope === 'mine' && d.notStartedCount === 0 && d.urgentCount === 0 && d.inProgressCount === 0 && d.overdueCount === 0;
             const mineEmptyBanner = isMineEmpty ? `
@@ -5831,7 +5921,7 @@
                         ${getTrendHtml(d.avgDaysTrend, true)}
                     </div>
                 </div>
-                <div style="text-align:right; font-size:0.7rem; color:var(--text-secondary); margin-top:0.5rem; text-transform:uppercase; letter-spacing:0.04em;">${rangeLabel} · ${viewScope === 'mine' ? '👤 Minhas' : '👥 Time Todo'} · ${scope === 'all' ? 'Todas' : 'Abertas'}</div>
+                <div style="text-align:right; font-size:0.7rem; color:var(--text-secondary); margin-top:0.5rem; text-transform:uppercase; letter-spacing:0.04em;">${rangeLabel} · ${viewScope === 'mine' ? '👤 Minhas' : '👥 Time Todo'} · ${scope === 'all' ? 'Todas' : 'Abertas'}${locationFilter.length > 0 ? ' · 📍 ' + locationFilter.map(l => escapeHtml(l)).join(', ') : ''}</div>
 
                 <div class="grid" style="margin-top: 1.5rem;">
                     <div class="card">
@@ -5868,8 +5958,8 @@
                 console.error('Erro ao buscar histórico para o dashboard exportado:', e);
             }
 
-            const { startIso, endIso, rangeLabel, groupFilterId, scope } = getDashboardFilters();
-            const d = computeDashboardData(history, startIso, endIso, groupFilterId, scope);
+            const { startIso, endIso, rangeLabel, groupFilterId, locationFilter, scope } = getDashboardFilters();
+            const d = computeDashboardData(history, startIso, endIso, groupFilterId, scope, locationFilter);
             const trendLabel = d.daysSpan <= 30 ? 'por Dia' : 'por Semana';
             const selectedGroup = groupFilterId ? currentGroups.find(g => String(g.id) === groupFilterId) : null;
             const groupLabel = selectedGroup ? selectedGroup.name : 'Todos os grupos';
