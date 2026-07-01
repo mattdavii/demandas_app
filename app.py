@@ -2346,134 +2346,104 @@ def build_feedback_email_admin(workspace, all_concluded, members, week_start, we
 
 @app.route('/api/cron/weekly-feedback', methods=['GET', 'POST'])
 def cron_weekly_feedback():
-    """Envia emails de feedback semanal via background thread — responde 202 imediatamente
-    para não deixar o cron-job.org (que tem timeout de ~30s) sem resposta enquanto
-    os emails são enviados. Protegido pela mesma CRON_SECRET_KEY."""
+    """Envia emails de feedback semanal de forma SÍNCRONA.
+    O gunicorn.conf.py define timeout=120s, suficiente para envio de emails.
+    Adicione &test=1 para usar a semana atual (diagnóstico)."""
     secret = request.args.get('key') or request.headers.get('X-Cron-Key')
     if not secret or secret != os.getenv('CRON_SECRET_KEY'):
         return jsonify({'error': 'Não autorizado'}), 403
 
     if not app.config.get('MAIL_USERNAME'):
-        return jsonify({'message': 'Email não configurado — nenhum envio realizado'}), 200
+        return jsonify({'message': 'Email não configurado'}), 200
 
     today = date.today()
     days_since_monday = today.weekday()
-    last_monday = today - timedelta(days=days_since_monday + 7)
-    last_sunday  = last_monday + timedelta(days=6)
 
-    def _send_all():
-        """Processa e envia os emails em background, dentro do contexto da app."""
-        try:
-          with app.app_context():
-            sent_personal = sent_admin = 0
-            errors = []
-            all_users = {u.id: u for u in User.query.all()}
-
-            for workspace in Workspace.query.all():
-                try:
-                    members_raw = WorkspaceMember.query.filter_by(workspace_id=workspace.id).all()
-                    if not members_raw:
-                        continue
-
-                    ws_users = {m.user_id: all_users.get(m.user_id) for m in members_raw}
-
-                    terminal_keys = [s.key for s in StatusConfig.query.filter_by(
-                        workspace_id=workspace.id, is_completed=True).all()]
-                    if not terminal_keys:
-                        continue
-
-                    all_concluded = DemandHistory.query.filter(
-                        DemandHistory.workspace_id == workspace.id,
-                        DemandHistory.status.in_(terminal_keys),
-                        DemandHistory.status_change_date >= last_monday,
-                        DemandHistory.status_change_date <= last_sunday
-                    ).all()
-
-                    class MemberInfo:
-                        __slots__ = ('user_id', 'fullName')
-                        def __init__(self, uid, u):
-                            self.user_id = uid
-                            self.fullName = (u.full_name or u.username) if u else str(uid)
-                    members_info = [MemberInfo(m.user_id, ws_users.get(m.user_id)) for m in members_raw]
-
-                    # Email pessoal
-                    for member_row in members_raw:
-                        user = ws_users.get(member_row.user_id)
-                        if not user or not user.email or user.weekly_feedback_enabled is False:
-                            continue
-                        personal = [h for h in all_concluded
-                                    if (h.assigned_to_user_id or h.user_id) == user.id]
-                        try:
-                            html = build_feedback_email_personal(user, personal, workspace, last_monday, last_sunday)
-                            mail.send(Message(
-                                f'📊 Seu resumo semanal — {last_monday.strftime("%d/%m")} a {last_sunday.strftime("%d/%m")}',
-                                recipients=[user.email], html=html))
-                            sent_personal += 1
-                        except Exception as e:
-                            errors.append(f'personal {user.email}: {str(e)[:100]}')
-
-                    # Email do admin
-                    for admin_member in [m for m in members_raw if m.role == 'admin']:
-                        admin_user = ws_users.get(admin_member.user_id)
-                        if not admin_user or not admin_user.email or admin_user.weekly_feedback_enabled is False:
-                            continue
-                        try:
-                            html = build_feedback_email_admin(workspace, all_concluded, members_info, last_monday, last_sunday)
-                            mail.send(Message(
-                                f'📊 Resumo do time — {last_monday.strftime("%d/%m")} a {last_sunday.strftime("%d/%m")}',
-                                recipients=[admin_user.email], html=html))
-                            sent_admin += 1
-                        except Exception as e:
-                            errors.append(f'admin {admin_user.email}: {str(e)[:100]}')
-
-                except Exception as e:
-                    errors.append(f'workspace {workspace.id}: {str(e)[:100]}')
-
-            print(f'[weekly-feedback] {sent_personal} pessoais + {sent_admin} admin enviados. Erros: {errors}')
-        except Exception as _thread_err:
-            print(f'[weekly-feedback] ERRO no thread: {_thread_err}')
-
-    # Modo de teste (?test=1): roda de forma síncrona e retorna o resultado direto
-    # Útil pra debugar sem depender dos logs — nunca usar em produção real
+    # ?test=1 usa a semana ATUAL (para diagnóstico); sem o parâmetro usa a semana passada
     if request.args.get('test') == '1':
-        try:
-            with app.app_context():
-                sent_personal = sent_admin = 0
-                errors = []
-                all_users = {u.id: u for u in User.query.all()}
-                for workspace in Workspace.query.all():
-                    members_raw = WorkspaceMember.query.filter_by(workspace_id=workspace.id).all()
-                    ws_users = {m.user_id: all_users.get(m.user_id) for m in members_raw}
-                    terminal_keys = [s.key for s in StatusConfig.query.filter_by(workspace_id=workspace.id, is_completed=True).all()]
-                    all_concluded = DemandHistory.query.filter(
-                        DemandHistory.workspace_id == workspace.id,
-                        DemandHistory.status.in_(terminal_keys) if terminal_keys else text('1=0'),
-                        DemandHistory.status_change_date >= last_monday,
-                        DemandHistory.status_change_date <= last_sunday
-                    ).all() if terminal_keys else []
-                    for member_row in members_raw:
-                        user = ws_users.get(member_row.user_id)
-                        if not user or not user.email or user.weekly_feedback_enabled is False:
-                            continue
-                        personal = [h for h in all_concluded if (h.assigned_to_user_id or h.user_id) == user.id]
-                        try:
-                            html = build_feedback_email_personal(user, personal, workspace, last_monday, last_sunday)
-                            mail.send(Message(f'[TESTE] 📊 Resumo semanal', recipients=[user.email], html=html))
-                            sent_personal += 1
-                        except Exception as e:
-                            errors.append(f'personal {user.email}: {str(e)}')
-                return jsonify({'sent_personal': sent_personal, 'sent_admin': sent_admin,
-                                'period': f'{last_monday} a {last_sunday}', 'errors': errors}), 200
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
+        last_monday = today - timedelta(days=days_since_monday)
+        last_sunday = today
+    else:
+        last_monday = today - timedelta(days=days_since_monday + 7)
+        last_sunday  = last_monday + timedelta(days=6)
 
-    # Dispara em background e responde imediatamente (evita timeout do cron-job.org)
-    threading.Thread(target=_send_all, daemon=True).start()
+    sent_personal = sent_admin = 0
+    errors = []
 
+    try:
+        all_users = {u.id: u for u in User.query.all()}
+
+        for workspace in Workspace.query.all():
+            try:
+                members_raw = WorkspaceMember.query.filter_by(workspace_id=workspace.id).all()
+                if not members_raw:
+                    continue
+
+                ws_users = {m.user_id: all_users.get(m.user_id) for m in members_raw}
+
+                terminal_keys = [s.key for s in StatusConfig.query.filter_by(
+                    workspace_id=workspace.id, is_completed=True).all()]
+                if not terminal_keys:
+                    continue
+
+                all_concluded = DemandHistory.query.filter(
+                    DemandHistory.workspace_id == workspace.id,
+                    DemandHistory.status.in_(terminal_keys),
+                    DemandHistory.status_change_date >= last_monday,
+                    DemandHistory.status_change_date <= last_sunday
+                ).all()
+
+                class MemberInfo:
+                    __slots__ = ('user_id', 'fullName')
+                    def __init__(self, uid, u):
+                        self.user_id = uid
+                        self.fullName = (u.full_name or u.username) if u else str(uid)
+                members_info = [MemberInfo(m.user_id, ws_users.get(m.user_id)) for m in members_raw]
+
+                for member_row in members_raw:
+                    user = ws_users.get(member_row.user_id)
+                    if not user or not user.email or user.weekly_feedback_enabled is False:
+                        continue
+                    personal = [h for h in all_concluded
+                                if (h.assigned_to_user_id or h.user_id) == user.id]
+                    try:
+                        html = build_feedback_email_personal(user, personal, workspace, last_monday, last_sunday)
+                        prefix = '[TESTE] ' if request.args.get('test') == '1' else ''
+                        mail.send(Message(
+                            f'{prefix}📊 Seu resumo semanal — {last_monday.strftime("%d/%m")} a {last_sunday.strftime("%d/%m")}',
+                            recipients=[user.email], html=html))
+                        sent_personal += 1
+                    except Exception as e:
+                        errors.append(f'personal {user.email}: {str(e)[:120]}')
+
+                for admin_member in [m for m in members_raw if m.role == 'admin']:
+                    admin_user = ws_users.get(admin_member.user_id)
+                    if not admin_user or not admin_user.email or admin_user.weekly_feedback_enabled is False:
+                        continue
+                    try:
+                        html = build_feedback_email_admin(workspace, all_concluded, members_info, last_monday, last_sunday)
+                        prefix = '[TESTE] ' if request.args.get('test') == '1' else ''
+                        mail.send(Message(
+                            f'{prefix}📊 Resumo do time — {last_monday.strftime("%d/%m")} a {last_sunday.strftime("%d/%m")}',
+                            recipients=[admin_user.email], html=html))
+                        sent_admin += 1
+                    except Exception as e:
+                        errors.append(f'admin {admin_user.email}: {str(e)[:120]}')
+
+            except Exception as e:
+                errors.append(f'workspace {workspace.id}: {str(e)[:120]}')
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    print(f'[weekly-feedback] {sent_personal} pessoais + {sent_admin} admin. Período: {last_monday} a {last_sunday}. Erros: {errors}')
     return jsonify({
-        'message': 'Feedback semanal iniciado em background',
-        'period': f'{last_monday} a {last_sunday}'
-    }), 202
+        'sent_personal': sent_personal,
+        'sent_admin': sent_admin,
+        'period': f'{last_monday} a {last_sunday}',
+        'errors': errors
+    }), 200
+
 
 # ============= ROTAS DE BACKUP =============
 @app.route('/api/export', methods=['GET'])
