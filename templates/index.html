@@ -5000,7 +5000,9 @@
             if (!entries) return;
             const last = entries[entries.length - 1];
             const chain = entries.map(e => getStatusLabel(e.status));
-            const checklist = last.checklist || [];
+            // null = registro antigo sem dado de checklist; [] = nova demanda sem checklist criado
+            const checklistRaw = last.checklist;
+            const checklist = checklistRaw || [];
             const borderColor = getStatusColor(last.status);
 
             let checklistHtml = '';
@@ -5021,6 +5023,15 @@
                         `).join('')}
                     </div>`;
             }
+
+            // Mensagem de rodapé diferenciada por tipo de ausência
+            const checklistFooter = checklist.length === 0
+                ? checklistRaw === null
+                    ? `<p style="font-size:0.73rem; color:var(--text-secondary); margin-top:1rem; opacity:0.55; border-top:1px solid var(--border); padding-top:0.75rem;">
+                        ℹ️ Esta demanda foi concluída antes da atualização que passou a registrar checklists no histórico. O checklist original não pode ser recuperado.
+                       </p>`
+                    : `<p style="font-size:0.73rem; color:var(--text-secondary); margin-top:1rem; opacity:0.55;">Nenhum checklist foi criado para esta demanda.</p>`
+                : '';
 
             let chainHtml = '';
             if (chain.length > 1) {
@@ -5048,7 +5059,7 @@
                 ${last.context ? `<p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem; white-space: pre-wrap;">📌 ${escapeHtml(last.context)}</p>` : ''}
                 ${chainHtml}
                 ${checklistHtml}
-                ${checklist.length === 0 ? `<p style="font-size:0.75rem; color:var(--text-secondary); margin-top:1rem; opacity:0.6;">Sem checklist registrado para esta demanda.</p>` : ''}
+                ${checklistFooter}
             `;
             document.getElementById('historyCardDetailModal').classList.add('show');
         }
