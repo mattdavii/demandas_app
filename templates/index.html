@@ -2689,7 +2689,10 @@
                     rebuildStatusAndPriorityStructures();
 
                     if (init.workGroups) currentGroups = init.workGroups;
-                    if (init.demands)    currentDemands = init.demands;
+                    if (init.demands) {
+                        currentDemands = init.demands;
+                        window._demandsLoadTime = Date.now();
+                    }
 
                     // Marca como sucesso ANTES de renderizar — assim qualquer erro
                     // de rendering não aciona o fallback de chamadas individuais
@@ -3377,6 +3380,7 @@
 
                 if (!response.ok) throw new Error('Resposta não-OK: ' + response.status);
                 currentDemands = await response.json();
+                window._demandsLoadTime = Date.now();
                 localStorage.setItem('cache_demands', JSON.stringify(currentDemands));
                 renderDemands();
                 updateSummary();
@@ -4218,6 +4222,7 @@
         // Evita 3 chamadas separadas de 31KB cada ao trocar de aba.
         let _historyCacheData = null;
         let _historyCacheTime = 0;
+        let _historyFetchPromise = null;
         const _HISTORY_CACHE_TTL = 120000; // 2 minutos
 
         async function getHistory(forceRefresh = false) {
@@ -4225,14 +4230,21 @@
             if (!forceRefresh && _historyCacheData && (now - _historyCacheTime) < _HISTORY_CACHE_TTL) {
                 return _historyCacheData;
             }
-            const response = await fetchWithRetry(`${API_URL}/history`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            }, 1);
-            if (!response.ok) throw new Error('Falha ao buscar histórico');
-            _historyCacheData = await response.json();
-            _historyCacheTime = Date.now();
-            window._cachedHistory = _historyCacheData; // compatibilidade com filtro de locais
-            return _historyCacheData;
+            // Se já há um fetch em andamento, espera ele em vez de disparar outro
+            if (_historyFetchPromise) return _historyFetchPromise;
+
+            _historyFetchPromise = (async () => {
+                const response = await fetchWithRetry(`${API_URL}/history`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (!response.ok) throw new Error('Falha ao buscar histórico');
+                _historyCacheData = await response.json();
+                _historyCacheTime = Date.now();
+                window._cachedHistory = _historyCacheData;
+                return _historyCacheData;
+            })().finally(() => { _historyFetchPromise = null; });
+
+            return _historyFetchPromise;
         }
 
         function invalidateHistoryCache() {
@@ -6650,6 +6662,12 @@
             closeSidebarMobile();
             document.querySelector('.content-inner').scrollTop = 0;
 
+            if (tab === 'demands') {
+                renderKanban(); // re-renderiza com dados em memória — instantâneo
+                // Se os dados têm mais de 60s, busca versão atualizada em background
+                const demandsAge = Date.now() - (window._demandsLoadTime || 0);
+                if (demandsAge > 60000) loadDemands();
+            }
             if (tab === 'today') {
                 updateScopeToggleButtons();
                 loadTodayPage();
