@@ -32,7 +32,7 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_size': 1,
     'max_overflow': 2,
     'pool_timeout': 8,
-    'connect_args': {'connect_timeout': 8},
+    'connect_args': {'connect_timeout': 8, 'options': '-c statement_timeout=25000'},
 }
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', secrets.token_urlsafe(32))
@@ -515,27 +515,6 @@ with app.app_context():
         except Exception:
             db.session.rollback()
 
-# Keepalive via before_request — único jeito garantido de rodar dentro do worker.
-# O Gunicorn faz fork do master; threads do master NÃO existem nos workers.
-import threading as _threading, time as _time
-_keepalive_started = False
-
-@app.before_request
-def _start_keepalive_once():
-    global _keepalive_started
-    if _keepalive_started:
-        return
-    _keepalive_started = True
-    def _ping():
-        _time.sleep(60)
-        while True:
-            try:
-                db.session.execute(text('SELECT 1'))
-                db.session.remove()
-            except Exception:
-                pass
-            _time.sleep(90)
-    _threading.Thread(target=_ping, daemon=True).start()
 
 # ============= ROTAS DE PÁGINA =============
 @app.route('/')
