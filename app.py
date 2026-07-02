@@ -1730,13 +1730,14 @@ def update_demand_status(demand_id):
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
     demand = Demand.query.get_or_404(demand_id)
-    
-    if demand.workspace_id != workspace_id is not None and demand.workspace_id.workspace_id != workspace_id:
+
+    if demand.workspace_id is not None and demand.workspace_id != workspace_id:
         return jsonify({'error': 'Acesso negado'}), 403
-    
+
     data = request.get_json()
     new_status = data.get('status')
-    
+    old_status = demand.status  # salvar antes de qualquer alteração
+
     if not new_status:
         return jsonify({'error': 'Status não fornecido'}), 400
     
