@@ -40,7 +40,7 @@ app.config['MAIL_PORT'] = int(os.getenv('MAIL_PORT', 587))
 app.config['MAIL_USE_TLS'] = os.getenv('MAIL_USE_TLS', True)
 app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
 app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
-app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_DEFAULT_SENDER', 'noreply@demandasapp.com')
+app.config['MAIL_DEFAULT_SENDER'] = ("Painel de Bordo", os.getenv('MAIL_USERNAME', 'noreply@demandasapp.com'))
 
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_pre_ping': True,     # testa a conexão antes de usar — reconecta se morta
@@ -247,7 +247,9 @@ class Demand(db.Model):
     reminder_sent = db.Column(db.Boolean, default=False)
     checklist = db.Column(db.JSON, default=list)  # [{"text": "...", "checked": false}, ...]
     is_recurring = db.Column(db.Boolean, default=False)
-    recurrence_type = db.Column(db.String(20), nullable=True)  # 'weekly'|'biweekly'|'monthly'|'quarterly'|'semiannual'|'yearly'
+    recurrence_type = db.Column(db.String(20), nullable=True)
+    previous_status = db.Column(db.String(50), nullable=True)
+    rejection_note = db.Column(db.Text, nullable=True)  # 'weekly'|'biweekly'|'monthly'|'quarterly'|'semiannual'|'yearly'
     
     def to_dict(self, user_cache=None):
         if self.assigned_to_user_id:
@@ -272,7 +274,9 @@ class Demand(db.Model):
             'reminderAt': self.reminder_at.isoformat() if self.reminder_at else None,
             'checklist': self.checklist or [],
             'isRecurring': self.is_recurring or False,
-            'recurrenceType': self.recurrence_type
+            'recurrenceType': self.recurrence_type,
+            'previousStatus': self.previous_status,
+            'rejectionNote': self.rejection_note
         }
 
 class DemandHistory(db.Model):
@@ -385,6 +389,7 @@ class StatusConfig(db.Model):
     emoji = db.Column(db.String(10), nullable=True)
     order = db.Column(db.Integer, default=0)
     is_completed = db.Column(db.Boolean, default=False)
+    is_approval = db.Column(db.Boolean, default=False)
 
     __table_args__ = (db.UniqueConstraint('workspace_id', 'key', name='unique_workspace_status_key'),)
 
@@ -396,7 +401,8 @@ class StatusConfig(db.Model):
             'color': self.color,
             'emoji': self.emoji,
             'order': self.order,
-            'isCompleted': self.is_completed
+            'isCompleted': self.is_completed,
+            'isApproval': self.is_approval or False
         }
 
 class PriorityConfig(db.Model):
@@ -477,7 +483,7 @@ def seed_default_status_and_priority(user_id, workspace_id):
             {'key': 'nao-iniciado', 'label': 'Não Iniciado', 'color': '#9aa0a7', 'emoji': '⚪', 'order': 1, 'is_completed': False},
             {'key': 'andamento', 'label': 'Em Andamento', 'color': '#f5a623', 'emoji': '🟡', 'order': 2, 'is_completed': False},
             {'key': 'aguardando', 'label': 'Aguardando', 'color': '#4fc3f7', 'emoji': '🔵', 'order': 3, 'is_completed': False},
-            {'key': 'aprovacao', 'label': 'Aprovação', 'color': '#b388ff', 'emoji': '🟣', 'order': 4, 'is_completed': False},
+            {'key': 'aprovacao', 'label': 'Aguardando Aprovação', 'color': '#b388ff', 'emoji': '🟣', 'order': 4, 'is_completed': False, 'is_approval': True},
             {'key': 'concluido', 'label': 'Concluído', 'color': '#3ddc84', 'emoji': '🟢', 'order': 5, 'is_completed': True},
         ]
         for d in defaults:
@@ -498,6 +504,16 @@ def seed_default_status_and_priority(user_id, workspace_id):
 # ============= CRIAR TABELAS NA INICIALIZAÇÃO =============
 with app.app_context():
     db.create_all()
+    for _stmt in [
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_approval BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS previous_status VARCHAR(50)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS rejection_note TEXT",
+    ]:
+        try:
+            db.session.execute(text(_stmt))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
 
 # ============= ROTAS DE PÁGINA =============
 @app.route('/')
@@ -1743,6 +1759,20 @@ def update_demand_status(demand_id):
 
     status_config = ws_filter(StatusConfig, user_id, workspace_id, {'key': new_status}).first()
     is_terminal = status_config.is_completed if status_config else (new_status in ('concluido', 'concluído'))
+    is_approval = status_config.is_approval if status_config else False
+
+    # Fluxo de aprovação: salva o status anterior e notifica os admins
+    if is_approval:
+        demand.previous_status = old_status
+        requester = User.query.get(user_id)
+        requester_name = (requester.full_name or requester.username) if requester else 'Alguém'
+        # Notifica após commit (dispara em background pra não atrasar a resposta)
+        import threading as _t
+        _d, _w, _r = demand, workspace_id, requester_name
+        def _notify():
+            with app.app_context():
+                notify_admins_approval_pending(_d, _w, _r)
+        _t.Thread(target=_notify, daemon=True).start()
 
     if is_terminal:
         if demand.is_recurring and demand.recurrence_type:
@@ -2182,6 +2212,151 @@ def get_activity_feed():
 
     return jsonify(items), 200
 
+
+
+# ============= FLUXO DE APROVAÇÃO =============
+def get_approval_status(workspace_id):
+    """Retorna o StatusConfig marcado como is_approval neste workspace, ou None."""
+    return StatusConfig.query.filter_by(workspace_id=workspace_id, is_approval=True).first()
+
+def notify_admins_approval_pending(demand, workspace_id, requester_name):
+    """Envia push notification + email pra todos os admins do workspace quando
+    uma demanda entra em aprovação."""
+    admins = WorkspaceMember.query.filter_by(workspace_id=workspace_id, role='admin').all()
+    for admin_member in admins:
+        admin_user = User.query.get(admin_member.user_id)
+        if not admin_user:
+            continue
+
+        # Push notification
+        subs = PushSubscription.query.filter_by(user_id=admin_user.id).all()
+        msg_body = f'{requester_name} solicitou aprovação: {demand.location} · {demand.activity}'
+        for sub in subs:
+            try:
+                from pywebpush import webpush, WebPushException
+                webpush(
+                    subscription_info={"endpoint": sub.endpoint, "keys": {"p256dh": sub.p256dh, "auth": sub.auth}},
+                    data=json.dumps({"title": "⏳ Aprovação Pendente", "body": msg_body, "url": "/"}),
+                    vapid_private_key=os.getenv('VAPID_PRIVATE_KEY'),
+                    vapid_claims={"sub": f"mailto:{os.getenv('MAIL_USERNAME', 'admin@app.com')}"}
+                )
+            except Exception:
+                pass
+
+        # Email
+        if admin_user.email and app.config.get('MAIL_USERNAME'):
+            try:
+                mail.send(Message(
+                    '⏳ Aprovação Pendente — Painel de Bordo',
+                    recipients=[admin_user.email],
+                    html=f"""
+                    <div style="font-family:Arial,sans-serif; background:#111; color:#e0e0e0; padding:2rem; max-width:500px; margin:auto;">
+                        <div style="border-left:4px solid #b388ff; padding-left:1rem; margin-bottom:1.5rem;">
+                            <div style="font-size:11px; text-transform:uppercase; letter-spacing:2px; color:#9aa0a7;">Painel de Bordo</div>
+                            <h2 style="color:#b388ff; margin:4px 0;">⏳ Aprovação Pendente</h2>
+                        </div>
+                        <p style="color:#9aa0a7;"><strong style="color:#e0e0e0;">{requester_name}</strong> solicitou aprovação para:</p>
+                        <div style="background:#1a1a1a; border-radius:6px; padding:1rem; margin:1rem 0;">
+                            <div style="color:#e0e0e0; font-weight:700; margin-bottom:0.25rem;">{demand.activity}</div>
+                            <div style="color:#9aa0a7; font-size:0.9rem;">📍 {demand.location}</div>
+                        </div>
+                        <a href="{os.getenv('FRONTEND_URL', '')}" style="display:inline-block; background:#b388ff; color:#1a0a2e; padding:0.75rem 1.5rem; border-radius:4px; text-decoration:none; font-weight:700;">Ver no Painel de Bordo</a>
+                        <div style="margin-top:2rem; font-size:11px; color:#555; border-top:1px solid #222; padding-top:1rem;">Desenvolvido por MD Soluções Tecnológicas</div>
+                    </div>"""
+                ))
+            except Exception:
+                pass
+
+
+@app.route('/api/demands/pending-approval', methods=['GET'])
+@jwt_required()
+def get_pending_approval():
+    """Lista demandas aguardando aprovação no workspace. Restrito a admins."""
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Apenas administradores podem ver aprovações pendentes'}), 403
+
+    approval_status = get_approval_status(workspace_id)
+    if not approval_status:
+        return jsonify([]), 200
+
+    demands = ws_filter(Demand, user_id, workspace_id, {'status': approval_status.key}).all()
+    assignee_ids = {d.assigned_to_user_id for d in demands if d.assigned_to_user_id}
+    user_cache = {u.id: u for u in User.query.filter(User.id.in_(assignee_ids)).all()} if assignee_ids else {}
+    return jsonify([d.to_dict(user_cache=user_cache) for d in demands]), 200
+
+
+@app.route('/api/demands/<int:demand_id>/approve', methods=['POST'])
+@jwt_required()
+def approve_demand(demand_id):
+    """Admin aprova a demanda: move pro status escolhido e limpa o estado de aprovação."""
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Apenas administradores podem aprovar demandas'}), 403
+
+    demand = Demand.query.get_or_404(demand_id)
+    data = request.get_json()
+    new_status = data.get('status')
+
+    if not new_status:
+        return jsonify({'error': 'Informe o status de destino'}), 400
+
+    status_config = ws_filter(StatusConfig, user_id, workspace_id, {'key': new_status}).first()
+    if not status_config:
+        return jsonify({'error': 'Status inválido'}), 400
+
+    demand.status = new_status
+    demand.previous_status = None
+    demand.rejection_note = None
+
+    db.session.commit()
+    return jsonify({'message': 'Demanda aprovada', 'demand': demand.to_dict()}), 200
+
+
+@app.route('/api/demands/<int:demand_id>/reject', methods=['POST'])
+@jwt_required()
+def reject_demand(demand_id):
+    """Admin rejeita a demanda: volta pro status anterior e salva a justificativa."""
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Apenas administradores podem rejeitar demandas'}), 403
+
+    demand = Demand.query.get_or_404(demand_id)
+    data = request.get_json()
+    note = (data.get('note') or '').strip()
+
+    if not note:
+        return jsonify({'error': 'A justificativa é obrigatória'}), 400
+
+    # Volta pro status anterior; se não houver, vai pro primeiro status não-concluído
+    target_status = demand.previous_status
+    if not target_status:
+        first = ws_filter(StatusConfig, user_id, workspace_id, {'is_completed': False}).order_by(StatusConfig.order.asc()).first()
+        target_status = first.key if first else 'nao-iniciado'
+
+    demand.status = target_status
+    demand.rejection_note = note
+    demand.previous_status = None
+
+    # Appenda a nota ao contexto pra o membro ver o motivo
+    admin_user = User.query.get(user_id)
+    admin_name = admin_user.full_name or admin_user.username if admin_user else 'Admin'
+    from datetime import date as _date
+    prefix = f'[Rejeitado em {_date.today().strftime("%d/%m/%Y")} por {admin_name}: {note}]'
+    demand.context = f'{prefix}\n\n{demand.context}' if demand.context else prefix
+
+    db.session.commit()
+    return jsonify({'message': 'Demanda rejeitada', 'demand': demand.to_dict()}), 200
+
+
+# ── Interceptar update_demand_status para detectar entrada em aprovação ────────
+# (injetado no update_demand_status existente via after_this_commit)
 
 
 # ============= ROTAS DE BACKUP =============
