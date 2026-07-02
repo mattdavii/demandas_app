@@ -2694,6 +2694,15 @@
                         window._demandsLoadTime = Date.now();
                     }
 
+                    // Histórico já vem no init — popula o cache imediatamente
+                    // para que Hoje (concluídas), Histórico, Locais e Dashboard
+                    // não precisem de chamada extra
+                    if (init.history && init.history.length >= 0) {
+                        _historyCacheData = init.history;
+                        _historyCacheTime = Date.now();
+                        window._cachedHistory = _historyCacheData;
+                    }
+
                     // Marca como sucesso ANTES de renderizar — assim qualquer erro
                     // de rendering não aciona o fallback de chamadas individuais
                     initOk = true;
@@ -4706,21 +4715,15 @@
                 .filter(d => !isOverdue(d.dueDate))
                 .sort((a, b) => (PRIORITY_RANK[b.priority] || 0) - (PRIORITY_RANK[a.priority] || 0));
 
-            // Agora que o histórico guarda assigned_to_user_id, o toggle Minhas/Time
-            // funciona também em "Concluídas Hoje". Fallback: se não tiver assignedToUserId
-            // (registros muito antigos anteriores à migração), usa user_id do histórico.
+            // "Concluídas Hoje" usa o cache de histórico (populado pelo /api/init)
+            // — sem chamada extra à API
             let concludedToday = [];
             try {
-                const response = await fetch(`${API_URL}/history`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                if (response.ok) {
-                    const history = await response.json();
-                    const allConcludedToday = history.filter(h => isStatusCompleted(h.status) && h.statusChangeDate === todayIso);
-                    concludedToday = viewScope === 'mine' && currentUser
-                        ? allConcludedToday.filter(h => (h.assignedToUserId || h.userId) == currentUser.id)
-                        : allConcludedToday;
-                }
+                const history = await getHistory();
+                const allConcludedToday = history.filter(h => isStatusCompleted(h.status) && h.statusChangeDate === todayIso);
+                concludedToday = viewScope === 'mine' && currentUser
+                    ? allConcludedToday.filter(h => (h.assignedToUserId || h.userId) == currentUser.id)
+                    : allConcludedToday;
             } catch (e) {
                 console.error('Erro ao buscar concluídas de hoje:', e);
             }
