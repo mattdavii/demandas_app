@@ -32,7 +32,7 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_size': 1,
     'max_overflow': 2,
     'pool_timeout': 8,
-    'connect_args': {'connect_timeout': 8, 'options': '-c statement_timeout=25000'},
+    'connect_args': {'connect_timeout': 8},
 }
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', secrets.token_urlsafe(32))
