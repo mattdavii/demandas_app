@@ -2714,12 +2714,10 @@
             if (isOnline) {
                 checkReminders();
                 processSyncQueue();
-                // Pré-carrega histórico em background — quando o usuário abrir
-                // Histórico, Locais ou Dashboard já estará em cache
-                getHistory().catch(() => {});
             }
             loadTodayPage();
-            loadPendingApprovals(); // carrega seção de aprovações pendentes pra admins
+            // Aprovações pendentes carregam em background sem bloquear o startup
+            if (currentWorkspaceRole === 'admin') loadPendingApprovals();
             document.getElementById('exportReportDate').value = toLocalISODate(new Date());
             updateSyncIndicator();
         }
