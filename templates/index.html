@@ -1810,6 +1810,7 @@
             <div style="background:var(--panel-raised); border-radius:var(--radius); padding:0.75rem 1rem; margin-bottom:1.25rem; border-left:3px solid #ff5b5b;">
                 <div style="font-size:0.7rem; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-secondary); margin-bottom:0.2rem;">Demanda</div>
                 <div id="rejectDemandTitle" style="font-size:0.9rem; color:var(--text-primary); font-weight:600;"></div>
+                <div id="rejectDemandLocation" style="font-size:0.78rem; color:var(--text-secondary); margin-top:0.2rem;">📍</div>
             </div>
             <div class="form-group">
                 <label style="display:flex; align-items:center; gap:0.4rem;">
@@ -1818,7 +1819,7 @@
                 </label>
                 <textarea id="rejectDemandNote" rows="5"
                     placeholder="Descreva o motivo da rejeição. O solicitante verá esta mensagem e poderá corrigir e reenviar a demanda para aprovação."
-                    style="resize:vertical; min-height:120px; font-size:0.85rem; line-height:1.5;"></textarea>
+                    style="resize:vertical; min-height:120px; font-size:0.85rem; line-height:1.5; width:100%; box-sizing:border-box;"></textarea>
             </div>
             <div id="rejectDemandAlert" class="alert"></div>
             <div style="display:flex; gap:0.75rem; margin-top:0.5rem;">
@@ -2687,17 +2688,13 @@
                     // Reconstrói STATUS_COLUMNS, PRIORITY_STYLES, PRIORITY_RANK a partir dos dados carregados
                     rebuildStatusAndPriorityStructures();
 
-                    if (init.workGroups) {
-                        currentGroups = init.workGroups;
-                        renderKanban();
-                    }
+                    if (init.workGroups) currentGroups = init.workGroups;
+                    if (init.demands)    currentDemands = init.demands;
 
-                    if (init.demands) {
-                        currentDemands = init.demands;
-                        renderKanban();
-                    }
-
+                    // Marca como sucesso ANTES de renderizar — assim qualquer erro
+                    // de rendering não aciona o fallback de chamadas individuais
                     initOk = true;
+                    renderKanban();
                 }
             } catch (e) {
                 console.warn('/api/init falhou, usando fallback:', e);
@@ -5308,7 +5305,7 @@
                                     ${statusOpts}
                                 </select>
                                 <button class="btn btn-sm" style="background:var(--led-green); color:#0a1f15; border:none; white-space:nowrap;" onclick="approveDemand(${d.id})">✅ Aprovar</button>
-                                <button class="btn btn-sm" style="background:transparent; color:var(--led-red); border:1px solid var(--led-red); white-space:nowrap;" onclick="openRejectModal(${d.id}, '${escapeHtml(d.activity)}')">❌ Rejeitar</button>
+                                <button class="btn btn-sm" style="background:transparent; color:var(--led-red); border:1px solid var(--led-red); white-space:nowrap;" onclick="openRejectModal(${d.id}, '${escapeHtml(d.activity)}', '${escapeHtml(d.location)}')">❌ Rejeitar</button>
                             </div>
                         </div>
                     `;
@@ -5337,9 +5334,10 @@
             } catch (e) { alert('Erro de conexão'); }
         }
 
-        function openRejectModal(demandId, activityName) {
+        function openRejectModal(demandId, activityName, location) {
             _rejectingDemandId = demandId;
             document.getElementById('rejectDemandTitle').textContent = activityName;
+            document.getElementById('rejectDemandLocation').textContent = '📍 ' + (location || '');
             document.getElementById('rejectDemandNote').value = '';
             document.getElementById('rejectDemandAlert').innerHTML = '';
             document.getElementById('rejectDemandModal').classList.add('show');
