@@ -2694,15 +2694,6 @@
                         window._demandsLoadTime = Date.now();
                     }
 
-                    // Histórico já vem no init — popula o cache imediatamente
-                    // para que Hoje (concluídas), Histórico, Locais e Dashboard
-                    // não precisem de chamada extra
-                    if (init.history && init.history.length >= 0) {
-                        _historyCacheData = init.history;
-                        _historyCacheTime = Date.now();
-                        window._cachedHistory = _historyCacheData;
-                    }
-
                     // Marca como sucesso ANTES de renderizar — assim qualquer erro
                     // de rendering não aciona o fallback de chamadas individuais
                     initOk = true;
@@ -6672,7 +6663,6 @@
             if (tab === 'today') {
                 updateScopeToggleButtons();
                 loadTodayPage();
-                loadPendingApprovals();
             }
             if (tab === 'history') {
                 loadHistory();
