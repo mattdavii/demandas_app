@@ -27,8 +27,12 @@ if DATABASE_URL.startswith('postgres://'):
 
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    'pool_pre_ping': True,  # testa a conexão antes de usar; reconecta se o Neon já tiver derrubado
-    'pool_recycle': 280,    # recicla conexões periodicamente, antes do banco fechar por ociosidade
+    'pool_pre_ping': True,
+    'pool_recycle': 240,
+    'pool_size': 1,
+    'max_overflow': 2,
+    'pool_timeout': 8,
+    'connect_args': {'connect_timeout': 8},
 }
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', secrets.token_urlsafe(32))
@@ -42,12 +46,6 @@ app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
 app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
 app.config['MAIL_DEFAULT_SENDER'] = ("Painel de Bordo", os.getenv('MAIL_USERNAME', 'noreply@demandasapp.com'))
 
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    'pool_pre_ping': True,     # testa a conexão antes de usar — reconecta se morta
-    'pool_recycle': 280,       # recicla conexões a cada 280s (Neon fecha ociosas em 300s)
-    'pool_timeout': 10,        # desiste de esperar conexão após 10s
-    'connect_args': {'connect_timeout': 10},
-}
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
 mail = Mail(app)
