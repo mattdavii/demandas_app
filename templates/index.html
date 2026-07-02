@@ -6655,8 +6655,10 @@
             document.querySelector('.content-inner').scrollTop = 0;
 
             if (tab === 'demands') {
-                renderKanban(); // re-renderiza com dados em memória — instantâneo
-                // Se os dados têm mais de 60s, busca versão atualizada em background
+                // Renderiza só se o Kanban ainda não tem conteúdo (primeira abertura ou erro no init)
+                const kanbanEl = document.getElementById('demandsList');
+                if (!kanbanEl || !kanbanEl.innerHTML.trim()) renderKanban();
+                // Re-busca dados se ficou mais de 60s sem atualizar
                 const demandsAge = Date.now() - (window._demandsLoadTime || 0);
                 if (demandsAge > 60000) loadDemands();
             }
