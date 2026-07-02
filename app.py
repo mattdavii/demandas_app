@@ -515,21 +515,27 @@ with app.app_context():
         except Exception:
             db.session.rollback()
 
-# Keepalive: pinga o Neon a cada 90s pra evitar que a conexão seja fechada por ociosidade.
-# Isso previne o WORKER TIMEOUT que acontecia quando a primeira query após silêncio
-# ficava esperando a reconexão por mais tempo que o timeout do Gunicorn (60s).
+# Keepalive via before_request — único jeito garantido de rodar dentro do worker.
+# O Gunicorn faz fork do master; threads do master NÃO existem nos workers.
 import threading as _threading, time as _time
-def _db_keepalive():
-    _time.sleep(30)  # aguarda o app estar pronto antes do primeiro ping
-    while True:
-        try:
-            with app.app_context():
+_keepalive_started = False
+
+@app.before_request
+def _start_keepalive_once():
+    global _keepalive_started
+    if _keepalive_started:
+        return
+    _keepalive_started = True
+    def _ping():
+        _time.sleep(60)
+        while True:
+            try:
                 db.session.execute(text('SELECT 1'))
                 db.session.remove()
-        except Exception:
-            pass
-        _time.sleep(90)
-_threading.Thread(target=_db_keepalive, daemon=True).start()
+            except Exception:
+                pass
+            _time.sleep(90)
+    _threading.Thread(target=_ping, daemon=True).start()
 
 # ============= ROTAS DE PÁGINA =============
 @app.route('/')
