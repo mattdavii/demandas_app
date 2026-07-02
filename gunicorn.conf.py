@@ -2,6 +2,6 @@
 # Coloque este arquivo na raiz do projeto (mesmo lugar que o app.py)
 
 workers = 1
-timeout = 60        # 60s: suficiente pra qualquer query normal; mata rápido se o Neon travar
+timeout = 120       # Neon serverless pode levar até 60s pra acordar após inatividade
 keepalive = 5
 loglevel = 'info'
