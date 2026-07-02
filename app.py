@@ -459,7 +459,8 @@ def send_push_notification(user_id, title, body, url='/'):
                 subscription_info=sub.to_subscription_info(),
                 data=json.dumps({"title": title, "body": body, "url": url}),
                 vapid_private_key=vapid_private_key,
-                vapid_claims=vapid_claims.copy()
+                vapid_claims=vapid_claims.copy(),
+                timeout=8  # não travar o worker se o serviço push não responder
             )
         except WebPushException as e:
             status_code = e.response.status_code if e.response is not None else None
@@ -553,9 +554,7 @@ def get_init_data():
     assignee_ids = {d.assigned_to_user_id for d in demands if d.assigned_to_user_id}
     user_cache = {u.id: u for u in User.query.filter(User.id.in_(assignee_ids)).all()} if assignee_ids else {}
 
-    # Histórico — incluído no init para evitar chamada extra no carregamento inicial
-    history_records = ws_filter(DemandHistory, user_id, workspace_id)\
-        .order_by(DemandHistory.timestamp.desc()).limit(500).all()
+
 
     member_users = {u.id: u for u in User.query.filter(
         User.id.in_([m.user_id for m in members_raw])
@@ -579,7 +578,6 @@ def get_init_data():
         'priorityConfigs': [p.to_dict() for p in priority_configs],
         'workGroups': [g.to_dict(demands_count=counts.get(g.id, 0)) for g in groups],
         'demands': [d.to_dict(user_cache=user_cache) for d in demands],
-        'history': [h.to_dict() for h in history_records],
     }), 200
 
 
@@ -1927,37 +1925,40 @@ def notify_assignment(demand, assigned_user, assigner_user_id):
 @app.route('/api/reminders/check', methods=['POST'])
 @jwt_required()
 def check_reminders():
-    """Verifica lembretes vencidos do workspace, envia email e marca como enviados.
-    Chamada pelo frontend ao abrir o app (verificação best-effort, sem cron)."""
+    """Verifica lembretes vencidos e os processa em BACKGROUND para não travar
+    o único worker do Gunicorn. O push notification externo pode demorar; com isso
+    a resposta é imediata e o worker fica livre para outras requisições."""
     user_id = int(get_jwt_identity())
-    user = User.query.get(user_id)
 
-    if not user:
-        return jsonify({'error': 'Usuário não encontrado'}), 404
+    import threading as _th
+    def _process():
+        with app.app_context():
+            try:
+                user = User.query.get(user_id)
+                if not user:
+                    return
+                workspace_id = get_user_workspace_id(user_id)
+                terminal_keys = [s.key for s in ws_filter(StatusConfig, user_id, workspace_id, {'is_completed': True}).all()]
+                now = datetime.now()
+                query = ws_filter(Demand, user_id, workspace_id).filter(
+                    Demand.reminder_at.isnot(None),
+                    Demand.reminder_at <= now,
+                    Demand.reminder_sent == False
+                )
+                if terminal_keys:
+                    query = query.filter(~Demand.status.in_(terminal_keys))
+                due_demands = query.all()
+                for demand in due_demands:
+                    send_reminder_notification(demand, user)
+                    demand.reminder_sent = True
+                if due_demands:
+                    db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                print(f'[reminders] erro: {e}')
 
-    workspace_id = get_user_workspace_id(user_id)
-    terminal_keys = [s.key for s in ws_filter(StatusConfig, user_id, workspace_id, {'is_completed': True}).all()]
-
-    now = datetime.now()
-    query = ws_filter(Demand, user_id, workspace_id).filter(
-        Demand.reminder_at.isnot(None),
-        Demand.reminder_at <= now,
-        Demand.reminder_sent == False
-    )
-    if terminal_keys:
-        query = query.filter(~Demand.status.in_(terminal_keys))
-    due_demands = query.all()
-
-    triggered = []
-    for demand in due_demands:
-        send_reminder_notification(demand, user)
-        demand.reminder_sent = True
-        triggered.append(demand.to_dict())
-
-    if due_demands:
-        db.session.commit()
-
-    return jsonify({'triggered': triggered}), 200
+    _th.Thread(target=_process, daemon=True).start()
+    return jsonify({'triggered': []}), 200
 
 @app.route('/api/cron/check-all-reminders', methods=['POST', 'GET'])
 def cron_check_all_reminders():
@@ -2237,7 +2238,8 @@ def notify_admins_approval_pending(demand, workspace_id, requester_name):
                     subscription_info={"endpoint": sub.endpoint, "keys": {"p256dh": sub.p256dh, "auth": sub.auth}},
                     data=json.dumps({"title": "⏳ Aprovação Pendente", "body": msg_body, "url": "/"}),
                     vapid_private_key=os.getenv('VAPID_PRIVATE_KEY'),
-                    vapid_claims={"sub": f"mailto:{os.getenv('MAIL_USERNAME', 'admin@app.com')}"}
+                    vapid_claims={"sub": f"mailto:{os.getenv('MAIL_USERNAME', 'admin@app.com')}"},
+                    timeout=8
                 )
             except Exception:
                 pass
