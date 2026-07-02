@@ -1801,17 +1801,30 @@
     <!-- MODAL DETALHE DO CARD DE HISTÓRICO (Locais) -->
     <!-- MODAL REJEIÇÃO DE DEMANDA -->
     <div id="rejectDemandModal" class="modal">
-        <div class="modal-content" style="max-width:460px;">
+        <div class="modal-content" style="max-width:500px;">
             <span class="close-modal" onclick="closeRejectModal()">&times;</span>
-            <div class="modal-header" style="color:#ff5b5b;">❌ Rejeitar Demanda</div>
-            <p style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:1rem;" id="rejectDemandTitle"></p>
+            <div style="display:flex; align-items:center; gap:0.6rem; margin-bottom:0.5rem;">
+                <span style="font-size:1.2rem;">❌</span>
+                <div class="modal-header" style="color:#ff5b5b; margin-bottom:0; border:none; padding:0;">Rejeitar Demanda</div>
+            </div>
+            <div style="background:var(--panel-raised); border-radius:var(--radius); padding:0.75rem 1rem; margin-bottom:1.25rem; border-left:3px solid #ff5b5b;">
+                <div style="font-size:0.7rem; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-secondary); margin-bottom:0.2rem;">Demanda</div>
+                <div id="rejectDemandTitle" style="font-size:0.9rem; color:var(--text-primary); font-weight:600;"></div>
+            </div>
             <div class="form-group">
-                <label>Justificativa <span style="color:var(--led-red);">*</span></label>
-                <textarea id="rejectDemandNote" rows="3" placeholder="Explique o motivo da rejeição. Isso ficará visível para quem criou a demanda." style="resize:vertical;"></textarea>
+                <label style="display:flex; align-items:center; gap:0.4rem;">
+                    Justificativa
+                    <span style="color:var(--led-red); font-size:0.75rem;">obrigatório</span>
+                </label>
+                <textarea id="rejectDemandNote" rows="5"
+                    placeholder="Descreva o motivo da rejeição. O solicitante verá esta mensagem e poderá corrigir e reenviar a demanda para aprovação."
+                    style="resize:vertical; min-height:120px; font-size:0.85rem; line-height:1.5;"></textarea>
             </div>
             <div id="rejectDemandAlert" class="alert"></div>
-            <button class="btn btn-primary" style="background:var(--led-red); border-color:var(--led-red);" onclick="confirmReject()">Rejeitar</button>
-            <button class="btn btn-secondary" onclick="closeRejectModal()" style="margin-left:0.5rem;">Cancelar</button>
+            <div style="display:flex; gap:0.75rem; margin-top:0.5rem;">
+                <button class="btn btn-secondary" onclick="closeRejectModal()" style="flex:1;">Cancelar</button>
+                <button class="btn btn-primary" style="flex:2; background:var(--led-red); border-color:var(--led-red);" onclick="confirmReject()">❌ Confirmar Rejeição</button>
+            </div>
         </div>
     </div>
 
