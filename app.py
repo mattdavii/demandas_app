@@ -502,18 +502,6 @@ def seed_default_status_and_priority(user_id, workspace_id):
 # ============= CRIAR TABELAS NA INICIALIZAÇÃO =============
 with app.app_context():
     db.create_all()
-    for _stmt in [
-        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_approval BOOLEAN DEFAULT FALSE",
-        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS previous_status VARCHAR(50)",
-        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS rejection_note TEXT",
-        # Garante que o status 'aprovacao' já existente seja marcado como gatilho de aprovação
-        "UPDATE status_configs SET is_approval = TRUE WHERE key = 'aprovacao' AND (is_approval IS NULL OR is_approval = FALSE)",
-    ]:
-        try:
-            db.session.execute(text(_stmt))
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
 
 
 # ============= ROTAS DE PÁGINA =============
