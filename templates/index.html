@@ -2711,6 +2711,9 @@
             if (isOnline) {
                 checkReminders();
                 processSyncQueue();
+                // Pré-carrega histórico em background — quando o usuário abrir
+                // Histórico, Locais ou Dashboard já estará em cache
+                getHistory().catch(() => {});
             }
             loadTodayPage();
             loadPendingApprovals(); // carrega seção de aprovações pendentes pra admins
@@ -4034,6 +4037,7 @@
 
                 if (response.ok) {
                     closeDemandDetailModal();
+                    invalidateHistoryCache(); // demanda concluída → histórico desatualizado
                     await loadDemands();
                 } else {
                     const data = await response.json().catch(() => ({}));
@@ -4210,6 +4214,31 @@
         }
 
         // ============= HISTÓRICO =============
+        // Cache de histórico compartilhado entre Histórico, Locais e Dashboard.
+        // Evita 3 chamadas separadas de 31KB cada ao trocar de aba.
+        let _historyCacheData = null;
+        let _historyCacheTime = 0;
+        const _HISTORY_CACHE_TTL = 120000; // 2 minutos
+
+        async function getHistory(forceRefresh = false) {
+            const now = Date.now();
+            if (!forceRefresh && _historyCacheData && (now - _historyCacheTime) < _HISTORY_CACHE_TTL) {
+                return _historyCacheData;
+            }
+            const response = await fetchWithRetry(`${API_URL}/history`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            }, 1);
+            if (!response.ok) throw new Error('Falha ao buscar histórico');
+            _historyCacheData = await response.json();
+            _historyCacheTime = Date.now();
+            window._cachedHistory = _historyCacheData; // compatibilidade com filtro de locais
+            return _historyCacheData;
+        }
+
+        function invalidateHistoryCache() {
+            _historyCacheTime = 0; // força recarregamento na próxima chamada
+        }
+
         async function loadHistory() {
             const container = document.getElementById('historyList');
             container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Carregando...</div>';
@@ -4221,10 +4250,17 @@
             if (activity) params.append('activity', activity);
 
             try {
-                const response = await fetch(`${API_URL}/history?${params.toString()}`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                const history = await response.json();
+                // Se tem filtro de texto aplicado, busca direto (parâmetros mudam o resultado)
+                // Senão, usa o cache compartilhado
+                let history;
+                if (location || activity) {
+                    const response = await fetch(`${API_URL}/history?${params.toString()}`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    history = await response.json();
+                } else {
+                    history = await getHistory();
+                }
                 renderHistory(history);
             } catch (e) {
                 console.error('Erro:', e);
@@ -4997,12 +5033,7 @@
             container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Carregando...</div>';
 
             try {
-                const response = await fetchWithRetry(`${API_URL}/history`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                }, 1);
-                if (response.ok) {
-                    allHistoryForLocations = await response.json();
-                }
+                allHistoryForLocations = await getHistory();
             } catch (e) {
                 console.error('Erro ao carregar histórico para locais:', e);
             }
@@ -5770,12 +5801,8 @@
             populateDashboardGroupFilter();
 
             try {
-                const response = await fetch(`${API_URL}/history`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                const history = await response.json();
-                window._cachedHistory = history;  // cache pra popular filtro de locais
-                populateDashboardLocationFilter(); // popula com locais do histórico tb
+                const history = await getHistory();
+                populateDashboardLocationFilter();
                 renderDashboard(history);
             } catch (e) {
                 console.error('Erro:', e);
