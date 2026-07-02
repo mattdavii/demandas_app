@@ -1321,6 +1321,15 @@
                 <button class="scope-toggle-btn" id="todayScopeMine" onclick="setViewScope('mine', loadTodayPage)">👤 Minhas Demandas</button>
                 <button class="scope-toggle-btn" id="todayScopeTeam" onclick="setViewScope('team', loadTodayPage)">👥 Time Todo</button>
             </div>
+            <!-- Aprovações pendentes — visível apenas para admins -->
+            <div id="pendingApprovalSection" class="admin-only-section" style="margin-bottom:1.5rem; display:none;">
+                <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem;">
+                    <span style="font-size:0.8rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:#b388ff;">⏳ Aguardando Aprovação</span>
+                    <span id="pendingApprovalBadge" style="background:#b388ff; color:#1a0a2e; font-size:0.65rem; font-weight:800; padding:1px 7px; border-radius:10px; display:none;"></span>
+                </div>
+                <div id="pendingApprovalList"></div>
+            </div>
+
             <div id="todayContent">
                 <div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Carregando...</div>
             </div>
@@ -1790,6 +1799,22 @@
     </div>
 
     <!-- MODAL DETALHE DO CARD DE HISTÓRICO (Locais) -->
+    <!-- MODAL REJEIÇÃO DE DEMANDA -->
+    <div id="rejectDemandModal" class="modal">
+        <div class="modal-content" style="max-width:460px;">
+            <span class="close-modal" onclick="closeRejectModal()">&times;</span>
+            <div class="modal-header" style="color:#ff5b5b;">❌ Rejeitar Demanda</div>
+            <p style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:1rem;" id="rejectDemandTitle"></p>
+            <div class="form-group">
+                <label>Justificativa <span style="color:var(--led-red);">*</span></label>
+                <textarea id="rejectDemandNote" rows="3" placeholder="Explique o motivo da rejeição. Isso ficará visível para quem criou a demanda." style="resize:vertical;"></textarea>
+            </div>
+            <div id="rejectDemandAlert" class="alert"></div>
+            <button class="btn btn-primary" style="background:var(--led-red); border-color:var(--led-red);" onclick="confirmReject()">Rejeitar</button>
+            <button class="btn btn-secondary" onclick="closeRejectModal()" style="margin-left:0.5rem;">Cancelar</button>
+        </div>
+    </div>
+
     <div id="historyCardDetailModal" class="modal">
         <div class="modal-content" style="max-width: 560px; max-height: 90vh; overflow-y: auto;">
             <span class="close-modal" onclick="closeHistoryCardDetailModal()" style="position:sticky; top:0; float:right;">&times;</span>
@@ -5213,6 +5238,122 @@
             document.getElementById('historyCardDetailModal').classList.remove('show');
         }
 
+        // ============= FLUXO DE APROVAÇÃO =============
+        let _rejectingDemandId = null;
+
+        async function loadPendingApprovals() {
+            if (currentWorkspaceRole !== 'admin') return;
+            const section = document.getElementById('pendingApprovalSection');
+            const list    = document.getElementById('pendingApprovalList');
+            const badge   = document.getElementById('pendingApprovalBadge');
+            if (!section) return;
+
+            try {
+                const resp = await fetchWithRetry(`${API_URL}/demands/pending-approval`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (!resp.ok) return;
+                const demands = await resp.json();
+
+                if (demands.length === 0) {
+                    section.style.display = 'none';
+                    return;
+                }
+
+                section.style.display = '';
+                badge.style.display = '';
+                badge.textContent = demands.length;
+
+                // Status disponíveis para aprovação (excluindo o próprio status de aprovação)
+                const approvalStatusKey = (currentStatusConfigs || []).find(s => s.isApproval)?.key;
+                const targetStatuses = (currentStatusConfigs || []).filter(s => !s.isCompleted && !s.isApproval);
+
+                list.innerHTML = demands.map(d => {
+                    const statusOpts = targetStatuses.map(s =>
+                        `<option value="${escapeHtml(s.key)}">${escapeHtml(s.emoji || '')} ${escapeHtml(s.label)}</option>`
+                    ).join('');
+                    return `
+                        <div class="demand-card" style="border-left-color:#b388ff; margin-bottom:0.75rem;">
+                            <div class="demand-header">
+                                <div>
+                                    <div style="margin-bottom:0.3rem;">${getGroupBadge(d.workGroupId)}</div>
+                                    <div class="demand-title">${escapeHtml(d.location)} · ${escapeHtml(d.activity)}</div>
+                                </div>
+                                <span style="font-size:0.6rem; color:#b388ff; border:1px solid #b388ff; border-radius:3px; padding:1px 5px; white-space:nowrap;">⏳ Aprovação</span>
+                            </div>
+                            ${d.context ? `<p style="font-size:0.78rem; color:var(--text-secondary); margin:0.4rem 0;">📌 ${escapeHtml(d.context.slice(0,120))}${d.context.length > 120 ? '…' : ''}</p>` : ''}
+                            <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap; margin-top:0.75rem;">
+                                <select id="approveStatusSelect_${d.id}" style="flex:1; min-width:140px; padding:0.4rem 0.6rem; font-size:0.78rem;">
+                                    ${statusOpts}
+                                </select>
+                                <button class="btn btn-sm" style="background:var(--led-green); color:#0a1f15; border:none; white-space:nowrap;" onclick="approveDemand(${d.id})">✅ Aprovar</button>
+                                <button class="btn btn-sm" style="background:transparent; color:var(--led-red); border:1px solid var(--led-red); white-space:nowrap;" onclick="openRejectModal(${d.id}, '${escapeHtml(d.activity)}')">❌ Rejeitar</button>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (e) {
+                section.style.display = 'none';
+            }
+        }
+
+        async function approveDemand(demandId) {
+            const select = document.getElementById(`approveStatusSelect_${demandId}`);
+            if (!select || !select.value) { alert('Selecione o status de destino'); return; }
+            try {
+                const resp = await fetchWithRetry(`${API_URL}/demands/${demandId}/approve`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ status: select.value })
+                }, 1);
+                if (resp.ok) {
+                    await loadDemands();
+                    loadPendingApprovals();
+                } else {
+                    const data = await resp.json().catch(() => ({}));
+                    alert(data.error || 'Erro ao aprovar');
+                }
+            } catch (e) { alert('Erro de conexão'); }
+        }
+
+        function openRejectModal(demandId, activityName) {
+            _rejectingDemandId = demandId;
+            document.getElementById('rejectDemandTitle').textContent = activityName;
+            document.getElementById('rejectDemandNote').value = '';
+            document.getElementById('rejectDemandAlert').innerHTML = '';
+            document.getElementById('rejectDemandModal').classList.add('show');
+        }
+
+        function closeRejectModal() {
+            document.getElementById('rejectDemandModal').classList.remove('show');
+            _rejectingDemandId = null;
+        }
+
+        async function confirmReject() {
+            const note = document.getElementById('rejectDemandNote').value.trim();
+            if (!note) {
+                showAlert('rejectDemandAlert', 'A justificativa é obrigatória', 'danger');
+                return;
+            }
+            try {
+                const resp = await fetchWithRetry(`${API_URL}/demands/${_rejectingDemandId}/reject`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ note })
+                }, 1);
+                if (resp.ok) {
+                    closeRejectModal();
+                    await loadDemands();
+                    loadPendingApprovals();
+                } else {
+                    const data = await resp.json().catch(() => ({}));
+                    showAlert('rejectDemandAlert', data.error || 'Erro ao rejeitar', 'danger');
+                }
+            } catch (e) { showAlert('rejectDemandAlert', 'Erro de conexão', 'danger'); }
+        }
+
+
+
         // ============= FEED DE ATIVIDADE =============
         function timeAgo(isoString) {
             if (!isoString) return '';
@@ -6173,6 +6314,9 @@
             const recurringBadge = d.isRecurring && d.recurrenceType
                 ? `<span style="font-size:0.6rem; color:var(--led-blue); border:1px solid var(--led-blue); border-radius:3px; padding:1px 5px; white-space:nowrap;">🔄 ${RECURRENCE_LABELS[d.recurrenceType] || d.recurrenceType}</span>`
                 : '';
+            const approvalBadge = (currentStatusConfigs || []).find(s => s.key === d.status && s.isApproval)
+                ? `<span style="font-size:0.6rem; color:#b388ff; border:1px solid #b388ff; border-radius:3px; padding:1px 5px; white-space:nowrap;">⏳ Aprovação</span>`
+                : '';
 
             return `
                 <div class="demand-card${d._pendingSync ? ' pending-sync' : ''}" style="margin-bottom: 0.75rem; border-left-color: ${finalBorderColor}; cursor: pointer;" onclick="showDemandDetailModal(${idArg})">
@@ -6185,6 +6329,7 @@
                         <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.4rem;">
                             ${getPriorityBadge(d.priority)}
                             ${recurringBadge}
+                            ${approvalBadge}
                             ${assigneeAvatar}
                         </div>
                     </div>
@@ -6221,6 +6366,9 @@
             }
             if (demand.isRecurring && demand.recurrenceType) {
                 html += `<div style="font-size:0.8rem; margin-bottom:0.6rem; color:var(--led-blue);">🔄 Recorrente · ${RECURRENCE_LABELS[demand.recurrenceType] || demand.recurrenceType}</div>`;
+            }
+            if (demand.rejectionNote) {
+                html += `<div style="font-size:0.82rem; margin-bottom:0.6rem; padding:0.6rem 0.75rem; background:#2a0a0a; border:1px solid var(--led-red); border-radius:var(--radius); color:var(--led-red);">❌ Rejeitada: ${escapeHtml(demand.rejectionNote)}</div>`;
             }
             if (demand.assignedToName) {
                 html += `<div style="font-size:0.85rem; margin-bottom:0.6rem; display:flex; align-items:center; gap:0.5rem;"><span class="member-avatar sm">${getInitials(demand.assignedToName)}</span> ${escapeHtml(demand.assignedToName)}</div>`;
@@ -6459,6 +6607,7 @@
             if (tab === 'today') {
                 updateScopeToggleButtons();
                 loadTodayPage();
+                loadPendingApprovals();
             }
             if (tab === 'history') {
                 loadHistory();
