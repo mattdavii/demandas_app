@@ -2703,6 +2703,7 @@
                 processSyncQueue();
             }
             loadTodayPage();
+            loadPendingApprovals(); // carrega seção de aprovações pendentes pra admins
             document.getElementById('exportReportDate').value = toLocalISODate(new Date());
             updateSyncIndicator();
         }
@@ -4140,6 +4141,7 @@
 
                 closeEditDemand();
                 loadDemands();
+                if (currentWorkspaceRole === 'admin') loadPendingApprovals();
             } catch (e) {
                 console.error('Erro de conexão, salvando localmente para sincronizar depois:', e);
 
