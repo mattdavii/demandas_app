@@ -2642,50 +2642,56 @@
 
             applyRoleBasedUI();
 
-            // ── UMA chamada busca todos os dados de startup (workspace, membros,
-            //    configs, grupos e demandas) — reduz 7 round-trips pro Neon em 1. ──
+            // ── UMA chamada busca todos os dados de startup ───────────────────────
+            let initOk = false;
             try {
                 const initResp = await fetchWithRetry(`${API_URL}/init`, {
                     headers: { 'Authorization': `Bearer ${token}` }
                 }, 2);
+
                 if (initResp.ok) {
                     const init = await initResp.json();
 
-                    // Workspace
                     if (init.workspace) {
                         currentWorkspace = init.workspace;
-                        loadWorkspaceInfo(init.workspace);
+                        applyWorkspaceLogo();
                     }
 
-                    // Membros
                     if (init.members) {
                         currentTeamMembers = init.members;
                     }
 
-                    // Status e prioridades
-                    if (init.statusConfigs) applyStatusConfigs(init.statusConfigs);
-                    if (init.priorityConfigs) applyPriorityConfigs(init.priorityConfigs);
+                    if (init.statusConfigs && init.statusConfigs.length > 0) {
+                        currentStatusConfigs = init.statusConfigs;
+                        localStorage.setItem('cache_statusConfigs', JSON.stringify(currentStatusConfigs));
+                    }
 
-                    // Grupos
+                    if (init.priorityConfigs && init.priorityConfigs.length > 0) {
+                        currentPriorityConfigs = init.priorityConfigs;
+                        localStorage.setItem('cache_priorityConfigs', JSON.stringify(currentPriorityConfigs));
+                    }
+
+                    // Reconstrói STATUS_COLUMNS, PRIORITY_STYLES, PRIORITY_RANK a partir dos dados carregados
+                    rebuildStatusAndPriorityStructures();
+
                     if (init.workGroups) {
                         currentGroups = init.workGroups;
                         renderKanban();
                     }
 
-                    // Demandas
                     if (init.demands) {
                         currentDemands = init.demands;
                         renderKanban();
                     }
-                } else {
-                    // Fallback: chamadas individuais se /api/init falhar
-                    await loadWorkspaceInfo();
-                    await loadTeamMembersBackground();
-                    await loadStatusAndPriorityConfigs();
-                    await Promise.all([loadGroups(), loadDemands()]);
+
+                    initOk = true;
                 }
             } catch (e) {
-                // Fallback em caso de erro de rede
+                console.warn('/api/init falhou, usando fallback:', e);
+            }
+
+            // Fallback: chamadas individuais se /api/init falhar
+            if (!initOk) {
                 await loadWorkspaceInfo();
                 await loadTeamMembersBackground();
                 await loadStatusAndPriorityConfigs();
