@@ -565,6 +565,10 @@ def get_init_data():
     assignee_ids = {d.assigned_to_user_id for d in demands if d.assigned_to_user_id}
     user_cache = {u.id: u for u in User.query.filter(User.id.in_(assignee_ids)).all()} if assignee_ids else {}
 
+    # Histórico — incluído no init para evitar chamada extra no carregamento inicial
+    history_records = ws_filter(DemandHistory, user_id, workspace_id)\
+        .order_by(DemandHistory.timestamp.desc()).limit(500).all()
+
     member_users = {u.id: u for u in User.query.filter(
         User.id.in_([m.user_id for m in members_raw])
     ).all()} if members_raw else {}
@@ -587,6 +591,7 @@ def get_init_data():
         'priorityConfigs': [p.to_dict() for p in priority_configs],
         'workGroups': [g.to_dict(demands_count=counts.get(g.id, 0)) for g in groups],
         'demands': [d.to_dict(user_cache=user_cache) for d in demands],
+        'history': [h.to_dict() for h in history_records],
     }), 200
 
 
