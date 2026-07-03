@@ -519,8 +519,9 @@ def ping():
 @app.route('/api/init')
 @jwt_required()
 def get_init_data():
-    """Retorna todos os dados de startup em UMA requisição.
-    Reduz de 10+ chamadas sequenciais para 1, eliminando latência cumulativa com o Neon."""
+    """Retorna configs, workspace, membros e grupos — sem demands e sem COUNT.
+    Demands são buscadas em paralelo pelo frontend via /api/demands, que é mais rápida
+    (2 queries) e pode renderizar o Kanban independentemente das queries de configuração."""
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
 
@@ -537,24 +538,6 @@ def get_init_data():
             db.and_(WorkGroup.workspace_id == None, WorkGroup.user_id == user_id, WorkGroup.is_active == True)
         )
     ).order_by(WorkGroup.order).all()
-
-    terminal_keys = [s.key for s in status_configs if s.is_completed]
-    count_q = db.session.query(Demand.work_group_id, db.func.count(Demand.id)).filter(
-        db.or_(Demand.workspace_id == workspace_id, db.and_(Demand.workspace_id == None, Demand.user_id == user_id))
-    )
-    if terminal_keys:
-        count_q = count_q.filter(~Demand.status.in_(terminal_keys))
-    counts = {row[0]: row[1] for row in count_q.group_by(Demand.work_group_id).all()}
-
-    demand_query = ws_filter(Demand, user_id, workspace_id)
-    if terminal_keys:
-        demand_query = demand_query.filter(~Demand.status.in_(terminal_keys))
-    demands = demand_query.all()
-
-    assignee_ids = {d.assigned_to_user_id for d in demands if d.assigned_to_user_id}
-    user_cache = {u.id: u for u in User.query.filter(User.id.in_(assignee_ids)).all()} if assignee_ids else {}
-
-
 
     member_users = {u.id: u for u in User.query.filter(
         User.id.in_([m.user_id for m in members_raw])
@@ -576,8 +559,7 @@ def get_init_data():
         'members': [member_dict(m) for m in members_raw],
         'statusConfigs': [s.to_dict() for s in status_configs],
         'priorityConfigs': [p.to_dict() for p in priority_configs],
-        'workGroups': [g.to_dict(demands_count=counts.get(g.id, 0)) for g in groups],
-        'demands': [d.to_dict(user_cache=user_cache) for d in demands],
+        'workGroups': [g.to_dict(demands_count=0) for g in groups],  # contagem calculada no frontend
     }), 200
 
 
