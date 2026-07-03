@@ -513,7 +513,19 @@ def index():
 
 @app.route('/ping')
 def ping():
-    """Health check leve."""
+    """Health check leve. Também aplica migrations pendentes na primeira chamada."""
+    _approval_cols = [
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS previous_status VARCHAR(50)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS rejection_note TEXT",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_approval BOOLEAN DEFAULT FALSE",
+        "UPDATE status_configs SET is_approval = TRUE WHERE key = 'aprovacao' AND (is_approval IS NULL OR is_approval = FALSE)",
+    ]
+    for _s in _approval_cols:
+        try:
+            db.session.execute(text(_s))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
     return 'pong', 200
 
 @app.route('/api/init')
