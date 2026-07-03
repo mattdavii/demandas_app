@@ -2710,7 +2710,7 @@
                 }
 
                 initOk = true;
-                renderKanban();
+                renderDemands();
             } catch (e) {
                 console.warn('/api/init ou /api/demands falhou, usando fallback:', e);
             }
@@ -6669,16 +6669,16 @@
             if (tab === 'demands') {
                 const kanbanEl = document.getElementById('demandsList');
                 const isEmpty = !kanbanEl || !kanbanEl.innerHTML.trim();
-                const isStale = window._demandsLoadTime && (Date.now() - window._demandsLoadTime > 60000);
-
-                if (isEmpty) {
-                    // Sem conteúdo: busca os dados (API ou cache local)
+                if (isEmpty && currentDemands.length > 0) {
+                    // Dados já em memória mas não renderizados — renderiza direto, sem API
+                    renderDemands();
+                } else if (isEmpty) {
+                    // Sem dados — busca da API (ou cache local)
                     loadDemands();
-                } else if (isStale) {
-                    // Dados antigos: atualiza em background sem limpar a tela
+                } else if (window._demandsLoadTime && (Date.now() - window._demandsLoadTime > 60000)) {
+                    // Dados frescos no DOM mas antigos — atualiza em background
                     loadDemands();
                 }
-                // Se tem conteúdo e dados frescos: mostra o que já está no DOM — instantâneo
             }
             if (tab === 'today') {
                 updateScopeToggleButtons();
