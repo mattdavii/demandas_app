@@ -1321,6 +1321,14 @@
                 <button class="scope-toggle-btn" id="todayScopeMine" onclick="setViewScope('mine', loadTodayPage)">👤 Minhas Demandas</button>
                 <button class="scope-toggle-btn" id="todayScopeTeam" onclick="setViewScope('team', loadTodayPage)">👥 Time Todo</button>
             </div>
+            <!-- Aprovações do membro: acompanhamento das demandas enviadas para aprovação -->
+            <div id="myApprovalsSection" style="margin-bottom:1.5rem; display:none;">
+                <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem;">
+                    <span style="font-size:0.8rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:#b388ff;">📋 Minhas Aprovações</span>
+                </div>
+                <div id="myApprovalsList"></div>
+            </div>
+
             <!-- Aprovações pendentes — visível apenas para admins -->
             <div id="pendingApprovalSection" class="admin-only-section" style="margin-bottom:1.5rem; display:none;">
                 <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem;">
@@ -2727,6 +2735,7 @@
             loadTodayPage();
             // Aprovações pendentes carregam em background sem bloquear o startup
             if (currentWorkspaceRole === 'admin') loadPendingApprovals();
+            else loadMyApprovals();
             document.getElementById('exportReportDate').value = toLocalISODate(new Date());
             updateSyncIndicator();
         }
@@ -5303,6 +5312,58 @@
         // ============= FLUXO DE APROVAÇÃO =============
         let _rejectingDemandId = null;
 
+        // ============= MINHAS APROVAÇÕES (visão do solicitante) =============
+        async function loadMyApprovals() {
+            // Admins veem a seção de aprovações pendentes do time, não esta
+            if (currentWorkspaceRole === 'admin') return;
+
+            const section = document.getElementById('myApprovalsSection');
+            const list    = document.getElementById('myApprovalsList');
+            if (!section || !list) return;
+
+            try {
+                const resp = await fetchWithRetry(`${API_URL}/demands/my-approvals`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (!resp.ok) return;
+                const data = await resp.json();
+                const { pending, rejected } = data;
+
+                if (pending.length === 0 && rejected.length === 0) {
+                    section.style.display = 'none';
+                    return;
+                }
+
+                section.style.display = '';
+
+                const renderCard = (d, tag) => `
+                    <div class="demand-card" style="border-left-color:${tag === 'pending' ? '#b388ff' : 'var(--led-red)'}; margin-bottom:0.6rem;">
+                        <div class="demand-header">
+                            <div>
+                                <div style="margin-bottom:0.3rem;">${getGroupBadge(d.workGroupId)}</div>
+                                <div class="demand-title">${escapeHtml(d.location)} · ${escapeHtml(d.activity)}</div>
+                            </div>
+                            ${tag === 'pending'
+                                ? `<span style="font-size:0.6rem; color:#b388ff; border:1px solid #b388ff; border-radius:3px; padding:1px 6px; white-space:nowrap;">⏳ Aguardando</span>`
+                                : `<span style="font-size:0.6rem; color:var(--led-red); border:1px solid var(--led-red); border-radius:3px; padding:1px 6px; white-space:nowrap;">❌ Rejeitada</span>`
+                            }
+                        </div>
+                        ${tag === 'rejected' && d.rejectionNote ? `
+                            <div style="font-size:0.75rem; margin-top:0.4rem; padding:0.4rem 0.6rem; background:#2a0a0a; border-radius:4px; color:var(--led-red);">
+                                ❌ ${escapeHtml(d.rejectionNote)}
+                            </div>` : ''}
+                    </div>`;
+
+                list.innerHTML =
+                    pending.map(d => renderCard(d, 'pending')).join('') +
+                    (rejected.length ? `<div style="font-size:0.7rem; text-transform:uppercase; color:var(--text-secondary); letter-spacing:0.04em; padding:0.5rem 0 0.25rem;">Rejeitadas recentemente</div>` : '') +
+                    rejected.map(d => renderCard(d, 'rejected')).join('');
+
+            } catch (e) {
+                section.style.display = 'none';
+            }
+        }
+
         async function loadPendingApprovals() {
             if (currentWorkspaceRole !== 'admin') return;
             const section = document.getElementById('pendingApprovalSection');
@@ -5326,9 +5387,13 @@
                 badge.style.display = '';
                 badge.textContent = demands.length;
 
-                // Status disponíveis para aprovação (excluindo o próprio status de aprovação)
+                // Status disponíveis para aprovação — inclui concluídos para o admin poder
+                // marcar como "Concluído" diretamente ao aprovar
                 const approvalStatusKey = (currentStatusConfigs || []).find(s => s.isApproval)?.key;
-                const targetStatuses = (currentStatusConfigs || []).filter(s => !s.isCompleted && !s.isApproval);
+                const completedStatuses = (currentStatusConfigs || []).filter(s => s.isCompleted);
+                const activeStatuses = (currentStatusConfigs || []).filter(s => !s.isCompleted && !s.isApproval);
+                // Concluídos primeiro, depois ativos
+                const targetStatuses = [...completedStatuses, ...activeStatuses];
 
                 list.innerHTML = demands.map(d => {
                     const statusOpts = targetStatuses.map(s =>
@@ -6678,6 +6743,8 @@
             if (tab === 'today') {
                 updateScopeToggleButtons();
                 loadTodayPage();
+                if (currentWorkspaceRole === 'admin') loadPendingApprovals();
+                else loadMyApprovals();
             }
             if (tab === 'history') {
                 loadHistory();
