@@ -7125,13 +7125,16 @@
                     <tbody>
                         ${users.map(u => {
                             const isMe = u.id === currentUser.id;
-                            const lastLogin = u.lastLogin ? new Date(u.lastLogin) : null;
-                            const daysSince = lastLogin ? Math.floor((now - lastLogin) / 86400000) : null;
+                            // Força interpretação UTC (servidor salva sem marcador de timezone)
+                            const lastLogin = u.lastLogin ? new Date(u.lastLogin.endsWith('Z') ? u.lastLogin : u.lastLogin + 'Z') : null;
+                            const daysSince = lastLogin ? Math.max(0, Math.floor((now - lastLogin) / 86400000)) : null;
                             const lastLoginStr = lastLogin
                                 ? (daysSince === 0 ? 'Hoje' : daysSince === 1 ? 'Ontem' : `${daysSince}d atrás`)
                                 : 'Nunca';
-                            const statusColor = !u.isActive ? 'var(--led-red)' : daysSince === null || daysSince > 30 ? 'var(--text-secondary)' : 'var(--led-green)';
-                            const statusLabel = !u.isActive ? '⛔ Inativo' : daysSince === null ? '⚪ Nunca' : daysSince > 30 ? '🟡 Inativo' : '🟢 Ativo';
+                            // isActive: null no banco = tratar como ativo (valor default)
+                            const isActive = u.isActive !== false;
+                            const statusColor = !isActive ? 'var(--led-red)' : daysSince === null || daysSince > 30 ? 'var(--amber)' : 'var(--led-green)';
+                            const statusLabel = !isActive ? '⛔ Inativo' : daysSince === null ? '⚪ Nunca acessou' : daysSince > 30 ? '🟡 Inativo 30d+' : '🟢 Ativo';
                             return `
                             <tr style="border-bottom:1px solid var(--border); ${!u.isActive ? 'opacity:0.5;' : ''}">
                                 <td style="padding:10px 12px;">
@@ -7155,7 +7158,7 @@
                                     <div style="display:flex; gap:0.4rem; justify-content:center; flex-wrap:wrap;">
                                         <button class="btn-edit btn-sm" onclick="openEditUserModal(${u.id}, '${escapeHtml(u.fullName||'')}', '${escapeHtml(u.username)}', '${escapeHtml(u.email||'')}')">✏️</button>
                                         ${!isMe ? `
-                                        <button class="btn-edit btn-sm" style="color:${u.isActive ? 'var(--amber)' : 'var(--led-green)'}; border-color:${u.isActive ? 'var(--amber)' : 'var(--led-green)'};" onclick="toggleUserActive(${u.id}, '${escapeHtml(u.fullName||u.username)}')" title="${u.isActive ? 'Desativar' : 'Ativar'}">${u.isActive ? '⛔' : '✅'}</button>
+                                        <button class="btn-edit btn-sm" style="color:${isActive ? 'var(--amber)' : 'var(--led-green)'}; border-color:${isActive ? 'var(--amber)' : 'var(--led-green)'};" onclick="toggleUserActive(${u.id}, '${escapeHtml(u.fullName||u.username)}')" title="${isActive ? 'Desativar' : 'Ativar'}">${isActive ? '⛔' : '✅'}</button>
                                         <button class="btn-delete btn-sm" onclick="deleteAdminUser(${u.id}, '${escapeHtml(u.fullName||u.username)}')" title="Excluir">🗑️</button>
                                         ` : ''}
                                     </div>
