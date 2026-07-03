@@ -2703,6 +2703,10 @@
                     if (currentGroups) {
                         currentGroups = currentGroups.map(g => ({ ...g, demandsCount: counts[g.id] || 0 }));
                     }
+                } else {
+                    // Demands falhou: tenta localStorage como fallback imediato
+                    const cached = localStorage.getItem('cache_demands');
+                    if (cached) { currentDemands = JSON.parse(cached); }
                 }
 
                 initOk = true;
@@ -6663,13 +6667,18 @@
             document.querySelector('.content-inner').scrollTop = 0;
 
             if (tab === 'demands') {
-                // Mostra o que já está no DOM (renderizado no enterApp)
                 const kanbanEl = document.getElementById('demandsList');
-                if (!kanbanEl || !kanbanEl.innerHTML.trim()) renderKanban();
-                // Só recarrega da API se o load time foi registrado E passou mais de 60s
-                if (window._demandsLoadTime && (Date.now() - window._demandsLoadTime > 60000)) {
+                const isEmpty = !kanbanEl || !kanbanEl.innerHTML.trim();
+                const isStale = window._demandsLoadTime && (Date.now() - window._demandsLoadTime > 60000);
+
+                if (isEmpty) {
+                    // Sem conteúdo: busca os dados (API ou cache local)
+                    loadDemands();
+                } else if (isStale) {
+                    // Dados antigos: atualiza em background sem limpar a tela
                     loadDemands();
                 }
+                // Se tem conteúdo e dados frescos: mostra o que já está no DOM — instantâneo
             }
             if (tab === 'today') {
                 updateScopeToggleButtons();
