@@ -66,6 +66,7 @@ class User(db.Model):
     access_verified = db.Column(db.Boolean, default=True)
     is_admin = db.Column(db.Boolean, default=False)
     theme = db.Column(db.String(30), default='bancada')
+    last_login = db.Column(db.DateTime, nullable=True)
     
     # Relacionamentos
     demands = db.relationship('Demand', foreign_keys='Demand.user_id', backref='user', lazy=True, cascade='all, delete-orphan')
@@ -98,7 +99,8 @@ class User(db.Model):
             'createdAt': self.created_at.isoformat() if self.created_at else None,
             'accessVerified': self.access_verified,
             'isAdmin': self.is_admin,
-            'theme': self.theme or 'bancada'
+            'theme': self.theme or 'bancada',
+            'lastLogin': self.last_login.isoformat() if self.last_login else None
         }
 
 class Workspace(db.Model):
@@ -516,6 +518,7 @@ def ping():
     """Health check leve. Também aplica migrations pendentes na primeira chamada."""
     _approval_cols = [
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS previous_status VARCHAR(50)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS rejection_note TEXT",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_approval BOOLEAN DEFAULT FALSE",
         "UPDATE status_configs SET is_approval = TRUE WHERE key = 'aprovacao' AND (is_approval IS NULL OR is_approval = FALSE)",
@@ -752,6 +755,15 @@ def get_current_user():
     if not user:
         return jsonify({'error': 'Usuário não encontrado'}), 404
     
+    # Registra último acesso com throttle de 10 minutos
+    now = datetime.now()
+    if not user.last_login or (now - user.last_login).total_seconds() > 600:
+        user.last_login = now
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
     result = user.to_dict()
     if user.access_verified:
         workspace_id = get_user_workspace_id(user_id)
@@ -2472,6 +2484,82 @@ def reject_demand(demand_id):
 # ── Interceptar update_demand_status para detectar entrada em aprovação ────────
 # (injetado no update_demand_status existente via after_this_commit)
 
+
+
+# ============= GESTÃO DE USUÁRIOS (ADMIN DA PLATAFORMA) =============
+@app.route('/api/admin/users', methods=['GET'])
+@jwt_required()
+def admin_list_users():
+    user_id = int(get_jwt_identity())
+    requester = User.query.get(user_id)
+    if not requester or not requester.is_admin:
+        return jsonify({'error': 'Acesso restrito'}), 403
+    users = User.query.order_by(User.id.asc()).all()
+    result = []
+    for u in users:
+        member = WorkspaceMember.query.filter_by(user_id=u.id).first()
+        workspace = Workspace.query.get(member.workspace_id) if member else None
+        d = u.to_dict()
+        d['workspaceName'] = workspace.name if workspace else None
+        d['workspaceRole'] = member.role if member else None
+        result.append(d)
+    return jsonify(result), 200
+
+
+@app.route('/api/admin/users/<int:target_id>', methods=['PUT'])
+@jwt_required()
+def admin_edit_user(target_id):
+    user_id = int(get_jwt_identity())
+    requester = User.query.get(user_id)
+    if not requester or not requester.is_admin:
+        return jsonify({'error': 'Acesso restrito'}), 403
+    target = User.query.get_or_404(target_id)
+    data = request.get_json()
+    if data.get('full_name', '').strip():
+        target.full_name = data['full_name'].strip()
+    if 'email' in data:
+        email = data['email'].strip().lower()
+        if User.query.filter(User.email == email, User.id != target_id).first():
+            return jsonify({'error': 'E-mail já em uso'}), 409
+        target.email = email
+    if 'username' in data:
+        uname = data['username'].strip()
+        if User.query.filter(User.username == uname, User.id != target_id).first():
+            return jsonify({'error': 'Username já em uso'}), 409
+        target.username = uname
+    db.session.commit()
+    return jsonify(target.to_dict()), 200
+
+
+@app.route('/api/admin/users/<int:target_id>/toggle-active', methods=['POST'])
+@jwt_required()
+def admin_toggle_user(target_id):
+    user_id = int(get_jwt_identity())
+    requester = User.query.get(user_id)
+    if not requester or not requester.is_admin:
+        return jsonify({'error': 'Acesso restrito'}), 403
+    if target_id == user_id:
+        return jsonify({'error': 'Não é possível alterar sua própria conta aqui'}), 400
+    target = User.query.get_or_404(target_id)
+    target.is_active = not target.is_active
+    db.session.commit()
+    return jsonify({'isActive': target.is_active, 'username': target.username}), 200
+
+
+@app.route('/api/admin/users/<int:target_id>', methods=['DELETE'])
+@jwt_required()
+def admin_delete_user(target_id):
+    user_id = int(get_jwt_identity())
+    requester = User.query.get(user_id)
+    if not requester or not requester.is_admin:
+        return jsonify({'error': 'Acesso restrito'}), 403
+    if target_id == user_id:
+        return jsonify({'error': 'Não é possível excluir sua própria conta'}), 400
+    target = User.query.get_or_404(target_id)
+    username = target.username
+    db.session.delete(target)
+    db.session.commit()
+    return jsonify({'message': f'Usuário {username} excluído'}), 200
 
 # ============= ROTAS DE BACKUP =============
 @app.route('/api/export', methods=['GET'])
