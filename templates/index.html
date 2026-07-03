@@ -1265,6 +1265,12 @@
 
     <!-- SEÇÃO DO APP PRINCIPAL -->
     <div class="app-shell" id="appContainer">
+        <!-- Banner de manutenção — aparece para todos quando há aviso ativo/futuro -->
+        <div id="maintenanceBanner" style="display:none; position:sticky; top:0; z-index:2000; padding:0.6rem 1.5rem; display:none; align-items:center; justify-content:space-between; gap:1rem; font-size:0.82rem; font-weight:600;">
+            <span id="maintenanceBannerText"></span>
+            <button onclick="document.getElementById('maintenanceBanner').style.display='none'" style="background:transparent; border:none; cursor:pointer; color:inherit; font-size:1rem; opacity:0.7;">✕</button>
+        </div>
+
         <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebarMobile()"></div>
 
         <nav class="sidebar" id="sidebar">
@@ -1535,6 +1541,39 @@
                 <button class="btn btn-sm" style="width:auto; background:transparent; border:1px solid var(--border); color:var(--text-secondary);" onclick="loadAdminUsers()">🔄 Atualizar</button>
             </div>
             <div id="adminUsersList"></div>
+
+            <!-- Painel de Manutenção -->
+            <div class="card" style="margin-top:2rem; border-color:var(--amber);">
+                <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:1rem;">
+                    <span style="font-size:1rem;">🔧</span>
+                    <h3 style="margin:0; color:var(--amber-bright);">Aviso de Manutenção</h3>
+                </div>
+                <div id="maintenanceCurrentNotice" style="margin-bottom:1rem;"></div>
+                <div class="form-group">
+                    <label>Mensagem para os usuários</label>
+                    <input type="text" id="maintenanceMsg" placeholder="Ex: O sistema passará por atualização programada." maxlength="200">
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>🕐 Início da manutenção</label>
+                        <input type="datetime-local" id="maintenanceStart">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>🕐 Fim previsto</label>
+                        <input type="datetime-local" id="maintenanceEnd">
+                    </div>
+                </div>
+                <div class="form-group" style="margin-top:1rem;">
+                    <label>🔔 Enviar notificação push aos usuários em (opcional)</label>
+                    <input type="datetime-local" id="maintenanceNotifyAt">
+                    <p style="font-size:0.7rem; color:var(--text-secondary); margin-top:0.25rem;">Requer o cron de manutenção ativo no cron-job.org. Deixe em branco para não notificar.</p>
+                </div>
+                <div id="maintenanceAlert" class="alert"></div>
+                <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
+                    <button class="btn btn-primary" style="background:var(--amber); border-color:var(--amber); color:#1a1305; width:auto;" onclick="saveMaintenance()">🔧 Programar Manutenção</button>
+                    <button class="btn btn-secondary" style="width:auto;" onclick="cancelMaintenance()">Cancelar Aviso Atual</button>
+                </div>
+            </div>
         </div>
 
         <!-- MODAL EDITAR USUÁRIO (ADMIN) -->
@@ -2776,6 +2815,8 @@
             // Aprovações pendentes carregam em background sem bloquear o startup
             if (currentWorkspaceRole === 'admin') loadPendingApprovals();
             else loadMyApprovals();
+            // Verifica se há aviso de manutenção ativo/futuro
+            checkMaintenanceBanner();
             document.getElementById('exportReportDate').value = toLocalISODate(new Date());
             updateSyncIndicator();
         }
@@ -5676,6 +5717,7 @@
                     <div class="badges">
                         <span class="badge" style="color:${sColor}; border-color:${sColor};">${getStatusLabel(d.status)}</span>
                     </div>
+                    ${renderReportChecklistHtml(d.checklist)}
                 </div>
             `;
         }
@@ -5696,6 +5738,7 @@
                     <div class="badges">
                         <span class="badge" style="color:${sColor}; border-color:${sColor};">${getStatusLabel(last.status)}</span>
                     </div>
+                    ${renderReportChecklistHtml(last.checklist)}
                 </div>
             `;
         }
@@ -6813,6 +6856,7 @@
             }
             if (tab === 'adminusers') {
                 loadAdminUsers();
+                checkMaintenanceBanner();
             }
             if (tab === 'settings') {
                 loadStatusAndPriorityConfigLists();
@@ -6855,6 +6899,29 @@
         }
 
         // ============= EXPORTAR HTML =============
+        function renderReportChecklistHtml(checklist) {
+            if (!checklist || checklist.length === 0) return '';
+            const done  = checklist.filter(i => i.checked).length;
+            const total = checklist.length;
+            const pct   = total > 0 ? Math.round(done / total * 100) : 0;
+            const items = checklist.map(i => `
+                <div style="display:flex; align-items:flex-start; gap:6px; margin:3px 0; font-size:12px; ${i.checked ? 'opacity:0.55;' : ''}">
+                    <span style="color:${i.checked ? '#3ddc84' : '#555'}; flex-shrink:0;">${i.checked ? '☑' : '☐'}</span>
+                    <span style="${i.checked ? 'text-decoration:line-through; color:#868d95;' : 'color:#c9d1d9;'}">${escapeHtml(i.text)}</span>
+                </div>`).join('');
+            return `
+                <div style="margin-top:10px; padding:8px 10px; background:#161b22; border-radius:4px; border:1px solid #30363d;">
+                    <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.04em; color:#868d95; margin-bottom:6px; display:flex; justify-content:space-between;">
+                        <span>☑ Checklist</span>
+                        <span style="color:${pct === 100 ? '#3ddc84' : '#f5a623'};">${done}/${total} (${pct}%)</span>
+                    </div>
+                    <div style="background:#30363d; height:4px; border-radius:2px; margin-bottom:8px;">
+                        <div style="background:${pct === 100 ? '#3ddc84' : '#f5a623'}; height:4px; border-radius:2px; width:${pct}%;"></div>
+                    </div>
+                    ${items}
+                </div>`;
+        }
+
         function renderReportCard(d, group) {
             const fallback = Object.values(PRIORITY_STYLES)[0] || { label: d.priority || '—', color: '#9aa0a7' };
             const p = PRIORITY_STYLES[d.priority] || fallback;
@@ -6870,6 +6937,7 @@
                     <div class="badges">
                         <span class="badge" style="color:${p.color}; border-color:${p.color};">${p.label}</span>
                     </div>
+                    ${renderReportChecklistHtml(d.checklist)}
                 </div>
             `;
         }
@@ -6883,6 +6951,7 @@
                     <div class="report-card-group" style="background:${hexToRgba(groupColor, 0.15)}; color:${groupColor}; border-color:${hexToRgba(groupColor, 0.45)};">${groupLabel}</div>
                     <div class="title">${escapeHtml(h.location)} - ${escapeHtml(h.activity)}</div>
                     ${h.context ? `<div class="ctx">📌 ${escapeHtml(h.context)}</div>` : ''}
+                    ${renderReportChecklistHtml(h.checklist)}
                 </div>
             `;
         }
@@ -7085,7 +7154,103 @@
         }
 
         // ============= CHAVES DE ACESSO (ADMIN) =============
-        // ============= GESTÃO DE USUÁRIOS (ADMIN DA PLATAFORMA) =============
+        // ============= AVISO DE MANUTENÇÃO =============
+        async function checkMaintenanceBanner() {
+            try {
+                const resp = await fetch(`${API_URL.replace('/api', '')}/api/maintenance`);
+                if (!resp.ok) return;
+                const notice = await resp.json();
+                renderMaintenanceBanner(notice);
+                // Atualizar o painel admin se estiver visível
+                const adminPanel = document.getElementById('maintenanceCurrentNotice');
+                if (adminPanel) renderMaintenanceAdminStatus(notice);
+            } catch (e) {}
+        }
+
+        function renderMaintenanceBanner(notice) {
+            const banner = document.getElementById('maintenanceBanner');
+            if (!banner) return;
+            if (!notice) { banner.style.display = 'none'; return; }
+
+            const now    = new Date();
+            const starts = new Date(notice.startsAt + (notice.startsAt.endsWith('Z') ? '' : 'Z'));
+            const ends   = new Date(notice.endsAt   + (notice.endsAt.endsWith('Z')   ? '' : 'Z'));
+            const fmtDT  = iso => new Date(iso + (iso.endsWith('Z') ? '' : 'Z')).toLocaleString('pt-BR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
+            const fmtT   = iso => new Date(iso + (iso.endsWith('Z') ? '' : 'Z')).toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+
+            let bg, text;
+            if (now >= starts && now <= ends) {
+                // Durante a manutenção
+                bg = '#7f1d1d'; text = `⚠️ Sistema em manutenção até ${fmtT(notice.endsAt)} — ${notice.message}`;
+            } else if (now < starts) {
+                // Antes da manutenção
+                bg = '#1c1400'; text = `🔧 Manutenção programada: ${fmtDT(notice.startsAt)} até ${fmtT(notice.endsAt)} — ${notice.message}`;
+            } else {
+                banner.style.display = 'none'; return;
+            }
+
+            banner.style.cssText = `display:flex; position:sticky; top:0; z-index:2000; padding:0.6rem 1.5rem; align-items:center; justify-content:space-between; gap:1rem; font-size:0.82rem; font-weight:600; background:${bg}; border-bottom:1px solid ${now >= starts ? '#dc2626' : 'var(--amber)'};`;
+            banner.style.color = now >= starts ? '#fca5a5' : 'var(--amber-bright)';
+            document.getElementById('maintenanceBannerText').textContent = text;
+        }
+
+        function renderMaintenanceAdminStatus(notice) {
+            const el = document.getElementById('maintenanceCurrentNotice');
+            if (!el) return;
+            if (!notice) {
+                el.innerHTML = '<p style="color:var(--text-secondary); font-size:0.8rem;">Nenhum aviso de manutenção ativo.</p>';
+                return;
+            }
+            const fmtDT = iso => new Date(iso + (iso.endsWith('Z') ? '' : 'Z')).toLocaleString('pt-BR', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'});
+            el.innerHTML = `
+                <div style="padding:0.75rem 1rem; background:var(--panel-raised); border-radius:var(--radius); border-left:3px solid var(--amber); font-size:0.82rem;">
+                    <strong style="color:var(--amber-bright);">Aviso atual:</strong> ${escapeHtml(notice.message)}<br>
+                    <span style="color:var(--text-secondary);">${fmtDT(notice.startsAt)} → ${fmtDT(notice.endsAt)}</span>
+                    ${notice.notifyAt ? `<br><span style="color:var(--text-secondary);">Notificação: ${fmtDT(notice.notifyAt)} ${notice.notifySent ? '✅ Enviada' : '⏳ Pendente'}</span>` : ''}
+                </div>`;
+        }
+
+        async function saveMaintenance() {
+            const msg   = document.getElementById('maintenanceMsg').value.trim();
+            const start = document.getElementById('maintenanceStart').value;
+            const end   = document.getElementById('maintenanceEnd').value;
+            const notify = document.getElementById('maintenanceNotifyAt').value;
+            if (!msg || !start || !end) {
+                showAlert('maintenanceAlert', 'Preencha mensagem, início e fim', 'danger'); return;
+            }
+            // Converter datetime-local para ISO sem timezone (servidor em UTC)
+            const toISO = v => v ? v + ':00' : null;
+            try {
+                const resp = await fetchWithRetry(`${API_URL}/admin/maintenance`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ message: msg, starts_at: toISO(start), ends_at: toISO(end), notify_at: toISO(notify) || null })
+                }, 1);
+                if (resp.ok) {
+                    showAlert('maintenanceAlert', 'Manutenção programada com sucesso!', 'success');
+                    checkMaintenanceBanner();
+                } else {
+                    const d = await resp.json().catch(() => ({}));
+                    showAlert('maintenanceAlert', d.error || 'Erro ao salvar', 'danger');
+                }
+            } catch (e) { showAlert('maintenanceAlert', 'Erro de conexão', 'danger'); }
+        }
+
+        async function cancelMaintenance() {
+            if (!confirm('Cancelar o aviso de manutenção atual?')) return;
+            try {
+                const resp = await fetchWithRetry(`${API_URL}/admin/maintenance`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (resp.ok) {
+                    document.getElementById('maintenanceBanner').style.display = 'none';
+                    checkMaintenanceBanner();
+                    showAlert('maintenanceAlert', 'Aviso cancelado', 'success');
+                }
+            } catch (e) { alert('Erro de conexão'); }
+        }
+
         async function loadAdminUsers() {
             const container = document.getElementById('adminUsersList');
             container.innerHTML = '<div style="text-align:center; padding:2rem; color:var(--text-secondary);">Carregando...</div>';
