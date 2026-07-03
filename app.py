@@ -2309,7 +2309,9 @@ def get_pending_approval():
 @app.route('/api/demands/<int:demand_id>/approve', methods=['POST'])
 @jwt_required()
 def approve_demand(demand_id):
-    """Admin aprova a demanda: move pro status escolhido e limpa o estado de aprovação."""
+    """Admin aprova a demanda: se o status destino for concluído, roda o fluxo completo
+    (cria histórico, remove de ativas — igual ao update_demand_status). Se for um status
+    intermediário, apenas atualiza o status da demanda ativa."""
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
 
@@ -2327,10 +2329,59 @@ def approve_demand(demand_id):
     if not status_config:
         return jsonify({'error': 'Status inválido'}), 400
 
+    is_terminal = status_config.is_completed
+
     requester_id = demand.assigned_to_user_id or demand.user_id
-    demand.status = new_status
     demand.previous_status = None
     demand.rejection_note = None
+
+    if is_terminal:
+        # Fluxo completo: cria registro no histórico e remove da tabela de ativas
+        history = DemandHistory(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            work_group_id=demand.work_group_id,
+            demand_id=demand.id,
+            assigned_to_user_id=demand.assigned_to_user_id or demand.user_id,
+            priority=demand.priority,
+            checklist=demand.checklist or [],
+            location=demand.location,
+            activity=demand.activity,
+            context=demand.context,
+            status=new_status,
+            status_change_date=date.today(),
+            created_date=demand.created_date
+        )
+        db.session.add(history)
+
+        # Demanda recorrente: cria próxima ocorrência
+        if demand.is_recurring and demand.recurrence_type:
+            new_due = next_due_date(demand.due_date, demand.recurrence_type)
+            first_status = ws_filter(StatusConfig, user_id, workspace_id, {'is_completed': False}).order_by(StatusConfig.order.asc()).first()
+            initial_status = first_status.key if first_status else 'nao-iniciado'
+            checklist_reset = [{'text': item['text'], 'checked': False} for item in (demand.checklist or [])]
+            next_demand = Demand(
+                user_id=demand.user_id,
+                workspace_id=demand.workspace_id,
+                work_group_id=demand.work_group_id,
+                location=demand.location,
+                activity=demand.activity,
+                context=demand.context,
+                status=initial_status,
+                priority=demand.priority,
+                due_date=new_due,
+                assigned_to=demand.assigned_to,
+                assigned_to_user_id=demand.assigned_to_user_id,
+                is_recurring=True,
+                recurrence_type=demand.recurrence_type,
+                checklist=checklist_reset
+            )
+            db.session.add(next_demand)
+
+        db.session.delete(demand)
+    else:
+        # Status intermediário: apenas atualiza
+        demand.status = new_status
 
     db.session.commit()
 
@@ -2339,19 +2390,18 @@ def approve_demand(demand_id):
     admin_name = (admin_user.full_name or admin_user.username) if admin_user else 'Admin'
     status_label = status_config.label if status_config else new_status
     import threading as _t
-    _rid, _act, _loc, _al = requester_id, demand.activity, demand.location, admin_name
-    _sl = status_label
+    _rid, _act, _loc, _al, _sl = requester_id, demand.activity, demand.location, admin_name, status_label
     def _notify_approved():
         with app.app_context():
             send_push_notification(
                 _rid,
-                f'✅ Demanda aprovada',
+                '✅ Demanda aprovada',
                 f'{_loc} · {_act} → {_sl} (por {_al})',
                 '/'
             )
     _t.Thread(target=_notify_approved, daemon=True).start()
 
-    return jsonify({'message': 'Demanda aprovada', 'demand': demand.to_dict()}), 200
+    return jsonify({'message': 'Demanda aprovada'}), 200
 
 
 @app.route('/api/demands/<int:demand_id>/reject', methods=['POST'])
