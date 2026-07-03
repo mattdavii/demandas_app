@@ -6655,12 +6655,13 @@
             document.querySelector('.content-inner').scrollTop = 0;
 
             if (tab === 'demands') {
-                // Renderiza só se o Kanban ainda não tem conteúdo (primeira abertura ou erro no init)
+                // Mostra o que já está no DOM (renderizado no enterApp)
                 const kanbanEl = document.getElementById('demandsList');
                 if (!kanbanEl || !kanbanEl.innerHTML.trim()) renderKanban();
-                // Re-busca dados se ficou mais de 60s sem atualizar
-                const demandsAge = Date.now() - (window._demandsLoadTime || 0);
-                if (demandsAge > 60000) loadDemands();
+                // Só recarrega da API se o load time foi registrado E passou mais de 60s
+                if (window._demandsLoadTime && (Date.now() - window._demandsLoadTime > 60000)) {
+                    loadDemands();
+                }
             }
             if (tab === 'today') {
                 updateScopeToggleButtons();
