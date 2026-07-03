@@ -5439,8 +5439,10 @@
                     body: JSON.stringify({ status: select.value })
                 }, 1);
                 if (resp.ok) {
-                    await loadDemands();
-                    loadPendingApprovals();
+                    invalidateHistoryCache(); // força recarregar histórico (Concluídas Hoje)
+                    await loadDemands();      // remove a demanda do Kanban
+                    loadPendingApprovals();   // retira da lista de pendentes
+                    loadTodayPage();          // atualiza contadores e "Concluídas Hoje"
                 } else {
                     const data = await resp.json().catch(() => ({}));
                     alert(data.error || 'Erro ao aprovar');
@@ -5476,8 +5478,10 @@
                 }, 1);
                 if (resp.ok) {
                     closeRejectModal();
+                    invalidateHistoryCache();
                     await loadDemands();
                     loadPendingApprovals();
+                    loadTodayPage();
                 } else {
                     const data = await resp.json().catch(() => ({}));
                     showAlert('rejectDemandAlert', data.error || 'Erro ao rejeitar', 'danger');
