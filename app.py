@@ -100,6 +100,7 @@ class User(db.Model):
             'accessVerified': self.access_verified,
             'isAdmin': self.is_admin,
             'theme': self.theme or 'bancada',
+            'isActive': self.is_active if self.is_active is not None else True,
             'lastLogin': self.last_login.isoformat() if self.last_login else None
         }
 
@@ -2557,9 +2558,21 @@ def admin_delete_user(target_id):
         return jsonify({'error': 'Não é possível excluir sua própria conta'}), 400
     target = User.query.get_or_404(target_id)
     username = target.username
-    db.session.delete(target)
-    db.session.commit()
-    return jsonify({'message': f'Usuário {username} excluído'}), 200
+    try:
+        # Remove FK dependentes não cobertos pelo cascade do SQLAlchemy
+        WorkspaceMember.query.filter_by(user_id=target_id).delete()
+        PushSubscription.query.filter_by(user_id=target_id).delete()
+        # Nullifica referências (não deletar para preservar histórico)
+        Demand.query.filter_by(assigned_to_user_id=target_id).update({'assigned_to_user_id': None})
+        DemandHistory.query.filter_by(assigned_to_user_id=target_id).update({'assigned_to_user_id': None})
+        AccessKey.query.filter_by(created_by=target_id).update({'created_by': None})
+        AccessKey.query.filter_by(used_by=target_id).update({'used_by': None})
+        db.session.delete(target)
+        db.session.commit()
+        return jsonify({'message': f'Usuário {username} excluído'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Erro ao excluir: {str(e)[:200]}'}), 500
 
 # ============= ROTAS DE BACKUP =============
 @app.route('/api/export', methods=['GET'])
