@@ -2688,7 +2688,11 @@
                     }
 
                     rebuildStatusAndPriorityStructures();
-                    if (init.workGroups) currentGroups = init.workGroups;
+                    if (init.workGroups) {
+                        currentGroups = init.workGroups;
+                        renderGroups();
+                        updateGroupSelect();
+                    }
                 }
 
                 if (demandsResp.ok) {
@@ -3934,6 +3938,7 @@
         }
 
         function showNewDemandModal() {
+            updateGroupSelect();
             document.getElementById('newGroupId').value = '';
             document.getElementById('newLocation').value = '';
             document.getElementById('newActivity').value = '';
