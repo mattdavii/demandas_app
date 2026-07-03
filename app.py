@@ -2251,6 +2251,41 @@ def notify_admins_approval_pending(demand, workspace_id, requester_name):
                 pass
 
 
+@app.route('/api/demands/my-approvals', methods=['GET'])
+@jwt_required()
+def get_my_approvals():
+    """Retorna demandas que o usuário enviou para aprovação — tanto pendentes quanto
+    já resolvidas (aprovadas ou rejeitadas nos últimos 30 dias via demand_history)."""
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+
+    # Demandas atualmente em aprovação enviadas por este usuário
+    approval_status = get_approval_status(workspace_id)
+    pending = []
+    if approval_status:
+        pending = ws_filter(Demand, user_id, workspace_id).filter(
+            Demand.status == approval_status.key,
+            db.or_(Demand.user_id == user_id, Demand.assigned_to_user_id == user_id)
+        ).all()
+
+    # Demandas recentemente resolvidas que passaram pelo fluxo de aprovação
+    # (identificadas pelo rejection_note ou pelo histórico de status change a partir de approval)
+    from datetime import timedelta
+    cutoff = datetime.now() - timedelta(days=30)
+    rejected_demands = ws_filter(Demand, user_id, workspace_id).filter(
+        Demand.rejection_note != None,
+        db.or_(Demand.user_id == user_id, Demand.assigned_to_user_id == user_id)
+    ).all()
+
+    assignee_ids = {d.assigned_to_user_id for d in pending + rejected_demands if d.assigned_to_user_id}
+    user_cache = {u.id: u for u in User.query.filter(User.id.in_(assignee_ids)).all()} if assignee_ids else {}
+
+    return jsonify({
+        'pending': [d.to_dict(user_cache=user_cache) for d in pending],
+        'rejected': [d.to_dict(user_cache=user_cache) for d in rejected_demands],
+    }), 200
+
+
 @app.route('/api/demands/pending-approval', methods=['GET'])
 @jwt_required()
 def get_pending_approval():
@@ -2292,11 +2327,30 @@ def approve_demand(demand_id):
     if not status_config:
         return jsonify({'error': 'Status inválido'}), 400
 
+    requester_id = demand.assigned_to_user_id or demand.user_id
     demand.status = new_status
     demand.previous_status = None
     demand.rejection_note = None
 
     db.session.commit()
+
+    # Notifica o solicitante em background
+    admin_user = User.query.get(user_id)
+    admin_name = (admin_user.full_name or admin_user.username) if admin_user else 'Admin'
+    status_label = status_config.label if status_config else new_status
+    import threading as _t
+    _rid, _act, _loc, _al = requester_id, demand.activity, demand.location, admin_name
+    _sl = status_label
+    def _notify_approved():
+        with app.app_context():
+            send_push_notification(
+                _rid,
+                f'✅ Demanda aprovada',
+                f'{_loc} · {_act} → {_sl} (por {_al})',
+                '/'
+            )
+    _t.Thread(target=_notify_approved, daemon=True).start()
+
     return jsonify({'message': 'Demanda aprovada', 'demand': demand.to_dict()}), 200
 
 
@@ -2334,7 +2388,22 @@ def reject_demand(demand_id):
     prefix = f'[Rejeitado em {_date.today().strftime("%d/%m/%Y")} por {admin_name}: {note}]'
     demand.context = f'{prefix}\n\n{demand.context}' if demand.context else prefix
 
+    requester_id = demand.assigned_to_user_id or demand.user_id
     db.session.commit()
+
+    # Notifica o solicitante em background
+    import threading as _t
+    _rid, _act, _loc, _n, _an = requester_id, demand.activity, demand.location, note, admin_name
+    def _notify_rejected():
+        with app.app_context():
+            send_push_notification(
+                _rid,
+                f'❌ Demanda rejeitada',
+                f'{_loc} · {_act} — {_an}: "{_n[:80]}"',
+                '/'
+            )
+    _t.Thread(target=_notify_rejected, daemon=True).start()
+
     return jsonify({'message': 'Demanda rejeitada', 'demand': demand.to_dict()}), 200
 
 
