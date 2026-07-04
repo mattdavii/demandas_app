@@ -7186,11 +7186,12 @@
         }
 
         function showAlert(id, message, type) {
-            const alert = document.getElementById(id);
-            alert.textContent = message;
-            alert.className = `alert show alert-${type}`;
+            const alertEl = document.getElementById(id);
+            if (!alertEl) return; // elemento não existe — ignora silenciosamente
+            alertEl.textContent = message;
+            alertEl.className = `alert show alert-${type}`;
             setTimeout(() => {
-                alert.classList.remove('show');
+                alertEl.classList.remove('show');
             }, 4000);
         }
 
@@ -7717,9 +7718,12 @@
                 const resp = await fetchWithRetry(`${API_URL}/agent/tokens`, {
                     headers: { 'Authorization': `Bearer ${token}` }
                 }, 1);
-                if (!resp.ok) return;
+                if (!resp.ok) {
+                    container.innerHTML = '<p style="font-size:0.78rem; color:var(--text-secondary);">Nenhum token ainda.</p>';
+                    return;
+                }
                 const tokens = await resp.json();
-                if (tokens.length === 0) {
+                if (!Array.isArray(tokens) || tokens.length === 0) {
                     container.innerHTML = '<p style="font-size:0.78rem; color:var(--text-secondary);">Nenhum token gerado ainda.</p>';
                     return;
                 }
