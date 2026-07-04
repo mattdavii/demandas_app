@@ -658,32 +658,23 @@ def register():
     
     access_token = create_access_token(identity=str(user.id))
 
-    # E-mail de boas-vindas
-    if app.config['MAIL_USERNAME']:
-        try:
-            frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5000')
-            if user.access_verified:
-                body_html = f'''
-                <p>Olá {user.full_name or user.username},</p>
-                <p>Sua conta no <strong>Painel de Bordo</strong> foi criada com sucesso!</p>
-                <p>Você já pode acessar a plataforma normalmente:</p>
-                <p><a href="{frontend_url}">Acessar Painel de Bordo</a></p>
-                '''
-            else:
-                body_html = f'''
-                <p>Olá {user.full_name or user.username},</p>
-                <p>Sua conta no <strong>Painel de Bordo</strong> foi criada com sucesso!</p>
-                <p>Antes de começar a usar a plataforma, você precisa de uma <strong>chave de acesso</strong> fornecida pelo administrador.</p>
-                <p>Entre em contato com quem te convidou para receber sua chave e liberar o acesso completo.</p>
-                '''
-            msg = Message(
-                'Bem-vindo ao Painel de Bordo!',
-                recipients=[user.email],
-                html=body_html
-            )
-            mail.send(msg)
-        except Exception as e:
-            print(f'Erro ao enviar email de boas-vindas: {e}')
+    # E-mail de boas-vindas em background (não bloqueia o registro)
+    if app.config.get('MAIL_USERNAME'):
+        import threading as _t
+        _uid, _uname, _uemail, _verified = user.id, user.full_name or user.username, user.email, user.access_verified
+        def _send_welcome():
+            with app.app_context():
+                try:
+                    frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5000')
+                    body_html = f'''
+                    <p>Olá {_uname},</p>
+                    <p>Sua conta no <strong>Painel de Bordo</strong> foi criada com sucesso!</p>
+                    ''' + (f'<p><a href="{frontend_url}">Acessar Painel de Bordo</a></p>' if _verified else
+                    '<p>Antes de começar, você precisará de uma <strong>chave de acesso</strong> fornecida pelo administrador.</p>')
+                    mail.send(Message('Bem-vindo ao Painel de Bordo!', recipients=[_uemail], html=body_html))
+                except Exception as e:
+                    print(f'Erro ao enviar email de boas-vindas: {e}')
+        _t.Thread(target=_send_welcome, daemon=True).start()
 
     return jsonify({
         'message': 'Usuário registrado com sucesso',
