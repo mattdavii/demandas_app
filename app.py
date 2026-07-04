@@ -570,6 +570,14 @@ def ping():
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS rejection_note TEXT",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_approval BOOLEAN DEFAULT FALSE",
         "UPDATE status_configs SET is_approval = TRUE WHERE key = 'aprovacao' AND (is_approval IS NULL OR is_approval = FALSE)",
+        """CREATE TABLE IF NOT EXISTS agent_tokens (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            name VARCHAR(100) NOT NULL,
+            token VARCHAR(64) UNIQUE NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW(),
+            last_used TIMESTAMP
+        )""",
     ]
     for _s in _approval_cols:
         try:
