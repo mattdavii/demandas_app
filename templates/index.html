@@ -2636,11 +2636,15 @@
                 const data = await response.json();
 
                 if (response.ok) {
-                    token = data.access_token;
-                    currentUser = data.user;
-                    localStorage.setItem('token', token);
-                    showAlert('registerAlert', '✅ Conta criada com sucesso!', 'success');
-                    setTimeout(() => { showApp(); }, 1200);
+                    showAlert('registerAlert', '✅ Conta criada com sucesso! Redirecionando para o login...', 'success');
+                    // Limpa os campos
+                    document.getElementById('registerUsername').value = '';
+                    document.getElementById('registerEmail').value = '';
+                    document.getElementById('registerFullName').value = '';
+                    document.getElementById('registerPassword').value = '';
+                    document.getElementById('registerPasswordConfirm').value = '';
+                    // Redireciona para login após 2s
+                    setTimeout(() => showLoginForm(), 2000);
                 } else {
                     showAlert('registerAlert', data.error || 'Erro ao criar conta', 'danger');
                 }
