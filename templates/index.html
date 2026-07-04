@@ -7468,9 +7468,9 @@
 
             let text;
             if (now >= starts && now <= ends) {
-                text = `⚠️ Sistema em manutenção — ${fmtDT(notice.startsAt)} até ${fmtT(notice.endsAt)} — ${notice.message}`;
+                text = `⚠️ Sistema em manutenção — ${fmtDT(notice.startsAt)} até ${fmtDT(notice.endsAt)} — ${notice.message}`;
             } else if (now < starts) {
-                text = `🔔 Manutenção programada: ${fmtDT(notice.startsAt)} até ${fmtT(notice.endsAt)} — ${notice.message}`;
+                text = `🔔 Manutenção programada: ${fmtDT(notice.startsAt)} até ${fmtDT(notice.endsAt)} — ${notice.message}`;
             } else {
                 banner.style.display = 'none'; return;
             }
