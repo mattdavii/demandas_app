@@ -1649,6 +1649,17 @@
             </div>
 
             <div class="card admin-only-section" style="margin-top: 1.5rem;">
+                <h3>✏️ Nome do Workspace</h3>
+                <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 1rem;">Personalize o nome do seu espaço de trabalho. Aparece na sidebar e nos relatórios.</p>
+                <div style="display:flex; gap:0.75rem; align-items:flex-start;">
+                    <input type="text" id="workspaceNameInput" maxlength="80" style="flex:1;"
+                        placeholder="Nome do workspace" onkeydown="if(event.key==='Enter') saveWorkspaceName()">
+                    <button class="btn btn-primary" style="width:auto; white-space:nowrap;" onclick="saveWorkspaceName()">Salvar Nome</button>
+                </div>
+                <div id="workspaceNameAlert" class="alert" style="margin-top:0.5rem;"></div>
+            </div>
+
+            <div class="card admin-only-section" style="margin-top: 1.5rem;">
                 <h3>🖼️ Logo do Workspace</h3>
                 <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 1rem;">Aparece acima de "Painel de Bordo" no menu e no topo dos relatórios exportados. Imagem pequena (ideal: fundo transparente, até 200px de largura).</p>
                 <div id="workspaceLogoPreviewWrap" style="display:none; margin-bottom: 1rem;">
@@ -3318,6 +3329,34 @@
                 }
             } catch (e) {
                 alert('Erro de conexão ao revogar link');
+            }
+        }
+
+        async function saveWorkspaceName() {
+            const input = document.getElementById('workspaceNameInput');
+            const name = input.value.trim();
+            if (!name) {
+                showAlert('workspaceNameAlert', 'Nome não pode ser vazio', 'danger');
+                return;
+            }
+            try {
+                const resp = await fetchWithRetry(`${API_URL}/workspace`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ name })
+                }, 1);
+                if (resp.ok) {
+                    const ws = await resp.json();
+                    currentWorkspace = { ...currentWorkspace, name: ws.name };
+                    // Atualiza o título da sidebar se houver
+                    showAlert('workspaceNameAlert', '✅ Nome atualizado com sucesso!', 'success');
+                    setTimeout(() => document.getElementById('workspaceNameAlert').innerHTML = '', 3000);
+                } else {
+                    const d = await resp.json().catch(() => ({}));
+                    showAlert('workspaceNameAlert', d.error || 'Erro ao salvar', 'danger');
+                }
+            } catch (e) {
+                showAlert('workspaceNameAlert', 'Erro de conexão', 'danger');
             }
         }
 
@@ -6865,6 +6904,11 @@
                 loadTeamMembers();
                 loadInviteKeys();
                 applyRoleBasedUI();
+                // Popular nome atual do workspace no campo de edição
+                const nameInput = document.getElementById('workspaceNameInput');
+                if (nameInput && currentWorkspace && currentWorkspace.name && !nameInput.value) {
+                    nameInput.value = currentWorkspace.name;
+                }
             }
             if (tab === 'calendar') {
                 initCalendar();
