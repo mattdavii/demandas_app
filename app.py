@@ -319,6 +319,7 @@ class DemandHistory(db.Model):
     status = db.Column(db.String(20), nullable=False)
     priority = db.Column(db.String(20), nullable=True)  # snapshot da prioridade no momento da mudança (registros novos)
     checklist = db.Column(db.JSON, nullable=True)  # snapshot do checklist da demanda ao concluir
+    action_type = db.Column(db.String(30), nullable=True)  # 'approved' | null (mudança normal)
     status_change_date = db.Column(db.Date, nullable=False)
     created_date = db.Column(db.Date, nullable=True)
     timestamp = db.Column(db.DateTime, default=datetime.now)
@@ -337,7 +338,8 @@ class DemandHistory(db.Model):
             'status': self.status,
             'statusChangeDate': self.status_change_date.isoformat() if self.status_change_date else None,
             'createdDate': self.created_date.isoformat() if self.created_date else None,
-            'checklist': self.checklist  # None = dado não disponível (registro antigo); [] = nova demanda sem checklist
+            'checklist': self.checklist,  # None = dado não disponível (registro antigo); [] = sem checklist
+            'actionType': self.action_type
         }
 
 class Note(db.Model):
@@ -543,6 +545,7 @@ def ping():
     """Health check leve. Também aplica migrations pendentes na primeira chamada."""
     _approval_cols = [
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS previous_status VARCHAR(50)",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS action_type VARCHAR(30)",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS rejection_note TEXT",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_approval BOOLEAN DEFAULT FALSE",
@@ -2244,7 +2247,7 @@ def get_activity_feed():
             'actorId': h.user_id,
             'actorName': (actor.full_name or actor.username) if actor else 'Alguém',
             'responsibleName': (responsible.full_name or responsible.username) if responsible else None,
-            'action': 'status_change',
+            'action': h.action_type or 'status_change',
             'status': h.status,
             'demandId': h.demand_id,
             'location': h.location,
@@ -2414,6 +2417,7 @@ def approve_demand(demand_id):
             assigned_to_user_id=demand.assigned_to_user_id or demand.user_id,
             priority=demand.priority,
             checklist=demand.checklist or [],
+            action_type='approved',  # sinaliza que foi via fluxo de aprovação
             location=demand.location,
             activity=demand.activity,
             context=demand.context,
