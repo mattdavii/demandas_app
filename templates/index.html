@@ -4991,10 +4991,11 @@
 
                 if (response.ok) {
                     const savedNote = await response.json();
+                    const wasEdit = isEdit;
+                    const editedId = editingNoteId; // salva ANTES de closeNoteModal resetar
                     closeNoteModal();
                     loadNotes();
-                    // Atualiza o gadget se a nota estiver fixada
-                    if (isEdit && _pinnedNoteIds.has(editingNoteId)) {
+                    if (wasEdit && _pinnedNoteIds.has(editedId)) {
                         refreshGadget(savedNote);
                     }
                 } else {
