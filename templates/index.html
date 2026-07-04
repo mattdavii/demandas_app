@@ -2796,6 +2796,7 @@
                     });
                     if (currentGroups) {
                         currentGroups = currentGroups.map(g => ({ ...g, demandsCount: counts[g.id] || 0 }));
+                        renderGroups(); // re-renderiza com os counts corretos
                     }
                 } else {
                     // Demands falhou: tenta localStorage como fallback imediato
@@ -4001,6 +4002,15 @@
 
         function renderDemands() {
             const container = document.getElementById('demandsList');
+
+            // Recalcula e sincroniza contagens dos grupos com o estado atual das demandas
+            if (currentGroups && currentDemands) {
+                const termKeys = new Set((currentStatusConfigs || []).filter(s => s.isCompleted).map(s => s.key));
+                const cnt = {};
+                currentDemands.forEach(d => { if (!termKeys.has(d.status)) cnt[d.workGroupId] = (cnt[d.workGroupId] || 0) + 1; });
+                currentGroups = currentGroups.map(g => ({ ...g, demandsCount: cnt[g.id] || 0 }));
+                renderGroups();
+            }
 
             if (currentDemands.length === 0) {
                 container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Nenhuma demanda pendente</div>';
