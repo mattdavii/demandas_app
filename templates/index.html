@@ -1331,14 +1331,16 @@
     </div>
 
     <!-- SEÇÃO DO APP PRINCIPAL -->
-    <div class="app-shell" id="appContainer">
-        <!-- Banner de manutenção — aparece para todos quando há aviso ativo/futuro -->
-        <div id="maintenanceBanner" style="display:none; position:sticky; top:0; z-index:2000; padding:0.6rem 1.5rem; display:none; align-items:center; justify-content:space-between; gap:1rem; font-size:0.82rem; font-weight:600;">
+    <!-- Banner de manutenção — fixo no topo, fora do app-shell -->
+    <div id="maintenanceBanner" style="display:none; position:fixed; top:0; left:0; right:0; z-index:9000; padding:0.65rem 1.25rem; align-items:center; justify-content:space-between; gap:1rem; font-size:0.82rem; font-weight:700; border-bottom:2px solid var(--amber); background:#1a1400; color:var(--amber-bright);">
+        <span style="display:flex; align-items:center; gap:0.5rem;">
+            <span style="font-size:1rem;">⚠️</span>
             <span id="maintenanceBannerText"></span>
-            <button onclick="document.getElementById('maintenanceBanner').style.display='none'" style="background:transparent; border:none; cursor:pointer; color:inherit; font-size:1rem; opacity:0.7;">✕</button>
-        </div>
+        </span>
+        <button onclick="document.getElementById('maintenanceBanner').style.display='none'" style="background:transparent; border:none; cursor:pointer; color:var(--amber); font-size:1rem; opacity:0.7; flex-shrink:0;">✕</button>
+    </div>
 
-        <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebarMobile()"></div>
+    <div class="app-shell" id="appContainer">
 
         <nav class="sidebar" id="sidebar">
             <div class="sidebar-header">
@@ -7464,23 +7466,17 @@
             const fmtDT  = iso => new Date(iso + (iso.endsWith('Z') ? '' : 'Z')).toLocaleString('pt-BR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
             const fmtT   = iso => new Date(iso + (iso.endsWith('Z') ? '' : 'Z')).toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
 
-            let bg, border, color, icon;
+            let text;
             if (now >= starts && now <= ends) {
-                bg = '#1a1400'; border = 'var(--amber)';
-                color = 'var(--amber-bright)';
-                icon = '⚠️';
-                text = `${icon} Sistema em manutenção até ${fmtT(notice.endsAt)} — ${notice.message}`;
+                text = `⚠️ Sistema em manutenção até ${fmtT(notice.endsAt)} — ${notice.message}`;
             } else if (now < starts) {
-                bg = '#1a1400'; border = 'var(--amber)';
-                color = 'var(--amber-bright)';
-                icon = '🔔';
-                text = `${icon} Manutenção programada: ${fmtDT(notice.startsAt)} até ${fmtT(notice.endsAt)} — ${notice.message}`;
+                text = `🔔 Manutenção programada: ${fmtDT(notice.startsAt)} até ${fmtT(notice.endsAt)} — ${notice.message}`;
             } else {
                 banner.style.display = 'none'; return;
             }
 
-            banner.style.cssText = `display:flex; position:sticky; top:0; z-index:2000; padding:0.65rem 1.25rem; align-items:center; justify-content:space-between; gap:1rem; font-size:0.82rem; font-weight:600; background:${bg}; border-bottom:2px solid ${border}; color:${color};`;
             document.getElementById('maintenanceBannerText').textContent = text;
+            banner.style.display = 'flex';
         }
 
         function renderMaintenanceAdminStatus(notice) {
