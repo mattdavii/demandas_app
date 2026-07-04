@@ -890,6 +890,7 @@
         .note-gadget-close:hover { color: var(--led-red); }
         .note-gadget-body { color: var(--text-secondary); line-height: 1.5; user-select: text; }
 
+
         .role-badge-admin { color: var(--amber-bright); border: 1px solid var(--amber); }
         .role-badge-member { color: var(--text-secondary); border: 1px solid var(--border); }
 
@@ -1191,7 +1192,7 @@
         <button onclick="document.getElementById('updatePopup').style.display='none'" style="background:transparent; border:none; color:var(--text-secondary); cursor:pointer; font-size:1rem; padding:0;">✕</button>
     </div>
 
-    <!-- Gadgets flutuantes: notas fixadas que ficam visíveis em todas as telas -->
+        <!-- Gadgets flutuantes: notas fixadas que ficam visíveis em todas as telas -->
     <div id="gadgetsContainer" style="position:fixed; z-index:3000; pointer-events:none;"></div>
 
     <div class="container" id="authContainer">
@@ -1715,6 +1716,30 @@
                     Compartilhe o link com quem quiser convidar. A pessoa acessa, cria a conta e já entra no seu workspace automaticamente. Links multi-uso: o mesmo link funciona pra várias pessoas. Revogue quando quiser encerrar o acesso.
                 </p>
                 <div id="inviteKeysList" class="scrollable-list"></div>
+            </div>
+
+            <div class="card" style="margin-top:1.5rem;">
+                <h3>🤖 Agentes de IA</h3>
+                <p style="font-size:0.78rem; color:var(--text-secondary); margin-bottom:1rem;">
+                    Gere tokens para conectar seu agente de IA pessoal (Custom GPT, Claude, n8n, Make.com, Zapier, etc.) à plataforma.<br>
+                    O agente poderá consultar suas demandas, histórico e resumos sem precisar fazer login.
+                </p>
+                <div style="display:flex; gap:0.75rem; margin-bottom:1rem; flex-wrap:wrap;">
+                    <input type="text" id="agentTokenName" placeholder='Nome do agente (ex: "Meu Custom GPT")' style="flex:1; min-width:200px;">
+                    <button class="btn btn-primary" style="width:auto; white-space:nowrap;" onclick="createAgentToken()">➕ Gerar Token</button>
+                </div>
+                <div id="agentTokenAlert" class="alert" style="margin-bottom:0.5rem;"></div>
+                <div id="agentTokensList"></div>
+                <div style="margin-top:1.25rem; padding:0.85rem 1rem; background:var(--panel-raised); border-radius:var(--radius); border-left:3px solid var(--amber); font-size:0.75rem; color:var(--text-secondary);">
+                    <strong style="color:var(--amber-bright);">Como usar:</strong><br>
+                    Após gerar o token, configure seu agente com estas URLs:<br>
+                    <code style="display:block; margin-top:0.4rem; padding:0.4rem 0.6rem; background:var(--panel); border-radius:4px; color:var(--text-primary);">
+                        GET https://demandas-app-kywp.onrender.com/api/agent/summary?token=SEU_TOKEN<br>
+                        GET https://demandas-app-kywp.onrender.com/api/agent/demands?token=SEU_TOKEN<br>
+                        GET https://demandas-app-kywp.onrender.com/api/agent/history?token=SEU_TOKEN
+                    </code>
+                    Os endpoints retornam JSON com suas demandas ativas, atrasadas, histórico e muito mais.
+                </div>
             </div>
 
             <div class="card admin-only-section" style="margin-top: 1.5rem;">
@@ -7147,6 +7172,7 @@
                 refreshPushStatus();
                 loadTeamMembers();
                 loadInviteKeys();
+                loadAgentTokens();
                 applyRoleBasedUI();
                 // Popular nome atual do workspace no campo de edição
                 const nameInput = document.getElementById('workspaceNameInput');
@@ -7680,6 +7706,83 @@
                 if (resp.ok) loadAdminUsers();
                 else { const d = await resp.json().catch(() => ({})); alert(d.error || 'Erro ao excluir'); }
             } catch (e) { alert('Erro de conexão'); }
+        }
+
+
+        // ============= AGENTES DE IA =============
+        async function loadAgentTokens() {
+            const container = document.getElementById('agentTokensList');
+            if (!container) return;
+            try {
+                const resp = await fetchWithRetry(`${API_URL}/agent/tokens`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (!resp.ok) return;
+                const tokens = await resp.json();
+                if (tokens.length === 0) {
+                    container.innerHTML = '<p style="font-size:0.78rem; color:var(--text-secondary);">Nenhum token gerado ainda.</p>';
+                    return;
+                }
+                const baseUrl = 'https://demandas-app-kywp.onrender.com';
+                container.innerHTML = tokens.map(t => `
+                    <div style="display:flex; align-items:center; gap:0.75rem; padding:0.6rem 0.75rem;
+                                background:var(--panel-raised); border-radius:var(--radius); margin-bottom:0.5rem; flex-wrap:wrap;">
+                        <div style="flex:1; min-width:0;">
+                            <div style="font-size:0.82rem; font-weight:600; color:var(--text-primary);">🤖 ${escapeHtml(t.name)}</div>
+                            <div style="font-size:0.68rem; color:var(--text-secondary); margin-top:2px; word-break:break-all;">
+                                <code style="color:var(--amber);">${t.token}</code>
+                            </div>
+                            <div style="font-size:0.65rem; color:var(--text-secondary); margin-top:2px;">
+                                Criado: ${new Date(t.createdAt + 'Z').toLocaleDateString('pt-BR')}
+                                ${t.lastUsed ? ' · Último uso: ' + new Date(t.lastUsed + 'Z').toLocaleDateString('pt-BR') : ' · Nunca usado'}
+                            </div>
+                        </div>
+                        <div style="display:flex; gap:0.4rem; flex-shrink:0;">
+                            <button class="btn-edit btn-sm" onclick="copyToClipboard('${t.token}')" title="Copiar token">📋</button>
+                            <button class="btn-delete btn-sm" onclick="revokeAgentToken(${t.id}, '${escapeHtml(t.name)}')" title="Revogar">🗑️</button>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) { console.error('Erro ao carregar tokens de agente:', e); }
+        }
+
+        async function createAgentToken() {
+            const name = document.getElementById('agentTokenName').value.trim();
+            if (!name) { showAlert('agentTokenAlert', 'Digite um nome para o agente', 'danger'); return; }
+            try {
+                const resp = await fetchWithRetry(`${API_URL}/agent/tokens`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ name })
+                }, 1);
+                const data = await resp.json();
+                if (resp.ok) {
+                    document.getElementById('agentTokenName').value = '';
+                    showAlert('agentTokenAlert', '✅ Token gerado! Copie agora — ele não será mostrado novamente de forma destacada.', 'success');
+                    loadAgentTokens();
+                } else {
+                    showAlert('agentTokenAlert', data.error || 'Erro ao gerar token', 'danger');
+                }
+            } catch (e) { showAlert('agentTokenAlert', 'Erro de conexão', 'danger'); }
+        }
+
+        async function revokeAgentToken(id, name) {
+            if (!confirm(`Revogar token "${name}"? O agente perderá acesso imediatamente.`)) return;
+            try {
+                const resp = await fetchWithRetry(`${API_URL}/agent/tokens/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (resp.ok) loadAgentTokens();
+                else alert('Erro ao revogar token');
+            } catch (e) { alert('Erro de conexão'); }
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                showAlert('agentTokenAlert', '📋 Token copiado!', 'success');
+                setTimeout(() => document.getElementById('agentTokenAlert').innerHTML = '', 2000);
+            });
         }
 
         async function loadAccessKeys() {
