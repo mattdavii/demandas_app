@@ -658,7 +658,6 @@ def register():
     
     access_token = create_access_token(identity=str(user.id))
 
-    # E-mail de boas-vindas em background (não bloqueia o registro)
     if app.config.get('MAIL_USERNAME'):
         import threading as _t
         _uid, _uname, _uemail, _verified = user.id, user.full_name or user.username, user.email, user.access_verified
@@ -672,9 +671,12 @@ def register():
                     ''' + (f'<p><a href="{frontend_url}">Acessar Painel de Bordo</a></p>' if _verified else
                     '<p>Antes de começar, você precisará de uma <strong>chave de acesso</strong> fornecida pelo administrador.</p>')
                     mail.send(Message('Bem-vindo ao Painel de Bordo!', recipients=[_uemail], html=body_html))
+                    print(f'[email] Boas-vindas enviado para {_uemail}')
                 except Exception as e:
-                    print(f'Erro ao enviar email de boas-vindas: {e}')
+                    print(f'[email] ERRO ao enviar boas-vindas para {_uemail}: {type(e).__name__}: {e}')
         _t.Thread(target=_send_welcome, daemon=True).start()
+    else:
+        print('[email] MAIL_USERNAME não configurado — e-mail de boas-vindas não enviado')
 
     return jsonify({
         'message': 'Usuário registrado com sucesso',
