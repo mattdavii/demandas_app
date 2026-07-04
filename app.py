@@ -197,6 +197,30 @@ def create_personal_workspace(user):
     db.session.commit()
     return workspace
 
+
+class MaintenanceNotice(db.Model):
+    """Aviso de manutenção programada. Apenas um registro ativo por vez."""
+    __tablename__ = 'maintenance_notices'
+    id           = db.Column(db.Integer, primary_key=True)
+    message      = db.Column(db.String(300), nullable=False)
+    starts_at    = db.Column(db.DateTime, nullable=False)
+    ends_at      = db.Column(db.DateTime, nullable=False)
+    notify_at    = db.Column(db.DateTime, nullable=True)   # quando enviar a notificação push
+    notify_sent  = db.Column(db.Boolean, default=False)
+    created_by   = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at   = db.Column(db.DateTime, default=datetime.now)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'message': self.message,
+            'startsAt': self.starts_at.isoformat() if self.starts_at else None,
+            'endsAt': self.ends_at.isoformat() if self.ends_at else None,
+            'notifyAt': self.notify_at.isoformat() if self.notify_at else None,
+            'notifySent': self.notify_sent,
+            'createdAt': self.created_at.isoformat() if self.created_at else None,
+        }
+
 class WorkGroup(db.Model):
     __tablename__ = 'work_groups'
     
@@ -950,6 +974,26 @@ def get_workspace_info():
     result = workspace.to_dict()
     result['myRole'] = get_user_workspace_role(user_id, workspace_id)
     return jsonify(result), 200
+
+
+@app.route('/api/workspace', methods=['PUT'])
+@jwt_required()
+def update_workspace():
+    """Atualiza nome do workspace. Restrito a admin do workspace."""
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Apenas administradores podem editar o workspace'}), 403
+    workspace = Workspace.query.get_or_404(workspace_id)
+    data = request.get_json()
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'Nome não pode ser vazio'}), 400
+    if len(name) > 80:
+        return jsonify({'error': 'Nome deve ter no máximo 80 caracteres'}), 400
+    workspace.name = name
+    db.session.commit()
+    return jsonify(workspace.to_dict()), 200
 
 @app.route('/api/workspace/logo', methods=['PUT'])
 @jwt_required()
@@ -2580,6 +2624,104 @@ def admin_delete_user(target_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': f'Erro ao excluir: {str(e)[:300]}'}), 500
+
+
+# ============= MANUTENÇÃO DO SISTEMA =============
+@app.route('/api/maintenance', methods=['GET'])
+def get_maintenance():
+    """Retorna o aviso de manutenção ativo ou futuro (sem autenticação — todos precisam ver)."""
+    now = datetime.now()
+    notice = MaintenanceNotice.query.filter(
+        MaintenanceNotice.ends_at > now
+    ).order_by(MaintenanceNotice.starts_at.asc()).first()
+    return jsonify(notice.to_dict() if notice else None), 200
+
+
+@app.route('/api/admin/maintenance', methods=['POST'])
+@jwt_required()
+def set_maintenance():
+    """Cria ou substitui o aviso de manutenção. Restrito ao admin da plataforma."""
+    user_id = int(get_jwt_identity())
+    requester = User.query.get(user_id)
+    if not requester or not requester.is_admin:
+        return jsonify({'error': 'Acesso restrito'}), 403
+
+    data = request.get_json()
+    try:
+        starts_at = datetime.fromisoformat(data['starts_at'])
+        ends_at   = datetime.fromisoformat(data['ends_at'])
+        notify_at = datetime.fromisoformat(data['notify_at']) if data.get('notify_at') else None
+    except (KeyError, ValueError) as e:
+        return jsonify({'error': f'Datas inválidas: {e}'}), 400
+
+    if ends_at <= starts_at:
+        return jsonify({'error': 'Fim deve ser depois do início'}), 400
+
+    # Remove avisos anteriores e cria novo
+    MaintenanceNotice.query.delete()
+    notice = MaintenanceNotice(
+        message=data.get('message', 'O sistema passará por manutenção programada.'),
+        starts_at=starts_at,
+        ends_at=ends_at,
+        notify_at=notify_at,
+        notify_sent=False,
+        created_by=user_id
+    )
+    db.session.add(notice)
+    db.session.commit()
+    return jsonify(notice.to_dict()), 201
+
+
+@app.route('/api/admin/maintenance', methods=['DELETE'])
+@jwt_required()
+def cancel_maintenance():
+    """Cancela o aviso de manutenção atual."""
+    user_id = int(get_jwt_identity())
+    requester = User.query.get(user_id)
+    if not requester or not requester.is_admin:
+        return jsonify({'error': 'Acesso restrito'}), 403
+    MaintenanceNotice.query.delete()
+    db.session.commit()
+    return jsonify({'message': 'Aviso cancelado'}), 200
+
+
+@app.route('/api/cron/check-maintenance-notify', methods=['GET', 'POST'])
+def cron_maintenance_notify():
+    """Verifica se é hora de enviar a notificação de manutenção programada.
+    Chamar via cron-job.org a cada 5 minutos."""
+    secret = request.args.get('key') or request.headers.get('X-Cron-Key')
+    if not secret or secret != os.getenv('CRON_SECRET_KEY'):
+        return jsonify({'error': 'Não autorizado'}), 403
+
+    now = datetime.now()
+    notice = MaintenanceNotice.query.filter(
+        MaintenanceNotice.notify_at != None,
+        MaintenanceNotice.notify_at <= now,
+        MaintenanceNotice.notify_sent == False,
+        MaintenanceNotice.ends_at > now
+    ).first()
+
+    if not notice:
+        return jsonify({'message': 'Nenhuma notificação pendente'}), 200
+
+    # Envia push para todos os usuários
+    users = User.query.filter_by(is_active=True).all()
+    sent = 0
+    for u in users:
+        try:
+            send_push_notification(
+                u.id,
+                '🔧 Manutenção Programada',
+                f'{notice.message} — {notice.starts_at.strftime("%d/%m às %H:%M")} até {notice.ends_at.strftime("%H:%M")}',
+                '/'
+            )
+            sent += 1
+        except Exception:
+            pass
+
+    notice.notify_sent = True
+    db.session.commit()
+    return jsonify({'message': f'Notificação enviada para {sent} usuários'}), 200
 
 # ============= ROTAS DE BACKUP =============
 @app.route('/api/export', methods=['GET'])
