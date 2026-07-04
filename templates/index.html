@@ -840,6 +840,56 @@
         .location-chip:hover { border-color: var(--amber); color: var(--amber); }
         .location-chip.active { background: var(--amber); color: #1a1305; border-color: var(--amber); font-weight: 700; }
 
+        /* Gadgets flutuantes (notas fixadas) */
+        .note-gadget {
+            position: fixed;
+            width: 240px;
+            min-height: 80px;
+            max-height: 320px;
+            overflow-y: auto;
+            background: #1c1a08;
+            border: 1px solid var(--amber);
+            border-radius: var(--radius);
+            padding: 0.6rem 0.75rem;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(245,166,35,0.2);
+            z-index: 3000;
+            pointer-events: all;
+            cursor: move;
+            font-size: 0.78rem;
+            resize: both;
+            user-select: none;
+        }
+        .note-gadget-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.4rem;
+            gap: 0.4rem;
+        }
+        .note-gadget-title {
+            font-weight: 700;
+            color: var(--amber-bright);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .note-gadget-close {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.9rem;
+            padding: 0;
+            line-height: 1;
+            flex-shrink: 0;
+        }
+        .note-gadget-close:hover { color: var(--led-red); }
+        .note-gadget-body { color: var(--text-secondary); line-height: 1.5; user-select: text; }
+
         .role-badge-admin { color: var(--amber-bright); border: 1px solid var(--amber); }
         .role-badge-member { color: var(--text-secondary); border: 1px solid var(--border); }
 
@@ -1127,6 +1177,9 @@
 </head>
 <body>
     <!-- SEÇÃO DE AUTENTICAÇÃO -->
+    <!-- Gadgets flutuantes: notas fixadas que ficam visíveis em todas as telas -->
+    <div id="gadgetsContainer" style="position:fixed; z-index:3000; pointer-events:none;"></div>
+
     <div class="container" id="authContainer">
         <div class="auth-container">
             <!-- LADO INFORMATIVO -->
@@ -2827,8 +2880,8 @@
             // Aprovações pendentes carregam em background sem bloquear o startup
             if (currentWorkspaceRole === 'admin') loadPendingApprovals();
             else loadMyApprovals();
-            // Verifica se há aviso de manutenção ativo/futuro
             checkMaintenanceBanner();
+            restorePinnedGadgets();
             document.getElementById('exportReportDate').value = toLocalISODate(new Date());
             updateSyncIndicator();
         }
@@ -4618,6 +4671,114 @@
         let editingNoteId = null;
         let noteChecklistDraft = [];
 
+        // ============= GADGETS FLUTUANTES (NOTAS FIXADAS) =============
+        // Persiste quais notas estão fixadas (IDs) no localStorage
+        let _pinnedNoteIds = new Set(JSON.parse(localStorage.getItem('pinnedGadgets') || '[]'));
+
+        function savePinnedGadgets() {
+            localStorage.setItem('pinnedGadgets', JSON.stringify([..._pinnedNoteIds]));
+        }
+
+        function pinNoteAsGadget(noteId) {
+            if (_pinnedNoteIds.has(noteId)) {
+                unpinGadget(noteId);
+                return;
+            }
+            // Busca a nota nos dados locais (já carregados em notesList via loadNotes)
+            const noteCards = document.querySelectorAll('.note-card');
+            // Busca da API se não encontrar localmente
+            fetchWithRetry(`${API_URL}/notes/${noteId}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            }, 1).then(r => r.ok ? r.json() : null).then(note => {
+                if (!note) { alert('Nota não encontrada'); return; }
+                _pinnedNoteIds.add(noteId);
+                savePinnedGadgets();
+                renderGadget(note);
+            }).catch(() => alert('Erro ao fixar nota'));
+        }
+
+        function renderGadget(note) {
+            const container = document.getElementById('gadgetsContainer');
+            if (!container) return;
+            if (document.getElementById(`gadget_${note.id}`)) return; // já existe
+
+            // Posição: cascata de 20px por gadget existente
+            const existingCount = container.querySelectorAll('.note-gadget').length;
+            const left = Math.min(window.innerWidth - 260, 40 + existingCount * 24);
+            const top = 80 + existingCount * 24;
+
+            const checklist = note.checklist || [];
+            const checklistHtml = checklist.length > 0
+                ? checklist.map(i => `<div style="display:flex; gap:0.4rem; margin:2px 0; ${i.checked ? 'opacity:0.5;' : ''}">
+                    <span style="color:${i.checked ? 'var(--led-green)' : 'var(--border)'}; flex-shrink:0;">${i.checked ? '☑' : '☐'}</span>
+                    <span style="${i.checked ? 'text-decoration:line-through;' : ''}">${escapeHtml(i.text)}</span>
+                  </div>`).join('')
+                : '';
+
+            const el = document.createElement('div');
+            el.className = 'note-gadget';
+            el.id = `gadget_${note.id}`;
+            el.style.left = `${left}px`;
+            el.style.top = `${top}px`;
+            el.innerHTML = `
+                <div class="note-gadget-header">
+                    <span class="note-gadget-title">📌 ${escapeHtml(note.subject)}</span>
+                    <button class="note-gadget-close" onclick="unpinGadget(${note.id})" title="Remover gadget">✕</button>
+                </div>
+                <div class="note-gadget-body">
+                    ${note.description ? `<p style="margin:0 0 0.4rem;">${escapeHtml(note.description)}</p>` : ''}
+                    ${checklistHtml}
+                </div>
+            `;
+
+            // Drag para mover
+            makeDraggable(el);
+            container.appendChild(el);
+        }
+
+        function unpinGadget(noteId) {
+            _pinnedNoteIds.delete(noteId);
+            savePinnedGadgets();
+            const el = document.getElementById(`gadget_${noteId}`);
+            if (el) el.remove();
+        }
+
+        function makeDraggable(el) {
+            let startX, startY, startLeft, startTop;
+            el.addEventListener('mousedown', e => {
+                if (e.target.classList.contains('note-gadget-close') || e.target.tagName === 'INPUT') return;
+                startX = e.clientX; startY = e.clientY;
+                startLeft = parseInt(el.style.left) || 0;
+                startTop  = parseInt(el.style.top)  || 0;
+                const onMove = mv => {
+                    el.style.left = `${startLeft + mv.clientX - startX}px`;
+                    el.style.top  = `${startTop  + mv.clientY - startY}px`;
+                };
+                const onUp = () => {
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+        }
+
+        async function restorePinnedGadgets() {
+            // Restaura os gadgets fixados após login
+            if (_pinnedNoteIds.size === 0) return;
+            for (const noteId of _pinnedNoteIds) {
+                try {
+                    const r = await fetchWithRetry(`${API_URL}/notes/${noteId}`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    }, 1);
+                    if (r.ok) renderGadget(await r.json());
+                } catch (e) {
+                    _pinnedNoteIds.delete(noteId); // nota foi deletada
+                }
+            }
+            savePinnedGadgets();
+        }
+
         async function loadNotes() {
             const container = document.getElementById('notesList');
             container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Carregando...</div>';
@@ -4661,8 +4822,9 @@
                                 `).join('')}
                             </div>
                         ` : ''}
-                        <div style="display: flex; gap: 0.5rem; margin-top: auto;">
+                        <div style="display: flex; gap: 0.5rem; margin-top: auto; flex-wrap:wrap;">
                             <button class="btn-edit btn-sm" onclick="editNote(${note.id})">Editar</button>
+                            <button class="btn-edit btn-sm" style="color:var(--amber); border-color:var(--amber);" onclick="pinNoteAsGadget(${note.id})" title="Fixar como card flutuante em todas as telas">📌 Fixar</button>
                             <button class="btn-delete btn-sm" onclick="deleteNote(${note.id})">Apagar</button>
                         </div>
                     </div>
