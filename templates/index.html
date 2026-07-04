@@ -1177,6 +1177,20 @@
 </head>
 <body>
     <!-- SEÇÃO DE AUTENTICAÇÃO -->
+    <!-- Popup de nova versão disponível -->
+    <div id="updatePopup" style="display:none; position:fixed; bottom:5rem; left:50%; transform:translateX(-50%); z-index:4000;
+        background:#1a1400; border:2px solid var(--amber); border-radius:12px; padding:0.85rem 1.25rem;
+        box-shadow:0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(245,166,35,0.15);
+        display:none; align-items:center; gap:0.75rem; max-width:340px; width:90%;">
+        <span style="font-size:1.3rem;">⚠️</span>
+        <div style="flex:1;">
+            <div style="font-size:0.8rem; font-weight:700; color:var(--amber-bright);">Nova versão disponível</div>
+            <div style="font-size:0.72rem; color:var(--text-secondary); margin-top:2px;">Recarregue para usar a versão mais recente.</div>
+        </div>
+        <button onclick="window.location.reload()" style="background:var(--amber); color:#1a1305; border:none; border-radius:6px; padding:0.4rem 0.75rem; font-size:0.75rem; font-weight:700; cursor:pointer; white-space:nowrap;">Recarregar</button>
+        <button onclick="document.getElementById('updatePopup').style.display='none'" style="background:transparent; border:none; color:var(--text-secondary); cursor:pointer; font-size:1rem; padding:0;">✕</button>
+    </div>
+
     <!-- Gadgets flutuantes: notas fixadas que ficam visíveis em todas as telas -->
     <div id="gadgetsContainer" style="position:fixed; z-index:3000; pointer-events:none;"></div>
 
@@ -7450,19 +7464,22 @@
             const fmtDT  = iso => new Date(iso + (iso.endsWith('Z') ? '' : 'Z')).toLocaleString('pt-BR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
             const fmtT   = iso => new Date(iso + (iso.endsWith('Z') ? '' : 'Z')).toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
 
-            let bg, text;
+            let bg, border, color, icon;
             if (now >= starts && now <= ends) {
-                // Durante a manutenção
-                bg = '#7f1d1d'; text = `⚠️ Sistema em manutenção até ${fmtT(notice.endsAt)} — ${notice.message}`;
+                bg = '#1a1400'; border = 'var(--amber)';
+                color = 'var(--amber-bright)';
+                icon = '⚠️';
+                text = `${icon} Sistema em manutenção até ${fmtT(notice.endsAt)} — ${notice.message}`;
             } else if (now < starts) {
-                // Antes da manutenção
-                bg = '#1c1400'; text = `🔧 Manutenção programada: ${fmtDT(notice.startsAt)} até ${fmtT(notice.endsAt)} — ${notice.message}`;
+                bg = '#1a1400'; border = 'var(--amber)';
+                color = 'var(--amber-bright)';
+                icon = '🔔';
+                text = `${icon} Manutenção programada: ${fmtDT(notice.startsAt)} até ${fmtT(notice.endsAt)} — ${notice.message}`;
             } else {
                 banner.style.display = 'none'; return;
             }
 
-            banner.style.cssText = `display:flex; position:sticky; top:0; z-index:2000; padding:0.6rem 1.5rem; align-items:center; justify-content:space-between; gap:1rem; font-size:0.82rem; font-weight:600; background:${bg}; border-bottom:1px solid ${now >= starts ? '#dc2626' : 'var(--amber)'};`;
-            banner.style.color = now >= starts ? '#fca5a5' : 'var(--amber-bright)';
+            banner.style.cssText = `display:flex; position:sticky; top:0; z-index:2000; padding:0.65rem 1.25rem; align-items:center; justify-content:space-between; gap:1rem; font-size:0.82rem; font-weight:600; background:${bg}; border-bottom:2px solid ${border}; color:${color};`;
             document.getElementById('maintenanceBannerText').textContent = text;
         }
 
@@ -7871,6 +7888,12 @@
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('/sw.js')
                     .catch((err) => console.error('Falha ao registrar Service Worker:', err));
+
+                // Mostra popup âmbar quando o app for atualizado
+                navigator.serviceWorker.addEventListener('controllerchange', () => {
+                    const popup = document.getElementById('updatePopup');
+                    if (popup) popup.style.display = 'flex';
+                });
             });
         }
     </script>
