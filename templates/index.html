@@ -4723,7 +4723,10 @@
             el.innerHTML = `
                 <div class="note-gadget-header">
                     <span class="note-gadget-title">📌 ${escapeHtml(note.subject)}</span>
-                    <button class="note-gadget-close" onclick="unpinGadget(${note.id})" title="Remover gadget">✕</button>
+                    <div style="display:flex; gap:0.3rem; align-items:center;">
+                        <button class="note-gadget-close" onclick="editNoteFromGadget(${note.id})" title="Editar nota" style="color:var(--amber);">✏️</button>
+                        <button class="note-gadget-close" onclick="unpinGadget(${note.id})" title="Remover gadget">✕</button>
+                    </div>
                 </div>
                 <div class="note-gadget-body">
                     ${note.description ? `<p style="margin:0 0 0.4rem;">${escapeHtml(note.description)}</p>` : ''}
@@ -4741,6 +4744,44 @@
             savePinnedGadgets();
             const el = document.getElementById(`gadget_${noteId}`);
             if (el) el.remove();
+        }
+
+        async function editNoteFromGadget(noteId) {
+            // Busca a nota e abre o modal de edição — funciona de qualquer tela
+            try {
+                const r = await fetchWithRetry(`${API_URL}/notes/${noteId}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (!r.ok) return;
+                const note = await r.json();
+                // Popula o modal de notas
+                editingNoteId = note.id;
+                document.getElementById('noteSubject').value = note.subject || '';
+                document.getElementById('noteDescription').value = note.description || '';
+                noteChecklistDraft = JSON.parse(JSON.stringify(note.checklist || []));
+                renderChecklistDraftEditor();
+                document.getElementById('noteModalTitle').textContent = '✏️ Editar Nota';
+                document.getElementById('noteModal').classList.add('show');
+            } catch (e) {
+                alert('Erro ao abrir nota para edição');
+            }
+        }
+
+        function refreshGadget(note) {
+            const el = document.getElementById(`gadget_${note.id}`);
+            if (!el) return;
+            const checklist = note.checklist || [];
+            const checklistHtml = checklist.length > 0
+                ? checklist.map(i => `<div style="display:flex; gap:0.4rem; margin:2px 0; ${i.checked ? 'opacity:0.5;' : ''}">
+                    <span style="color:${i.checked ? 'var(--led-green)' : 'var(--border)'}; flex-shrink:0;">${i.checked ? '☑' : '☐'}</span>
+                    <span style="${i.checked ? 'text-decoration:line-through;' : ''}">${escapeHtml(i.text)}</span>
+                  </div>`).join('')
+                : '';
+            el.querySelector('.note-gadget-title').textContent = `📌 ${note.subject}`;
+            el.querySelector('.note-gadget-body').innerHTML = `
+                ${note.description ? `<p style="margin:0 0 0.4rem;">${escapeHtml(note.description)}</p>` : ''}
+                ${checklistHtml}
+            `;
         }
 
         function makeDraggable(el) {
@@ -4949,8 +4990,13 @@
                 }, 1);
 
                 if (response.ok) {
+                    const savedNote = await response.json();
                     closeNoteModal();
                     loadNotes();
+                    // Atualiza o gadget se a nota estiver fixada
+                    if (isEdit && _pinnedNoteIds.has(editingNoteId)) {
+                        refreshGadget(savedNote);
+                    }
                 } else {
                     const data = await response.json().catch(() => ({}));
                     alert(data.error || 'Erro ao salvar nota');
@@ -4967,6 +5013,7 @@
 
             note.checklist[itemIdx].checked = !note.checklist[itemIdx].checked;
             renderNotes();
+            if (_pinnedNoteIds.has(noteId)) refreshGadget(note);
 
             try {
                 await fetchWithRetry(`${API_URL}/notes/${noteId}`, {
