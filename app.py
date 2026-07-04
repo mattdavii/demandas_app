@@ -221,6 +221,26 @@ class MaintenanceNotice(db.Model):
             'createdAt': self.created_at.isoformat() if self.created_at else None,
         }
 
+
+class AgentToken(db.Model):
+    """Token de acesso pessoal para agentes de IA externos (Custom GPTs, n8n, etc.)"""
+    __tablename__ = 'agent_tokens'
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    name       = db.Column(db.String(100), nullable=False)   # ex: "Meu Custom GPT"
+    token      = db.Column(db.String(64), unique=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    last_used  = db.Column(db.DateTime, nullable=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'token': self.token,
+            'createdAt': self.created_at.isoformat() if self.created_at else None,
+            'lastUsed': self.last_used.isoformat() if self.last_used else None,
+        }
+
 class WorkGroup(db.Model):
     __tablename__ = 'work_groups'
     
@@ -2734,6 +2754,167 @@ def cron_maintenance_notify():
     notice.notify_sent = True
     db.session.commit()
     return jsonify({'message': f'Notificação enviada para {sent} usuários'}), 200
+
+
+
+# ============= AGENTE IA (ACESSO EXTERNO VIA TOKEN) =============
+def get_agent_user(token_str):
+    """Autentica um agente via token pessoal e retorna (user, workspace_id) ou None."""
+    tok = AgentToken.query.filter_by(token=token_str).first()
+    if not tok:
+        return None, None
+    tok.last_used = datetime.now()
+    db.session.commit()
+    workspace_id = get_user_workspace_id(tok.user_id)
+    return User.query.get(tok.user_id), workspace_id
+
+
+@app.route('/api/agent/summary', methods=['GET'])
+def agent_summary():
+    """Resumo das demandas para agentes de IA externos.
+    Auth: ?token=SEU_TOKEN  ou  Authorization: Bearer SEU_TOKEN"""
+    token_str = request.args.get('token') or (request.headers.get('Authorization', '').replace('Bearer ', '').strip())
+    user, workspace_id = get_agent_user(token_str)
+    if not user:
+        return jsonify({'error': 'Token inválido ou expirado'}), 401
+
+    demands  = ws_filter(Demand, user.id, workspace_id).all()
+    terminal = [s.key for s in ws_filter(StatusConfig, user.id, workspace_id, {'is_completed': True}).all()]
+    approval = [s.key for s in ws_filter(StatusConfig, user.id, workspace_id, {'is_approval': True}).all()]
+    active   = [d for d in demands if d.status not in terminal]
+    overdue  = [d for d in active if d.due_date and str(d.due_date) < str(date.today()) and d.status not in approval]
+    today_d  = [d for d in active if d.due_date and str(d.due_date) == str(date.today())]
+    pending_appr = [d for d in active if d.status in approval]
+
+    groups   = {g.id: g.name for g in WorkGroup.query.filter(
+        db.or_(WorkGroup.workspace_id == workspace_id,
+               db.and_(WorkGroup.workspace_id == None, WorkGroup.user_id == user.id))
+    ).all()}
+
+    def fmt(d):
+        return {
+            'local': d.location,
+            'atividade': d.activity,
+            'status': d.status,
+            'prioridade': d.priority,
+            'grupo': groups.get(d.work_group_id, '—'),
+            'vencimento': str(d.due_date) if d.due_date else None,
+        }
+
+    return jsonify({
+        'usuario': user.full_name or user.username,
+        'data_hoje': str(date.today()),
+        'totais': {
+            'ativas': len(active),
+            'atrasadas': len(overdue),
+            'para_hoje': len(today_d),
+            'aguardando_aprovacao': len(pending_appr),
+        },
+        'atrasadas': [fmt(d) for d in overdue],
+        'para_hoje': [fmt(d) for d in today_d],
+        'aguardando_aprovacao': [fmt(d) for d in pending_appr],
+    }), 200
+
+
+@app.route('/api/agent/demands', methods=['GET'])
+def agent_demands():
+    """Lista completa de demandas ativas para agentes de IA.
+    Parâmetros opcionais: ?grupo=NOME&status=STATUS&prioridade=ALTA&local=TEXTO"""
+    token_str = request.args.get('token') or (request.headers.get('Authorization', '').replace('Bearer ', '').strip())
+    user, workspace_id = get_agent_user(token_str)
+    if not user:
+        return jsonify({'error': 'Token inválido'}), 401
+
+    terminal = [s.key for s in ws_filter(StatusConfig, user.id, workspace_id, {'is_completed': True}).all()]
+    demands  = ws_filter(Demand, user.id, workspace_id).filter(~Demand.status.in_(terminal)).all()
+    groups   = {g.id: g.name for g in WorkGroup.query.filter(
+        db.or_(WorkGroup.workspace_id == workspace_id,
+               db.and_(WorkGroup.workspace_id == None, WorkGroup.user_id == user.id))
+    ).all()}
+
+    # Filtros opcionais
+    grupo_q   = (request.args.get('grupo')      or '').lower()
+    status_q  = (request.args.get('status')     or '').lower()
+    prior_q   = (request.args.get('prioridade') or '').lower()
+    local_q   = (request.args.get('local')      or '').lower()
+
+    result = []
+    for d in demands:
+        nome_grupo = groups.get(d.work_group_id, '')
+        if grupo_q  and grupo_q  not in nome_grupo.lower(): continue
+        if status_q and status_q not in d.status.lower():   continue
+        if prior_q  and prior_q  not in (d.priority or '').lower(): continue
+        if local_q  and local_q  not in (d.location or '').lower(): continue
+        result.append({
+            'id': d.id,
+            'local': d.location,
+            'atividade': d.activity,
+            'contexto': d.context,
+            'status': d.status,
+            'prioridade': d.priority,
+            'grupo': nome_grupo,
+            'vencimento': str(d.due_date) if d.due_date else None,
+            'atrasada': bool(d.due_date and str(d.due_date) < str(date.today())),
+        })
+
+    return jsonify({'total': len(result), 'demandas': result}), 200
+
+
+@app.route('/api/agent/history', methods=['GET'])
+def agent_history():
+    """Histórico de demandas concluídas recentes para agentes de IA.
+    Parâmetro opcional: ?dias=30 (padrão: 30 dias)"""
+    token_str = request.args.get('token') or (request.headers.get('Authorization', '').replace('Bearer ', '').strip())
+    user, workspace_id = get_agent_user(token_str)
+    if not user:
+        return jsonify({'error': 'Token inválido'}), 401
+
+    days   = min(int(request.args.get('dias', 30)), 90)
+    cutoff = date.today() - __import__('datetime').timedelta(days=days)
+    records = ws_filter(DemandHistory, user.id, workspace_id).filter(
+        DemandHistory.status_change_date >= cutoff
+    ).order_by(DemandHistory.timestamp.desc()).limit(100).all()
+
+    return jsonify({'periodo_dias': days, 'total': len(records), 'concluidas': [
+        {'local': h.location, 'atividade': h.activity, 'status': h.status,
+         'data': str(h.status_change_date), 'aprovada': h.action_type == 'approved'}
+        for h in records
+    ]}), 200
+
+
+# ── Gerenciamento de tokens pelo usuário ──────────────────────────────────────
+@app.route('/api/agent/tokens', methods=['GET'])
+@jwt_required()
+def list_agent_tokens():
+    user_id = int(get_jwt_identity())
+    tokens = AgentToken.query.filter_by(user_id=user_id).order_by(AgentToken.created_at.desc()).all()
+    return jsonify([t.to_dict() for t in tokens]), 200
+
+
+@app.route('/api/agent/tokens', methods=['POST'])
+@jwt_required()
+def create_agent_token():
+    user_id = int(get_jwt_identity())
+    data = request.get_json()
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'Dê um nome para identificar seu agente'}), 400
+    if AgentToken.query.filter_by(user_id=user_id).count() >= 10:
+        return jsonify({'error': 'Limite de 10 tokens por conta'}), 400
+    token = AgentToken(user_id=user_id, name=name, token=secrets.token_urlsafe(40))
+    db.session.add(token)
+    db.session.commit()
+    return jsonify(token.to_dict()), 201
+
+
+@app.route('/api/agent/tokens/<int:tok_id>', methods=['DELETE'])
+@jwt_required()
+def delete_agent_token(tok_id):
+    user_id = int(get_jwt_identity())
+    tok = AgentToken.query.filter_by(id=tok_id, user_id=user_id).first_or_404()
+    db.session.delete(tok)
+    db.session.commit()
+    return jsonify({'message': 'Token revogado'}), 200
 
 # ============= ROTAS DE BACKUP =============
 @app.route('/api/export', methods=['GET'])
