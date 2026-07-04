@@ -7167,17 +7167,20 @@
                 checkMaintenanceBanner();
             }
             if (tab === 'settings') {
-                loadStatusAndPriorityConfigLists();
-                renderThemeGrid();
-                refreshPushStatus();
-                loadTeamMembers();
-                loadInviteKeys();
-                loadAgentTokens();
-                applyRoleBasedUI();
-                // Popular nome atual do workspace no campo de edição
-                const nameInput = document.getElementById('workspaceNameInput');
-                if (nameInput && currentWorkspace && currentWorkspace.name && !nameInput.value) {
-                    nameInput.value = currentWorkspace.name;
+                try {
+                    loadStatusAndPriorityConfigLists();
+                    renderThemeGrid();
+                    refreshPushStatus();
+                    loadTeamMembers();
+                    loadInviteKeys();
+                    loadAgentTokens();
+                    applyRoleBasedUI();
+                    const nameInput = document.getElementById('workspaceNameInput');
+                    if (nameInput && currentWorkspace && currentWorkspace.name && !nameInput.value) {
+                        nameInput.value = currentWorkspace.name;
+                    }
+                } catch(e) {
+                    console.error('[settings] Erro ao carregar:', e);
                 }
             }
             if (tab === 'calendar') {
