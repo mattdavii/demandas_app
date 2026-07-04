@@ -1861,6 +1861,15 @@ def get_notes():
     notes = Note.query.filter_by(user_id=user_id).order_by(Note.updated_at.desc()).all()
     return jsonify([n.to_dict() for n in notes]), 200
 
+
+@app.route('/api/notes/<int:note_id>', methods=['GET'])
+@jwt_required()
+def get_note(note_id):
+    """Retorna uma nota específica (usada para restaurar gadgets fixados)"""
+    user_id = int(get_jwt_identity())
+    note = Note.query.filter_by(id=note_id, user_id=user_id).first_or_404()
+    return jsonify(note.to_dict()), 200
+
 @app.route('/api/notes', methods=['POST'])
 @jwt_required()
 def create_note():
@@ -2229,11 +2238,17 @@ def get_whatsapp_text():
 @app.route('/api/activity-feed', methods=['GET'])
 @jwt_required()
 def get_activity_feed():
-    """Feed de atividades recentes do workspace: quem moveu o quê pra qual status e quando.
-    Usa demand_history como fonte — user_id é quem fez a mudança, assigned_to_user_id é o responsável."""
+    """Feed de atividades recentes do workspace."""
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
     limit = min(int(request.args.get('limit', 50)), 200)
+
+    # Garante a coluna action_type (pode não existir em deploys anteriores)
+    try:
+        db.session.execute(text("ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS action_type VARCHAR(30)"))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
     history = ws_filter(DemandHistory, user_id, workspace_id)         .order_by(DemandHistory.timestamp.desc())         .limit(limit).all()
 
