@@ -7124,14 +7124,24 @@
             }
         });
 
-        function switchTab(tab) {
+        function switchTab(tab, sourceEl) {
             document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
             document.querySelectorAll('.sidebar-link[data-tab]').forEach(el => el.classList.remove('active'));
-            document.getElementById('tab-' + tab).classList.add('active');
-            const clicked = event.target.closest('.sidebar-link');
+            const tabEl = document.getElementById('tab-' + tab);
+            if (tabEl) tabEl.classList.add('active');
+            // Marca o link ativo — usa sourceEl se passado, senão tenta event global
+            const clicked = sourceEl || (typeof event !== 'undefined' && event && event.target
+                ? event.target.closest('.sidebar-link')
+                : null);
             if (clicked) clicked.classList.add('active');
+            // Fallback: marca pelo data-tab
+            if (!clicked) {
+                const link = document.querySelector(`.sidebar-link[data-tab="${tab}"]`);
+                if (link) link.classList.add('active');
+            }
             closeSidebarMobile();
-            document.querySelector('.content-inner').scrollTop = 0;
+            const contentInner = document.querySelector('.content-inner');
+            if (contentInner) contentInner.scrollTop = 0;
 
             if (tab === 'demands') {
                 const kanbanEl = document.getElementById('demandsList');
