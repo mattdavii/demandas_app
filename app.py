@@ -921,23 +921,11 @@ def verify_access_key():
         db.session.add(WorkspaceMember(workspace_id=access_key.workspace_id, user_id=user.id, role='member'))
         db.session.commit()
     else:
-        # Chave pessoal: cria um workspace novo e independente, com o conjunto
-        # padrão de status/prioridade e os grupos iniciais, como sempre foi.
+        # Chave pessoal: cria um workspace novo e independente com
+        # status/prioridade padrão. Grupos ficam em branco — o usuário
+        # cria os próprios conforme sua necessidade.
         workspace = create_personal_workspace(user)
         seed_default_status_and_priority(user.id, workspace.id)
-
-        default_groups = [
-            {'name': 'BACKOFFICE', 'emoji': '👨🏻‍💻', 'order': 1},
-            {'name': 'ATENDIMENTOS', 'emoji': '👨🏼‍🔧', 'order': 2}
-        ]
-        for group_data in default_groups:
-            db.session.add(WorkGroup(
-                user_id=user.id,
-                workspace_id=workspace.id,
-                name=group_data['name'],
-                emoji=group_data['emoji'],
-                order=group_data['order']
-            ))
         db.session.commit()
 
     if app.config['MAIL_USERNAME']:
