@@ -4472,6 +4472,7 @@
         let _historyCacheData = null;
         let _historyCacheTime = 0;
         let _historyFetchPromise = null;
+        let _historyFetchStart = 0;
         const _HISTORY_CACHE_TTL = 120000; // 2 minutos
 
         async function getHistory(forceRefresh = false) {
@@ -4479,9 +4480,13 @@
             if (!forceRefresh && _historyCacheData && (now - _historyCacheTime) < _HISTORY_CACHE_TTL) {
                 return _historyCacheData;
             }
-            // Se já há um fetch em andamento, espera ele em vez de disparar outro
-            if (_historyFetchPromise) return _historyFetchPromise;
+            // Se já há um fetch em andamento há menos de 20s, espera ele
+            // Se passou de 20s, considera travado e inicia novo
+            if (_historyFetchPromise && (now - _historyFetchStart) < 20000) {
+                return _historyFetchPromise;
+            }
 
+            _historyFetchStart = Date.now();
             _historyFetchPromise = (async () => {
                 const response = await fetchWithRetry(`${API_URL}/history`, {
                     headers: { 'Authorization': `Bearer ${token}` }
