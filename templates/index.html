@@ -2329,7 +2329,7 @@
 
     <script>
         const API_URL = '/api';
-        let token = localStorage.getItem('token');
+        let token = sessionStorage.getItem('token');
         let currentUser = null;
         let currentWorkspaceRole = null; // 'admin' | 'member'
         let currentWorkspace = null; // { id, name, logoUrl }
@@ -2563,14 +2563,14 @@
 
         function getSyncQueue() {
             try {
-                return JSON.parse(localStorage.getItem('syncQueue') || '[]');
+                return JSON.parse(sessionStorage.getItem('syncQueue') || '[]');
             } catch (e) {
                 return [];
             }
         }
 
         function setSyncQueue(queue) {
-            localStorage.setItem('syncQueue', JSON.stringify(queue));
+            sessionStorage.setItem('syncQueue', JSON.stringify(queue));
             updateSyncIndicator();
         }
 
@@ -2738,7 +2738,7 @@
                 if (response.ok) {
                     token = data.access_token;
                     currentUser = data.user;
-                    localStorage.setItem('token', token);
+                    sessionStorage.setItem('token', token);
                     showApp();
                 } else {
                     showAlert('loginAlert', data.error || 'Erro ao fazer login', 'danger');
@@ -2826,8 +2826,8 @@
         function doLogout() {
             token = null;
             currentUser = null;
-            localStorage.removeItem('token');
-            localStorage.removeItem('cache_user');
+            sessionStorage.removeItem('token');
+            sessionStorage.removeItem('cache_user');
             document.getElementById('authContainer').style.display = 'flex';
             document.getElementById('appContainer').classList.remove('show');
             document.getElementById('accessKeyContainer').style.display = 'none';
@@ -2845,19 +2845,19 @@
 
                 if (response.ok) {
                     currentUser = await response.json();
-                    localStorage.setItem('cache_user', JSON.stringify(currentUser));
+                    sessionStorage.setItem('cache_user', JSON.stringify(currentUser));
                     isOnline = true;
                 } else if (response.status === 401) {
                     // sessão de fato inválida/expirada
                     token = null;
-                    localStorage.removeItem('token');
+                    sessionStorage.removeItem('token');
                     return;
                 } else {
                     throw new Error('Resposta não-OK: ' + response.status);
                 }
             } catch (e) {
                 console.error('Erro ao verificar sessão, tentando modo offline:', e);
-                const cachedUser = localStorage.getItem('cache_user');
+                const cachedUser = sessionStorage.getItem('cache_user');
                 if (cachedUser) {
                     currentUser = JSON.parse(cachedUser);
                     userFromCache = true;
@@ -2909,7 +2909,7 @@
 
                 if (response.ok) {
                     currentUser.accessVerified = true;
-                    localStorage.setItem('cache_user', JSON.stringify(currentUser));
+                    sessionStorage.setItem('cache_user', JSON.stringify(currentUser));
                     document.getElementById('accessKeyContainer').style.display = 'none';
                     await enterApp();
                 } else {
@@ -2969,11 +2969,11 @@
 
                     if (init.statusConfigs && init.statusConfigs.length > 0) {
                         currentStatusConfigs = init.statusConfigs;
-                        localStorage.setItem('cache_statusConfigs', JSON.stringify(currentStatusConfigs));
+                        sessionStorage.setItem('cache_statusConfigs', JSON.stringify(currentStatusConfigs));
                     }
                     if (init.priorityConfigs && init.priorityConfigs.length > 0) {
                         currentPriorityConfigs = init.priorityConfigs;
-                        localStorage.setItem('cache_priorityConfigs', JSON.stringify(currentPriorityConfigs));
+                        sessionStorage.setItem('cache_priorityConfigs', JSON.stringify(currentPriorityConfigs));
                     }
 
                     rebuildStatusAndPriorityStructures();
@@ -2987,7 +2987,7 @@
                 if (demandsResp.ok) {
                     currentDemands = await demandsResp.json();
                     window._demandsLoadTime = Date.now();
-                    localStorage.setItem('cache_demands', JSON.stringify(currentDemands));
+                    sessionStorage.setItem('cache_demands', JSON.stringify(currentDemands));
 
                     // Calcular contagens por grupo no frontend (sem query extra no backend)
                     const terminalKeys = new Set((currentStatusConfigs || []).filter(s => s.isCompleted).map(s => s.key));
@@ -3003,7 +3003,7 @@
                     }
                 } else {
                     // Demands falhou: tenta localStorage como fallback imediato
-                    const cached = localStorage.getItem('cache_demands');
+                    const cached = sessionStorage.getItem('cache_demands');
                     if (cached) { currentDemands = JSON.parse(cached); }
                 }
 
@@ -3133,12 +3133,12 @@
 
                 if (!response.ok) throw new Error('Resposta não-OK: ' + response.status);
                 currentGroups = await response.json();
-                localStorage.setItem('cache_groups', JSON.stringify(currentGroups));
+                sessionStorage.setItem('cache_groups', JSON.stringify(currentGroups));
                 renderGroups();
                 updateGroupSelect();
             } catch (e) {
                 console.error('Erro ao carregar grupos, tentando cache local:', e);
-                const cached = localStorage.getItem('cache_groups');
+                const cached = sessionStorage.getItem('cache_groups');
                 if (cached) {
                     currentGroups = JSON.parse(cached);
                     renderGroups();
@@ -3724,12 +3724,12 @@
                 if (!response.ok) throw new Error('Resposta não-OK: ' + response.status);
                 currentDemands = await response.json();
                 window._demandsLoadTime = Date.now();
-                localStorage.setItem('cache_demands', JSON.stringify(currentDemands));
+                sessionStorage.setItem('cache_demands', JSON.stringify(currentDemands));
                 renderDemands();
                 updateSummary();
             } catch (e) {
                 console.error('Erro ao carregar demandas, tentando cache local:', e);
-                const cached = localStorage.getItem('cache_demands');
+                const cached = sessionStorage.getItem('cache_demands');
                 if (cached) {
                     currentDemands = JSON.parse(cached);
                     renderDemands();
@@ -3773,13 +3773,13 @@
                     currentPriorityConfigs = await priorityRes.json();
                 }
 
-                localStorage.setItem('cache_statusConfigs', JSON.stringify(currentStatusConfigs));
-                localStorage.setItem('cache_priorityConfigs', JSON.stringify(currentPriorityConfigs));
+                sessionStorage.setItem('cache_statusConfigs', JSON.stringify(currentStatusConfigs));
+                sessionStorage.setItem('cache_priorityConfigs', JSON.stringify(currentPriorityConfigs));
             } catch (e) {
                 console.error('Erro ao carregar status/prioridade, tentando cache local:', e);
                 try {
-                    currentStatusConfigs = JSON.parse(localStorage.getItem('cache_statusConfigs') || '[]');
-                    currentPriorityConfigs = JSON.parse(localStorage.getItem('cache_priorityConfigs') || '[]');
+                    currentStatusConfigs = JSON.parse(sessionStorage.getItem('cache_statusConfigs') || '[]');
+                    currentPriorityConfigs = JSON.parse(sessionStorage.getItem('cache_priorityConfigs') || '[]');
                 } catch (e2) {
                     currentStatusConfigs = [];
                     currentPriorityConfigs = [];
@@ -4456,7 +4456,7 @@
                     checklist: demandChecklist,
                     _pendingSync: true
                 });
-                localStorage.setItem('cache_demands', JSON.stringify(currentDemands));
+                sessionStorage.setItem('cache_demands', JSON.stringify(currentDemands));
                 renderDemands();
                 updateSummary();
 
@@ -4501,7 +4501,7 @@
                     currentDemands[idx]._pendingSync = true;
                     currentDemands[idx]._pendingComplete = true;
                 }
-                localStorage.setItem('cache_demands', JSON.stringify(currentDemands));
+                sessionStorage.setItem('cache_demands', JSON.stringify(currentDemands));
                 renderDemands();
                 closeDemandDetailModal();
 
@@ -4630,7 +4630,7 @@
                     if (statusChanged) currentDemands[idx].status = newStatus;
                     currentDemands[idx]._pendingSync = true;
                 }
-                localStorage.setItem('cache_demands', JSON.stringify(currentDemands));
+                sessionStorage.setItem('cache_demands', JSON.stringify(currentDemands));
                 renderDemands();
                 updateSummary();
 
