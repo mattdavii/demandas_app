@@ -2907,10 +2907,12 @@
                 }
 
                 initOk = true;
+                diagLog(`init OK — demands:${currentDemands.length} groups:${currentGroups?.length} statuses:${currentStatusConfigs.length}`);
                 renderDemands();
                 updateSummary();
             } catch (e) {
                 console.warn('/api/init ou /api/demands falhou, usando fallback:', e);
+                diagLog(`enterApp catch: ${e.message}`, true);
             }
 
             // Fallback: chamadas individuais se /api/init ou /api/demands falhar
@@ -7125,6 +7127,7 @@
         });
 
         function switchTab(tab, sourceEl) {
+            diagLog(`switchTab(${tab})`);
             document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
             document.querySelectorAll('.sidebar-link[data-tab]').forEach(el => el.classList.remove('active'));
             const tabEl = document.getElementById('tab-' + tab);
@@ -7205,13 +7208,29 @@
 
         function showAlert(id, message, type) {
             const alertEl = document.getElementById(id);
-            if (!alertEl) return; // elemento não existe — ignora silenciosamente
+            if (!alertEl) return;
             alertEl.textContent = message;
             alertEl.className = `alert show alert-${type}`;
-            setTimeout(() => {
-                alertEl.classList.remove('show');
-            }, 4000);
+            setTimeout(() => { alertEl.classList.remove('show'); }, 4000);
         }
+
+        // ── DIAGNÓSTICO TEMPORÁRIO ──────────────────────────────────────────
+        // Mostra log verde no rodapé. Remover após resolver o problema.
+        function diagLog(msg, isErr) {
+            let d = document.getElementById('_diag');
+            if (!d) {
+                d = document.createElement('div');
+                d.id = '_diag';
+                d.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:99999;background:#080808;font-size:9px;padding:2px 8px;max-height:100px;overflow-y:auto;border-top:1px solid #333;font-family:monospace;';
+                document.body.appendChild(d);
+            }
+            const t = new Date().toTimeString().slice(0,8);
+            const color = isErr ? '#ff5b5b' : '#3ddc84';
+            d.innerHTML += `<div style="color:${color}">[${t}] ${msg}</div>`;
+            d.scrollTop = d.scrollHeight;
+        }
+        window.onerror = (msg, src, line) => diagLog(`ERR: ${msg} (${src}:${line})`, true);
+        window.addEventListener('unhandledrejection', e => diagLog(`PROMISE: ${e.reason}`, true));
 
         async function downloadBackup() {
             try {
