@@ -241,6 +241,31 @@ class AgentToken(db.Model):
             'lastUsed': self.last_used.isoformat() if self.last_used else None,
         }
 
+
+class AppLog(db.Model):
+    """Log de erros e eventos do frontend, enviados pelos clientes em tempo real."""
+    __tablename__ = 'app_logs'
+    id         = db.Column(db.Integer, primary_key=True)
+    created_at = db.Column(db.DateTime, default=datetime.now, index=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    username   = db.Column(db.String(80), nullable=True)   # snapshot para não perder se user for deletado
+    level      = db.Column(db.String(10), nullable=False, default='error')  # error | warn | info
+    category   = db.Column(db.String(50), nullable=True)   # js_error | api_error | init | etc.
+    message    = db.Column(db.Text, nullable=False)
+    details    = db.Column(db.Text, nullable=True)          # JSON extra (stack trace, etc.)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'createdAt': self.created_at.isoformat() if self.created_at else None,
+            'userId': self.user_id,
+            'username': self.username,
+            'level': self.level,
+            'category': self.category,
+            'message': self.message,
+            'details': self.details,
+        }
+
 class WorkGroup(db.Model):
     __tablename__ = 'work_groups'
     
@@ -585,6 +610,14 @@ def ping():
             db.session.commit()
         except Exception:
             db.session.rollback()
+    # Limpeza de logs antigos (>7 dias)
+    try:
+        from datetime import timedelta
+        cutoff = datetime.now() - timedelta(days=7)
+        AppLog.query.filter(AppLog.created_at < cutoff).delete()
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
     return 'pong', 200
 
 @app.route('/api/init')
@@ -2923,6 +2956,84 @@ def delete_agent_token(tok_id):
     db.session.delete(tok)
     db.session.commit()
     return jsonify({'message': 'Token revogado'}), 200
+
+
+# ============= LOG DO SISTEMA =============
+@app.route('/api/log', methods=['POST'])
+@jwt_required()
+def post_log():
+    """Recebe entradas de log do frontend. Rate limit simples: max 20 por minuto por usuário."""
+    user_id = int(get_jwt_identity())
+    data = request.get_json() or {}
+
+    level    = (data.get('level') or 'error')[:10]
+    category = (data.get('category') or '')[:50]
+    message  = (data.get('message') or '')[:2000]
+    details  = data.get('details')
+    if details and not isinstance(details, str):
+        details = json.dumps(details)[:4000]
+
+    if not message:
+        return jsonify({'ok': True}), 200
+
+    # Rate limit: não salvar mais de 20 logs por minuto por usuário
+    from datetime import timedelta
+    cutoff = datetime.now() - timedelta(minutes=1)
+    recent = AppLog.query.filter(
+        AppLog.user_id == user_id,
+        AppLog.created_at >= cutoff
+    ).count()
+    if recent >= 20:
+        return jsonify({'ok': True, 'skipped': True}), 200
+
+    user = User.query.get(user_id)
+    entry = AppLog(
+        user_id=user_id,
+        username=user.full_name or user.username if user else str(user_id),
+        level=level,
+        category=category,
+        message=message,
+        details=details
+    )
+    db.session.add(entry)
+    db.session.commit()
+    return jsonify({'ok': True}), 201
+
+
+@app.route('/api/admin/logs', methods=['GET'])
+@jwt_required()
+def admin_get_logs():
+    """Retorna logs do sistema. Restrito ao admin da plataforma."""
+    user_id = int(get_jwt_identity())
+    requester = User.query.get(user_id)
+    if not requester or not requester.is_admin:
+        return jsonify({'error': 'Acesso restrito'}), 403
+
+    limit     = min(int(request.args.get('limit', 200)), 500)
+    level_f   = request.args.get('level')
+    user_f    = request.args.get('username')
+    category_f = request.args.get('category')
+
+    q = AppLog.query.order_by(AppLog.created_at.desc())
+    if level_f:    q = q.filter(AppLog.level == level_f)
+    if user_f:     q = q.filter(AppLog.username.ilike(f'%{user_f}%'))
+    if category_f: q = q.filter(AppLog.category == category_f)
+
+    logs = q.limit(limit).all()
+    return jsonify([l.to_dict() for l in logs]), 200
+
+
+@app.route('/api/admin/logs', methods=['DELETE'])
+@jwt_required()
+def admin_clear_logs():
+    """Limpa todos os logs. Restrito ao admin da plataforma."""
+    user_id = int(get_jwt_identity())
+    requester = User.query.get(user_id)
+    if not requester or not requester.is_admin:
+        return jsonify({'error': 'Acesso restrito'}), 403
+    deleted = AppLog.query.delete()
+    db.session.commit()
+    return jsonify({'deleted': deleted}), 200
 
 # ============= ROTAS DE BACKUP =============
 @app.route('/api/export', methods=['GET'])
