@@ -2034,6 +2034,49 @@
 
     <!-- MODAL DETALHE DO CARD DE HISTÓRICO (Locais) -->
     <!-- MODAL REJEIÇÃO DE DEMANDA -->
+    <!-- ONBOARDING — aparece na primeira vez que o usuário acessa -->
+    <div id="onboardingModal" class="modal" style="z-index:6000;">
+        <div class="modal-content" style="max-width:520px; padding:0; overflow:hidden;">
+
+            <!-- Step 1: Boas-vindas + escolha de perfil -->
+            <div id="onboardStep1">
+                <div style="background:linear-gradient(135deg, #1a1200, #0a0a0a); padding:2rem 2rem 1.5rem; text-align:center; border-bottom:1px solid var(--border);">
+                    <div style="font-size:2.5rem; margin-bottom:0.5rem;">🎛️</div>
+                    <h2 style="color:var(--amber-bright); margin:0 0 0.4rem; font-size:1.3rem;">Bem-vindo ao Painel de Bordo</h2>
+                    <p style="color:var(--text-secondary); font-size:0.82rem; margin:0;">Vamos configurar seu espaço em 1 minuto.</p>
+                </div>
+                <div style="padding:1.5rem;">
+                    <p style="font-size:0.85rem; color:var(--text-secondary); text-align:center; margin-bottom:1.25rem;">Como você pretende usar a plataforma?</p>
+                    <div style="display:flex; flex-direction:column; gap:0.75rem;">
+                        <button onclick="onboardSelectProfile('personal')" style="background:var(--panel-raised); border:1px solid var(--border); border-radius:var(--radius); padding:1rem 1.25rem; text-align:left; cursor:pointer; transition:border-color 0.15s;" onmouseover="this.style.borderColor='var(--amber)'" onmouseout="this.style.borderColor='var(--border)'">
+                            <div style="font-size:1.1rem; margin-bottom:0.3rem;">👤 Uso Pessoal</div>
+                            <div style="font-size:0.75rem; color:var(--text-secondary);">Estudante, freelancer, profissional autônomo — organizo meu próprio dia a dia</div>
+                        </button>
+                        <button onclick="onboardSelectProfile('team')" style="background:var(--panel-raised); border:1px solid var(--border); border-radius:var(--radius); padding:1rem 1.25rem; text-align:left; cursor:pointer; transition:border-color 0.15s;" onmouseover="this.style.borderColor='var(--amber)'" onmouseout="this.style.borderColor='var(--border)'">
+                            <div style="font-size:1.1rem; margin-bottom:0.3rem;">🏢 Empresa / Time</div>
+                            <div style="font-size:0.75rem; color:var(--text-secondary);">Gerencio equipes, setores ou projetos com outras pessoas</div>
+                        </button>
+                    </div>
+                    <p style="font-size:0.68rem; color:var(--text-secondary); text-align:center; margin-top:1.25rem; opacity:0.6;">Você pode mudar isso depois em Configurações.</p>
+                </div>
+            </div>
+
+            <!-- Step 2: Guia de primeiros passos -->
+            <div id="onboardStep2" style="display:none;">
+                <div style="padding:1.5rem 2rem; border-bottom:1px solid var(--border);">
+                    <div id="onboardStepTitle" style="font-size:1.1rem; font-weight:700; color:var(--amber-bright); margin-bottom:0.25rem;"></div>
+                    <div id="onboardStepSub" style="font-size:0.78rem; color:var(--text-secondary);"></div>
+                </div>
+                <div id="onboardStepContent" style="padding:1.5rem;"></div>
+                <div style="padding:0 1.5rem 1.5rem; display:flex; gap:0.75rem;">
+                    <button class="btn btn-secondary" style="flex:1;" onclick="showOnboardStep(1)">← Voltar</button>
+                    <button class="btn btn-primary" style="flex:2;" onclick="finishOnboarding()">Entendido, começar! 🚀</button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
     <div id="rejectDemandModal" class="modal">
         <div class="modal-content" style="max-width:500px;">
             <span class="close-modal" onclick="closeRejectModal()">&times;</span>
@@ -2993,6 +3036,7 @@
             restorePinnedGadgets();
             document.getElementById('exportReportDate').value = toLocalISODate(new Date());
             updateSyncIndicator();
+            checkOnboarding();
         }
 
         // Mostra/esconde tudo marcado como .admin-only-section conforme o papel da conta no workspace.
@@ -4162,8 +4206,100 @@
             }
         }
 
+        // ============= ONBOARDING =============
+        const ONBOARD_KEY = 'pb_onboard_v1';
+
+        function checkOnboarding() {
+            if (localStorage.getItem(ONBOARD_KEY)) return; // já viu
+            // Mostra após 800ms para o app terminar de carregar
+            setTimeout(() => {
+                document.getElementById('onboardingModal').classList.add('show');
+            }, 800);
+        }
+
+        function showOnboardStep(step) {
+            document.getElementById('onboardStep1').style.display = step === 1 ? '' : 'none';
+            document.getElementById('onboardStep2').style.display = step === 2 ? '' : 'none';
+        }
+
+        function onboardSelectProfile(profile) {
+            const title = document.getElementById('onboardStepTitle');
+            const sub = document.getElementById('onboardStepSub');
+            const content = document.getElementById('onboardStepContent');
+
+            if (profile === 'personal') {
+                title.textContent = '👤 Tudo pronto para uso pessoal!';
+                sub.textContent = 'Veja como funciona em 4 passos simples';
+                content.innerHTML = `
+                    <div style="display:flex; flex-direction:column; gap:0.75rem;">
+                        ${[
+                            ['📁 Grupos', 'Organize suas tarefas em áreas. Ex: Faculdade, Trabalho, Casa, Projetos Pessoais. Crie em Configurações → Grupos.'],
+                            ['📋 Demandas', 'Cada tarefa é uma demanda. Defina local, atividade, prioridade e prazo.'],
+                            ['🔄 Status', 'Mova as demandas entre Agendado → Em Andamento → Concluído.'],
+                            ['📅 Hoje', 'A aba Hoje mostra o que está atrasado e o que tem pra fazer no dia. Comece por ela!'],
+                        ].map(([t, d]) => `
+                            <div style="display:flex; gap:0.75rem; align-items:flex-start;">
+                                <span style="font-size:1.1rem; flex-shrink:0;">${t.split(' ')[0]}</span>
+                                <div>
+                                    <div style="font-size:0.82rem; font-weight:600; color:var(--text-primary);">${t.slice(3)}</div>
+                                    <div style="font-size:0.74rem; color:var(--text-secondary);">${d}</div>
+                                </div>
+                            </div>`).join('')}
+                    </div>`;
+            } else {
+                title.textContent = '🏢 Configurando para equipe!';
+                sub.textContent = 'Estruture seus times e comece a colaborar';
+                content.innerHTML = `
+                    <div style="display:flex; flex-direction:column; gap:0.75rem;">
+                        ${[
+                            ['📁 Grupos = Setores', 'Crie grupos para cada setor da empresa. Ex: Comercial, TI, Operações. Em Configurações → Grupos.'],
+                            ['👥 Convide sua equipe', 'Em Configurações → Links de Convite, gere um link e compartilhe com seu time.'],
+                            ['📋 Atribua demandas', 'Ao criar uma demanda, escolha o responsável. Cada membro vê o que é dele em "Minhas Demandas".'],
+                            ['📊 Visão do time', 'Use o toggle "Time Todo" em Hoje e Dashboard para ver a situação de todos os membros.'],
+                        ].map(([t, d]) => `
+                            <div style="display:flex; gap:0.75rem; align-items:flex-start;">
+                                <span style="font-size:1.1rem; flex-shrink:0;">${t.split(' ')[0]}</span>
+                                <div>
+                                    <div style="font-size:0.82rem; font-weight:600; color:var(--text-primary);">${t.slice(2).trim()}</div>
+                                    <div style="font-size:0.74rem; color:var(--text-secondary);">${d}</div>
+                                </div>
+                            </div>`).join('')}
+                    </div>`;
+            }
+            showOnboardStep(2);
+        }
+
+        function finishOnboarding() {
+            localStorage.setItem(ONBOARD_KEY, '1');
+            document.getElementById('onboardingModal').classList.remove('show');
+            // Se não há grupos, abre Configurações automaticamente
+            if (!currentGroups || currentGroups.length === 0) {
+                setTimeout(() => switchTab('settings'), 400);
+            }
+        }
+
         function renderDemands() {
             const container = document.getElementById('demandsList');
+
+            // Empty state: sem grupos criados ainda
+            if (!currentGroups || currentGroups.length === 0) {
+                container.innerHTML = `
+                    <div style="text-align:center; padding:3rem 1.5rem; max-width:380px; margin:0 auto;">
+                        <div style="font-size:3rem; margin-bottom:1rem;">📂</div>
+                        <h3 style="color:var(--text-primary); margin-bottom:0.5rem;">Nenhum grupo criado ainda</h3>
+                        <p style="color:var(--text-secondary); font-size:0.82rem; margin-bottom:1.5rem;">
+                            Grupos organizam suas demandas em áreas. Crie o primeiro para começar —
+                            pode ser um projeto, setor, área de estudo ou qualquer categoria que faça sentido pra você.
+                        </p>
+                        <button class="btn btn-primary" onclick="switchTab('settings')" style="width:auto; padding:0.6rem 1.5rem;">
+                            ➕ Criar meu primeiro grupo
+                        </button>
+                        <div style="margin-top:1rem; font-size:0.72rem; color:var(--text-secondary); opacity:0.7;">
+                            Vá em Configurações → Grupos
+                        </div>
+                    </div>`;
+                return;
+            }
 
             // Recalcula e sincroniza contagens dos grupos com o estado atual das demandas
             if (currentGroups && currentDemands) {
