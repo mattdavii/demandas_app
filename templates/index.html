@@ -1365,6 +1365,7 @@
                 <button class="sidebar-link" data-tab="activity" onclick="switchTab('activity')">📣 <span>Atividade</span></button>
                 <button class="sidebar-link" id="adminKeysTabBtn" data-tab="adminkeys" style="display:none;" onclick="switchTab('adminkeys')">🔑 <span>Chaves</span></button>
                 <button class="sidebar-link" id="adminUsersTabBtn" data-tab="adminusers" style="display:none;" onclick="switchTab('adminusers')">👥 <span>Usuários</span></button>
+                <button class="sidebar-link" id="adminLogTabBtn" data-tab="adminlog" style="display:none;" onclick="switchTab('adminlog')">🪲 <span>Log</span></button>
                 <button class="sidebar-link" data-tab="settings" onclick="switchTab('settings')">⚙️ <span>Configurações</span></button>
             </div>
 
@@ -1648,7 +1649,20 @@
             </div>
         </div>
 
-        <!-- MODAL EDITAR USUÁRIO (ADMIN) -->
+        <!-- TAB: LOG (ADMIN ONLY) -->
+        <div id="tab-adminlog" class="tab-content">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:0.5rem;">
+                <h3 style="margin:0;">🪲 Log do Sistema</h3>
+                <div style="display:flex; gap:0.5rem;">
+                    <button class="btn btn-sm" style="width:auto; background:transparent; border:1px solid var(--border); color:var(--text-secondary);" onclick="clearAppLog()">🗑️ Limpar</button>
+                    <button class="btn btn-sm" style="width:auto; background:transparent; border:1px solid var(--border); color:var(--text-secondary);" onclick="copyAppLog()">📋 Copiar</button>
+                </div>
+            </div>
+            <div style="font-size:0.7rem; color:var(--text-secondary); margin-bottom:0.75rem;">
+                Registra erros JS, chamadas de API e eventos internos desta sessão. Não persiste ao recarregar.
+            </div>
+            <div id="appLogContainer" style="background:#080808; border-radius:var(--radius); border:1px solid var(--border); padding:0.75rem; height:calc(100vh - 220px); overflow-y:auto; font-family:monospace; font-size:0.72rem; line-height:1.6;"></div>
+        </div>
         <div id="editUserModal" class="modal">
             <div class="modal-content" style="max-width:460px;">
                 <span class="close-modal" onclick="closeEditUserModal()">&times;</span>
@@ -2847,9 +2861,11 @@
             if (currentUser.isAdmin) {
                 document.getElementById('adminKeysTabBtn').style.display = '';
                 document.getElementById('adminUsersTabBtn').style.display = '';
+                document.getElementById('adminLogTabBtn').style.display = '';
             } else {
                 document.getElementById('adminKeysTabBtn').style.display = 'none';
                 document.getElementById('adminUsersTabBtn').style.display = 'none';
+                document.getElementById('adminLogTabBtn').style.display = 'none';
             }
 
             applyRoleBasedUI();
@@ -2913,12 +2929,12 @@
                 }
 
                 initOk = true;
-                diagLog(`init OK — demands:${currentDemands.length} groups:${currentGroups?.length} statuses:${currentStatusConfigs.length}`);
+                appLog(`Init OK — demands:${currentDemands.length} groups:${currentGroups?.length} statuses:${currentStatusConfigs.length}`, 'success');
                 renderDemands();
                 updateSummary();
             } catch (e) {
                 console.warn('/api/init ou /api/demands falhou, usando fallback:', e);
-                diagLog(`enterApp catch: ${e.message}`, true);
+                appLog(`enterApp catch: ${e.message}`, 'error');
             }
 
             // Fallback: chamadas individuais se /api/init ou /api/demands falhar
@@ -7133,7 +7149,7 @@
         });
 
         function switchTab(tab, sourceEl) {
-            diagLog(`switchTab(${tab})`);
+            if (currentUser?.isAdmin) appLog(`switchTab(${tab})`);
             document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
             document.querySelectorAll('.sidebar-link[data-tab]').forEach(el => el.classList.remove('active'));
             const tabEl = document.getElementById('tab-' + tab);
@@ -7194,6 +7210,9 @@
                 loadAdminUsers();
                 checkMaintenanceBanner();
             }
+            if (tab === 'adminlog') {
+                renderAppLog();
+            }
             if (tab === 'settings') {
                 loadStatusAndPriorityConfigLists();
                 renderThemeGrid();
@@ -7220,23 +7239,6 @@
             setTimeout(() => { alertEl.classList.remove('show'); }, 4000);
         }
 
-        // ── DIAGNÓSTICO TEMPORÁRIO ──────────────────────────────────────────
-        // Mostra log verde no rodapé. Remover após resolver o problema.
-        function diagLog(msg, isErr) {
-            let d = document.getElementById('_diag');
-            if (!d) {
-                d = document.createElement('div');
-                d.id = '_diag';
-                d.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:99999;background:#080808;font-size:9px;padding:2px 8px;max-height:100px;overflow-y:auto;border-top:1px solid #333;font-family:monospace;';
-                document.body.appendChild(d);
-            }
-            const t = new Date().toTimeString().slice(0,8);
-            const color = isErr ? '#ff5b5b' : '#3ddc84';
-            d.innerHTML += `<div style="color:${color}">[${t}] ${msg}</div>`;
-            d.scrollTop = d.scrollHeight;
-        }
-        window.onerror = (msg, src, line) => diagLog(`ERR: ${msg} (${src}:${line})`, true);
-        window.addEventListener('unhandledrejection', e => diagLog(`PROMISE: ${e.reason}`, true));
 
         async function downloadBackup() {
             try {
@@ -7605,6 +7607,73 @@
                 }
             } catch (e) { alert('Erro de conexão'); }
         }
+
+        // ============= SISTEMA DE LOG (ADMIN) =============
+        const _appLog = [];
+        const _LOG_MAX = 500;
+
+        function appLog(msg, type = 'info') {
+            const now = new Date();
+            const ts = now.toTimeString().slice(0, 8);
+            const entry = { ts, msg: String(msg), type, ms: now.getTime() };
+            _appLog.push(entry);
+            if (_appLog.length > _LOG_MAX) _appLog.shift();
+            // Se a aba de log está aberta, atualiza em tempo real
+            const container = document.getElementById('appLogContainer');
+            if (container && document.getElementById('tab-adminlog')?.classList.contains('active')) {
+                appendLogLine(container, entry);
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+
+        function appendLogLine(container, entry) {
+            const color = { error: '#ff5b5b', warn: '#f5a623', success: '#3ddc84', api: '#60a5fa', info: '#9aa0a7' }[entry.type] || '#9aa0a7';
+            const prefix = { error: 'ERR ', warn: 'WRN ', success: 'OK  ', api: 'API ', info: '    ' }[entry.type] || '    ';
+            const div = document.createElement('div');
+            div.style.color = color;
+            div.style.whiteSpace = 'pre-wrap';
+            div.style.wordBreak = 'break-all';
+            div.textContent = `[${entry.ts}] ${prefix}${entry.msg}`;
+            container.appendChild(div);
+        }
+
+        function renderAppLog() {
+            const container = document.getElementById('appLogContainer');
+            if (!container) return;
+            container.innerHTML = '';
+            if (_appLog.length === 0) {
+                container.innerHTML = '<span style="color:var(--text-secondary);">Nenhum evento registrado nesta sessão.</span>';
+                return;
+            }
+            _appLog.forEach(entry => appendLogLine(container, entry));
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function clearAppLog() {
+            _appLog.length = 0;
+            renderAppLog();
+        }
+
+        function copyAppLog() {
+            const text = _appLog.map(e => `[${e.ts}] ${e.type.padEnd(5)} ${e.msg}`).join('\n');
+            navigator.clipboard?.writeText(text).then(() =>
+                showAlert('', '', '') // just copy silently
+            ).catch(() => {});
+            // Fallback
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+        }
+
+        // Captura erros globais JS
+        window.addEventListener('error', e => appLog(`${e.message} (${e.filename?.split('/').pop()}:${e.lineno})`, 'error'));
+        window.addEventListener('unhandledrejection', e => appLog(`Promise: ${e.reason}`, 'error'));
+
+        // Interceptar fetchWithRetry para logar chamadas de API
+        const _origFetchWithRetry = null; // será substituído após definição
 
         async function loadAdminUsers() {
             const container = document.getElementById('adminUsersList');
