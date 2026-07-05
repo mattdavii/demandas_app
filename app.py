@@ -198,6 +198,30 @@ def create_personal_workspace(user):
     return workspace
 
 
+
+class DemandType(db.Model):
+    """Tipos de demanda configuráveis por workspace (ex: Corretiva, Preventiva, Projeto)."""
+    __tablename__ = 'demand_types'
+    id           = db.Column(db.Integer, primary_key=True)
+    user_id      = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    workspace_id = db.Column(db.Integer, db.ForeignKey('workspaces.id'), nullable=True)
+    name         = db.Column(db.String(60), nullable=False)
+    emoji        = db.Column(db.String(10), default='📌')
+    color        = db.Column(db.String(20), default='#9aa0a7')
+    order        = db.Column(db.Integer, default=0)
+
+    __table_args__ = (db.UniqueConstraint('workspace_id', 'name', name='_workspace_type_uc'),)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'emoji': self.emoji or '📌',
+            'color': self.color or '#9aa0a7',
+            'order': self.order or 0,
+            'workspaceId': self.workspace_id,
+        }
+
 class MaintenanceNotice(db.Model):
     """Aviso de manutenção programada. Apenas um registro ativo por vez."""
     __tablename__ = 'maintenance_notices'
@@ -318,6 +342,7 @@ class Demand(db.Model):
     checklist = db.Column(db.JSON, default=list)  # [{"text": "...", "checked": false}, ...]
     is_recurring = db.Column(db.Boolean, default=False)
     recurrence_type = db.Column(db.String(20), nullable=True)
+    type_id = db.Column(db.Integer, db.ForeignKey('demand_types.id', ondelete='SET NULL'), nullable=True)
     previous_status = db.Column(db.String(50), nullable=True)
     rejection_note = db.Column(db.Text, nullable=True)  # 'weekly'|'biweekly'|'monthly'|'quarterly'|'semiannual'|'yearly'
     
@@ -345,6 +370,7 @@ class Demand(db.Model):
             'checklist': self.checklist or [],
             'isRecurring': self.is_recurring or False,
             'recurrenceType': self.recurrence_type,
+            'typeId': self.type_id,
             'previousStatus': self.previous_status,
             'rejectionNote': self.rejection_note
         }
@@ -364,7 +390,8 @@ class DemandHistory(db.Model):
     status = db.Column(db.String(20), nullable=False)
     priority = db.Column(db.String(20), nullable=True)  # snapshot da prioridade no momento da mudança (registros novos)
     checklist = db.Column(db.JSON, nullable=True)  # snapshot do checklist da demanda ao concluir
-    action_type = db.Column(db.String(30), nullable=True)  # 'approved' | null (mudança normal)
+    action_type = db.Column(db.String(30), nullable=True)
+    type_id = db.Column(db.Integer, nullable=True)  # snapshot do tipo ao concluir  # 'approved' | null (mudança normal)
     status_change_date = db.Column(db.Date, nullable=False)
     created_date = db.Column(db.Date, nullable=True)
     timestamp = db.Column(db.DateTime, default=datetime.now)
@@ -384,7 +411,8 @@ class DemandHistory(db.Model):
             'statusChangeDate': self.status_change_date.isoformat() if self.status_change_date else None,
             'createdDate': self.created_date.isoformat() if self.created_date else None,
             'checklist': self.checklist,  # None = dado não disponível (registro antigo); [] = sem checklist
-            'actionType': self.action_type
+            'actionType': self.action_type,
+            'typeId': self.type_id
         }
 
 class Note(db.Model):
@@ -657,8 +685,11 @@ def get_init_data():
             'email': u.email if u else None,
         }
 
+    demand_types = ws_filter(DemandType, user_id, workspace_id).order_by(DemandType.order.asc()).all()
+
     return jsonify({
         'user': user.to_dict() if user else None,
+        'demandTypes': [t.to_dict() for t in demand_types],
         'workspace': {'id': workspace.id, 'name': workspace.name, 'logoUrl': workspace.logo_url} if workspace else None,
         'members': [member_dict(m) for m in members_raw],
         'statusConfigs': [s.to_dict() for s in status_configs],
@@ -3022,6 +3053,72 @@ def admin_clear_logs():
     deleted = AppLog.query.delete()
     db.session.commit()
     return jsonify({'deleted': deleted}), 200
+
+
+# ============= TIPOS DE DEMANDA =============
+@app.route('/api/demand-types', methods=['GET'])
+@jwt_required()
+def get_demand_types():
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    types = ws_filter(DemandType, user_id, workspace_id).order_by(DemandType.order.asc()).all()
+    return jsonify([t.to_dict() for t in types]), 200
+
+
+@app.route('/api/demand-types', methods=['POST'])
+@jwt_required()
+def create_demand_type():
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    data = request.get_json()
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'Nome obrigatório'}), 400
+    if DemandType.query.filter(
+        db.or_(DemandType.workspace_id == workspace_id,
+               db.and_(DemandType.workspace_id == None, DemandType.user_id == user_id)),
+        DemandType.name == name
+    ).first():
+        return jsonify({'error': 'Já existe um tipo com este nome'}), 409
+    max_order = db.session.query(db.func.max(DemandType.order)).filter(
+        db.or_(DemandType.workspace_id == workspace_id,
+               db.and_(DemandType.workspace_id == None, DemandType.user_id == user_id))
+    ).scalar() or 0
+    dt = DemandType(user_id=user_id, workspace_id=workspace_id,
+                    name=name, emoji=data.get('emoji','📌'),
+                    color=data.get('color','#9aa0a7'), order=max_order+1)
+    db.session.add(dt)
+    db.session.commit()
+    return jsonify(dt.to_dict()), 201
+
+
+@app.route('/api/demand-types/<int:type_id>', methods=['PUT'])
+@jwt_required()
+def update_demand_type(type_id):
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    dt = ws_filter(DemandType, user_id, workspace_id, {'id': type_id}).first_or_404()
+    data = request.get_json()
+    if 'name' in data and data['name'].strip():
+        dt.name = data['name'].strip()
+    if 'emoji' in data:  dt.emoji = data['emoji'] or '📌'
+    if 'color' in data:  dt.color = data['color'] or '#9aa0a7'
+    if 'order' in data:  dt.order = int(data['order'])
+    db.session.commit()
+    return jsonify(dt.to_dict()), 200
+
+
+@app.route('/api/demand-types/<int:type_id>', methods=['DELETE'])
+@jwt_required()
+def delete_demand_type(type_id):
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    dt = ws_filter(DemandType, user_id, workspace_id, {'id': type_id}).first_or_404()
+    # Desvincula demandas que usavam este tipo
+    Demand.query.filter_by(type_id=type_id).update({'type_id': None})
+    db.session.delete(dt)
+    db.session.commit()
+    return jsonify({'message': 'Tipo removido'}), 200
 
 # ============= ROTAS DE BACKUP =============
 @app.route('/api/export', methods=['GET'])
