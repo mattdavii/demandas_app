@@ -1653,15 +1653,51 @@
         <div id="tab-adminlog" class="tab-content">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:0.5rem;">
                 <h3 style="margin:0;">🪲 Log do Sistema</h3>
-                <div style="display:flex; gap:0.5rem;">
-                    <button class="btn btn-sm" style="width:auto; background:transparent; border:1px solid var(--border); color:var(--text-secondary);" onclick="clearAppLog()">🗑️ Limpar</button>
-                    <button class="btn btn-sm" style="width:auto; background:transparent; border:1px solid var(--border); color:var(--text-secondary);" onclick="copyAppLog()">📋 Copiar</button>
+                <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                    <button class="btn btn-sm" style="width:auto;" onclick="loadServerLogs()">🔄 Atualizar</button>
+                    <button class="btn btn-sm" style="width:auto; background:transparent; border:1px solid var(--border); color:var(--text-secondary);" onclick="copyAppLog()">📋 Copiar sessão</button>
+                    <button class="btn btn-sm" style="width:auto; background:transparent; border:1px solid var(--led-red); color:var(--led-red);" onclick="clearServerLogs()">🗑️ Limpar servidor</button>
                 </div>
             </div>
-            <div style="font-size:0.7rem; color:var(--text-secondary); margin-bottom:0.75rem;">
-                Registra erros JS, chamadas de API e eventos internos desta sessão. Não persiste ao recarregar.
+
+            <!-- Filtros -->
+            <div style="display:flex; gap:0.5rem; margin-bottom:0.75rem; flex-wrap:wrap;">
+                <select id="logFilterLevel" onchange="loadServerLogs()" style="flex:1; min-width:100px; font-size:0.78rem;">
+                    <option value="">Todos os níveis</option>
+                    <option value="error">🔴 Erros</option>
+                    <option value="warn">🟡 Warnings</option>
+                    <option value="info">⚪ Info</option>
+                </select>
+                <input type="text" id="logFilterUser" placeholder="Filtrar por usuário..." onchange="loadServerLogs()"
+                    style="flex:1; min-width:120px; font-size:0.78rem;">
+                <select id="logFilterCategory" onchange="loadServerLogs()" style="flex:1; min-width:100px; font-size:0.78rem;">
+                    <option value="">Todas categorias</option>
+                    <option value="js_error">JS Error</option>
+                    <option value="promise">Promise</option>
+                    <option value="error">Outros erros</option>
+                </select>
             </div>
-            <div id="appLogContainer" style="background:#080808; border-radius:var(--radius); border:1px solid var(--border); padding:0.75rem; height:calc(100vh - 220px); overflow-y:auto; font-family:monospace; font-size:0.72rem; line-height:1.6;"></div>
+
+            <!-- Tabs: Servidor vs Sessão atual -->
+            <div style="display:flex; gap:0; margin-bottom:0; border-bottom:1px solid var(--border);">
+                <button id="logTabServer" onclick="showLogView('server')"
+                    style="padding:0.4rem 1rem; background:var(--amber); color:#1a1305; border:none; border-radius:4px 4px 0 0; font-size:0.75rem; font-weight:700; cursor:pointer;">
+                    🌐 Servidor (todos)
+                </button>
+                <button id="logTabSession" onclick="showLogView('session')"
+                    style="padding:0.4rem 1rem; background:transparent; color:var(--text-secondary); border:none; border-radius:4px 4px 0 0; font-size:0.75rem; cursor:pointer;">
+                    💻 Esta sessão
+                </button>
+            </div>
+
+            <div id="logServerView">
+                <div id="serverLogContainer" style="background:#080808; border-radius:0 var(--radius) var(--radius) var(--radius); border:1px solid var(--border); border-top:none; padding:0.75rem; height:calc(100vh - 300px); overflow-y:auto; font-family:monospace; font-size:0.72rem; line-height:1.7;">
+                    <span style="color:var(--text-secondary);">Clique em Atualizar para carregar os logs do servidor.</span>
+                </div>
+            </div>
+            <div id="logSessionView" style="display:none;">
+                <div id="appLogContainer" style="background:#080808; border-radius:0 var(--radius) var(--radius) var(--radius); border:1px solid var(--border); border-top:none; padding:0.75rem; height:calc(100vh - 300px); overflow-y:auto; font-family:monospace; font-size:0.72rem; line-height:1.7;"></div>
+            </div>
         </div>
         <div id="editUserModal" class="modal">
             <div class="modal-content" style="max-width:460px;">
@@ -7211,7 +7247,8 @@
                 checkMaintenanceBanner();
             }
             if (tab === 'adminlog') {
-                renderAppLog();
+                loadServerLogs();
+                showLogView('server');
             }
             if (tab === 'settings') {
                 loadStatusAndPriorityConfigLists();
@@ -7610,30 +7647,40 @@
 
         // ============= SISTEMA DE LOG (ADMIN) =============
         const _appLog = [];
-        const _LOG_MAX = 500;
+        const _LOG_MAX = 300;
 
-        function appLog(msg, type = 'info') {
+        function appLog(msg, type = 'info', category = '', details = null) {
             const now = new Date();
             const ts = now.toTimeString().slice(0, 8);
-            const entry = { ts, msg: String(msg), type, ms: now.getTime() };
+            const entry = { ts, msg: String(msg), type, category };
             _appLog.push(entry);
             if (_appLog.length > _LOG_MAX) _appLog.shift();
-            // Se a aba de log está aberta, atualiza em tempo real
+
+            // Atualiza aba de log em tempo real se estiver aberta
             const container = document.getElementById('appLogContainer');
             if (container && document.getElementById('tab-adminlog')?.classList.contains('active')) {
                 appendLogLine(container, entry);
                 container.scrollTop = container.scrollHeight;
+            }
+
+            // Envia erros e warnings ao servidor (assíncrono, fire-and-forget)
+            if ((type === 'error' || type === 'warn') && token) {
+                const body = { level: type, category: category || type, message: String(msg).slice(0, 500), details };
+                fetch(`${API_URL}/log`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify(body)
+                }).catch(() => {});
             }
         }
 
         function appendLogLine(container, entry) {
             const color = { error: '#ff5b5b', warn: '#f5a623', success: '#3ddc84', api: '#60a5fa', info: '#9aa0a7' }[entry.type] || '#9aa0a7';
             const prefix = { error: 'ERR ', warn: 'WRN ', success: 'OK  ', api: 'API ', info: '    ' }[entry.type] || '    ';
+            const cat = entry.category ? `[${entry.category}] ` : '';
             const div = document.createElement('div');
-            div.style.color = color;
-            div.style.whiteSpace = 'pre-wrap';
-            div.style.wordBreak = 'break-all';
-            div.textContent = `[${entry.ts}] ${prefix}${entry.msg}`;
+            div.style.cssText = `color:${color}; white-space:pre-wrap; word-break:break-all; padding:1px 0;`;
+            div.textContent = `[${entry.ts}] ${prefix}${cat}${entry.msg}`;
             container.appendChild(div);
         }
 
@@ -7649,31 +7696,97 @@
             container.scrollTop = container.scrollHeight;
         }
 
-        function clearAppLog() {
-            _appLog.length = 0;
-            renderAppLog();
-        }
+        function clearAppLog() { _appLog.length = 0; renderAppLog(); }
 
         function copyAppLog() {
-            const text = _appLog.map(e => `[${e.ts}] ${e.type.padEnd(5)} ${e.msg}`).join('\n');
-            navigator.clipboard?.writeText(text).then(() =>
-                showAlert('', '', '') // just copy silently
-            ).catch(() => {});
-            // Fallback
-            const ta = document.createElement('textarea');
-            ta.value = text;
-            document.body.appendChild(ta);
-            ta.select();
-            document.execCommand('copy');
-            document.body.removeChild(ta);
+            const text = _appLog.map(e => `[${e.ts}] ${e.type.padEnd(5)} ${e.category ? '['+e.category+'] ' : ''}${e.msg}`).join('\n');
+            navigator.clipboard?.writeText(text).catch(() => {});
         }
 
-        // Captura erros globais JS
-        window.addEventListener('error', e => appLog(`${e.message} (${e.filename?.split('/').pop()}:${e.lineno})`, 'error'));
-        window.addEventListener('unhandledrejection', e => appLog(`Promise: ${e.reason}`, 'error'));
+        function showLogView(view) {
+            const server = document.getElementById('logServerView');
+            const session = document.getElementById('logSessionView');
+            const btnS = document.getElementById('logTabServer');
+            const btnSe = document.getElementById('logTabSession');
+            if (view === 'server') {
+                server.style.display = '';   session.style.display = 'none';
+                btnS.style.background = 'var(--amber)'; btnS.style.color = '#1a1305'; btnS.style.fontWeight = '700';
+                btnSe.style.background = 'transparent'; btnSe.style.color = 'var(--text-secondary)'; btnSe.style.fontWeight = '';
+            } else {
+                server.style.display = 'none'; session.style.display = '';
+                btnSe.style.background = 'var(--amber)'; btnSe.style.color = '#1a1305'; btnSe.style.fontWeight = '700';
+                btnS.style.background = 'transparent'; btnS.style.color = 'var(--text-secondary)'; btnS.style.fontWeight = '';
+                renderAppLog();
+            }
+        }
 
-        // Interceptar fetchWithRetry para logar chamadas de API
-        const _origFetchWithRetry = null; // será substituído após definição
+        async function loadServerLogs() {
+            const container = document.getElementById('serverLogContainer');
+            if (!container) return;
+            container.innerHTML = '<span style="color:var(--text-secondary);">Carregando...</span>';
+
+            const level    = document.getElementById('logFilterLevel')?.value || '';
+            const username = document.getElementById('logFilterUser')?.value || '';
+            const category = document.getElementById('logFilterCategory')?.value || '';
+            const params   = new URLSearchParams();
+            if (level)    params.append('level', level);
+            if (username) params.append('username', username);
+            if (category) params.append('category', category);
+            params.append('limit', '200');
+
+            try {
+                const resp = await fetchWithRetry(`${API_URL}/admin/logs?${params}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (!resp.ok) { container.innerHTML = '<span style="color:var(--led-red);">Erro ao carregar logs</span>'; return; }
+                const logs = await resp.json();
+                container.innerHTML = '';
+                if (!logs.length) {
+                    container.innerHTML = '<span style="color:var(--text-secondary);">Nenhum log encontrado.</span>';
+                    return;
+                }
+                logs.forEach(log => {
+                    const color = { error: '#ff5b5b', warn: '#f5a623', info: '#9aa0a7', success: '#3ddc84' }[log.level] || '#9aa0a7';
+                    const dt = log.createdAt ? new Date(log.createdAt + (log.createdAt.endsWith('Z') ? '' : 'Z'))
+                        .toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '';
+                    const div = document.createElement('div');
+                    div.style.cssText = `color:${color}; padding:2px 0; border-bottom:1px solid #111; white-space:pre-wrap; word-break:break-all;`;
+                    div.textContent = `[${dt}] ${log.level.padEnd(5)} @${log.username||'?'} [${log.category||'-'}] ${log.message}`;
+                    if (log.details) {
+                        const det = document.createElement('div');
+                        det.style.cssText = 'color:#555; font-size:0.65rem; padding-left:1rem; white-space:pre-wrap;';
+                        det.textContent = log.details;
+                        div.appendChild(det);
+                    }
+                    container.appendChild(div);
+                });
+                container.scrollTop = container.scrollHeight;
+            } catch (e) {
+                container.innerHTML = `<span style="color:var(--led-red);">Erro: ${e.message}</span>`;
+            }
+        }
+
+        async function clearServerLogs() {
+            if (!confirm('Limpar TODOS os logs do servidor? Esta ação não pode ser desfeita.')) return;
+            try {
+                const resp = await fetchWithRetry(`${API_URL}/admin/logs`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (resp.ok) {
+                    const d = await resp.json();
+                    loadServerLogs();
+                }
+            } catch (e) { alert('Erro ao limpar logs'); }
+        }
+
+        // Captura erros globais JS automaticamente
+        window.addEventListener('error', e =>
+            appLog(`${e.message} (${e.filename?.split('/').pop() || ''}:${e.lineno})`, 'error', 'js_error', e.stack?.slice(0, 500))
+        );
+        window.addEventListener('unhandledrejection', e =>
+            appLog(`Promise rejeitada: ${e.reason}`, 'error', 'promise')
+        );
 
         async function loadAdminUsers() {
             const container = document.getElementById('adminUsersList');
