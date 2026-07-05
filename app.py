@@ -2189,7 +2189,7 @@ def get_history():
     if activity:
         query = query.filter(DemandHistory.activity.ilike(f'%{activity}%'))
 
-    history = query.order_by(DemandHistory.status_change_date.desc()).all()
+    history = query.order_by(DemandHistory.status_change_date.desc()).limit(500).all()
     return jsonify([h.to_dict() for h in history]), 200
 
 # ============= ROTAS DE RELATÓRIO =============
