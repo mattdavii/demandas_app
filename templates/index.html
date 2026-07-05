@@ -1699,6 +1699,32 @@
                 <div id="appLogContainer" style="background:#080808; border-radius:0 var(--radius) var(--radius) var(--radius); border:1px solid var(--border); border-top:none; padding:0.75rem; height:calc(100vh - 300px); overflow-y:auto; font-family:monospace; font-size:0.72rem; line-height:1.7;"></div>
             </div>
         </div>
+        <!-- MODAL: TIPO DE DEMANDA -->
+        <div id="demandTypeModal" class="modal">
+            <div class="modal-content" style="max-width:420px;">
+                <span class="close-modal" onclick="closeDemandTypeModal()">&times;</span>
+                <div class="modal-header" id="demandTypeModalTitle">🏷️ Novo Tipo de Demanda</div>
+                <input type="hidden" id="demandTypeId">
+                <div style="display:flex; gap:0.75rem; align-items:flex-end; margin-bottom:0.75rem;">
+                    <div class="form-group" style="flex:0 0 auto; margin-bottom:0;">
+                        <label>Emoji</label>
+                        <input type="text" id="demandTypeEmoji" value="📌" maxlength="4" style="width:58px; text-align:center; font-size:1.2rem;">
+                    </div>
+                    <div class="form-group" style="flex:1; margin-bottom:0;">
+                        <label>Nome <span style="color:var(--led-red);">*</span></label>
+                        <input type="text" id="demandTypeName" placeholder="Ex: Corretiva, Projeto, Bug...">
+                    </div>
+                    <div class="form-group" style="flex:0 0 auto; margin-bottom:0;">
+                        <label>Cor</label>
+                        <input type="color" id="demandTypeColor" value="#9aa0a7" style="width:44px; height:38px; padding:2px; border-radius:4px; cursor:pointer;">
+                    </div>
+                </div>
+                <div id="demandTypeAlert" class="alert"></div>
+                <button class="btn btn-primary" onclick="saveDemandType()">Salvar</button>
+                <button class="btn btn-secondary" onclick="closeDemandTypeModal()" style="margin-left:0.5rem;">Cancelar</button>
+            </div>
+        </div>
+
         <div id="editUserModal" class="modal">
             <div class="modal-content" style="max-width:460px;">
                 <span class="close-modal" onclick="closeEditUserModal()">&times;</span>
@@ -1748,6 +1774,17 @@
                     <button class="btn btn-sm btn-primary" style="width:auto;" onclick="showNewPriorityModal()">➕ Nova Prioridade</button>
                 </div>
                 <div id="priorityConfigList" class="scrollable-list"></div>
+            </div>
+
+            <div class="card admin-only-section" style="margin-top: 1.5rem;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
+                    <h3 style="margin-bottom:0;">🏷️ Tipos de Demanda</h3>
+                    <button class="btn btn-sm btn-primary" style="width:auto;" onclick="showNewDemandTypeModal()">➕ Novo Tipo</button>
+                </div>
+                <p style="font-size:0.78rem; color:var(--text-secondary); margin-bottom:0.75rem;">
+                    Categorize suas demandas por tipo (ex: Corretiva, Preventiva, Projeto, Bug). Aparece no card e nos relatórios.
+                </p>
+                <div id="demandTypesList" class="scrollable-list"></div>
             </div>
 
             <div class="card" style="margin-top: 1.5rem;">
@@ -2204,6 +2241,12 @@
                 <select id="newPriority"></select>
             </div>
             <div class="form-group">
+                <label>Tipo de demanda <span style="color:var(--text-secondary); font-weight:400;">(opcional)</span></label>
+                <select id="newTypeId">
+                    <option value="">Sem tipo</option>
+                </select>
+            </div>
+            <div class="form-group">
                 <label>Status</label>
                 <select id="newStatus"></select>
             </div>
@@ -2263,6 +2306,12 @@
             <div class="form-group">
                 <label>Prioridade</label>
                 <select id="editDemandPriority"></select>
+            </div>
+            <div class="form-group">
+                <label>Tipo de demanda <span style="color:var(--text-secondary); font-weight:400;">(opcional)</span></label>
+                <select id="editDemandTypeId">
+                    <option value="">Sem tipo</option>
+                </select>
             </div>
             <div class="form-group">
                 <label>Status</label>
@@ -2966,6 +3015,11 @@
                         applyWorkspaceLogo();
                     }
                     if (init.members) currentTeamMembers = init.members;
+
+                    if (init.demandTypes) {
+                        currentDemandTypes = init.demandTypes;
+                        updateDemandTypeSelects();
+                    }
 
                     if (init.statusConfigs && init.statusConfigs.length > 0) {
                         currentStatusConfigs = init.statusConfigs;
@@ -4392,6 +4446,7 @@
             const due_date = document.getElementById('newDueDate').value;
             const reminder_at = document.getElementById('newReminderAt').value;
             const assigned_to_user_id = document.getElementById('newAssignedToUserId').value;
+            const type_id = document.getElementById('newTypeId')?.value || null;
 
             if (!work_group_id || !location || !activity) {
                 alert('Preencha os campos obrigatórios');
@@ -4418,6 +4473,7 @@
                         reminder_at: reminder_at || null,
                         status,
                         assigned_to_user_id: assigned_to_user_id ? parseInt(assigned_to_user_id) : null,
+                        type_id: type_id ? parseInt(type_id) : null,
                         is_recurring: !!recurrenceType,
                         recurrence_type: recurrenceType || null,
                         checklist: newDemandChecklistDraft.filter(item => item.text.trim() !== '')
@@ -4529,6 +4585,12 @@
             populatePriorityDropdown('editDemandPriority', { selectedValue: demand.priority });
             populateStatusDropdown('editDemandStatus', { includeCompleted: true, selectedValue: demand.status });
             populateAssigneeDropdown('editDemandAssignedToUserId', demand.assignedToUserId || '');
+            // Popular tipo de demanda
+            const typeEl = document.getElementById('editDemandTypeId');
+            if (typeEl) {
+                updateDemandTypeSelects();
+                typeEl.value = demand.typeId || '';
+            }
             document.getElementById('editDemandRecurrenceType').value = demand.recurrenceType || '';
             document.getElementById('editDemandDueDate').value = demand.dueDate || '';
             document.getElementById('editDemandReminderAt').value = demand.reminderAt ? demand.reminderAt.slice(0, 16) : '';
@@ -4568,6 +4630,7 @@
                         activity: document.getElementById('editDemandActivity').value,
                         context: document.getElementById('editDemandContext').value,
                         priority: document.getElementById('editDemandPriority').value,
+                        type_id: document.getElementById('editDemandTypeId')?.value ? parseInt(document.getElementById('editDemandTypeId').value) : null,
                         due_date: dueDate || null,
                         reminder_at: reminderAt || null,
                         assigned_to_user_id: assignedToUserId ? parseInt(assignedToUserId) : null,
@@ -7042,6 +7105,7 @@
             const approvalBadge = (currentStatusConfigs || []).find(s => s.key === d.status && s.isApproval)
                 ? `<span style="font-size:0.6rem; color:#b388ff; border:1px solid #b388ff; border-radius:3px; padding:1px 5px; white-space:nowrap;">⏳ Aprovação</span>`
                 : '';
+            const typeBadge = getDemandTypeBadge(d.typeId);
 
             return `
                 <div class="demand-card${d._pendingSync ? ' pending-sync' : ''}" style="margin-bottom: 0.75rem; border-left-color: ${finalBorderColor}; cursor: pointer;" onclick="showDemandDetailModal(${idArg})">
@@ -7053,6 +7117,7 @@
                         </div>
                         <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.4rem;">
                             ${getPriorityBadge(d.priority)}
+                            ${typeBadge}
                             ${recurringBadge}
                             ${approvalBadge}
                             ${assigneeAvatar}
@@ -7392,6 +7457,7 @@
                 refreshPushStatus();
                 loadTeamMembers();
                 loadInviteKeys();
+                loadDemandTypes();
                 loadAgentTokens();
                 applyRoleBasedUI();
                 const nameInput = document.getElementById('workspaceNameInput');
@@ -7923,6 +7989,116 @@
         window.addEventListener('unhandledrejection', e =>
             appLog(`Promise rejeitada: ${e.reason}`, 'error', 'promise')
         );
+
+        // ============= TIPOS DE DEMANDA =============
+        let currentDemandTypes = [];
+
+        function getDemandTypeBadge(typeId) {
+            if (!typeId || !currentDemandTypes.length) return '';
+            const t = currentDemandTypes.find(t => t.id === typeId);
+            if (!t) return '';
+            return `<span style="font-size:0.6rem; font-weight:700; padding:1px 6px; border-radius:3px; border:1px solid ${t.color}; color:${t.color}; white-space:nowrap;">${t.emoji} ${escapeHtml(t.name)}</span>`;
+        }
+
+        function updateDemandTypeSelects() {
+            const opts = '<option value="">Sem tipo</option>' +
+                currentDemandTypes.map(t => `<option value="${t.id}">${t.emoji} ${escapeHtml(t.name)}</option>`).join('');
+            ['newTypeId', 'editDemandTypeId'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) { const v = el.value; el.innerHTML = opts; if (v) el.value = v; }
+            });
+        }
+
+        async function loadDemandTypes() {
+            try {
+                const r = await fetchWithRetry(`${API_URL}/demand-types`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (r.ok) {
+                    currentDemandTypes = await r.json();
+                    updateDemandTypeSelects();
+                    renderDemandTypesList();
+                }
+            } catch (e) { console.error('Erro ao carregar tipos:', e); }
+        }
+
+        function renderDemandTypesList() {
+            const c = document.getElementById('demandTypesList');
+            if (!c) return;
+            if (!currentDemandTypes.length) {
+                c.innerHTML = '<p style="font-size:0.78rem; color:var(--text-secondary); padding:0.5rem 0;">Nenhum tipo criado. Clique em ➕ para adicionar.</p>';
+                return;
+            }
+            c.innerHTML = currentDemandTypes.map(t => `
+                <div style="display:flex; align-items:center; gap:0.75rem; padding:0.6rem 0; border-bottom:1px solid var(--border);">
+                    <span style="font-size:1.2rem;">${t.emoji}</span>
+                    <span style="flex:1; font-size:0.82rem; color:var(--text-primary);">${escapeHtml(t.name)}</span>
+                    <span style="width:14px; height:14px; border-radius:50%; background:${t.color}; flex-shrink:0;"></span>
+                    <button class="btn-edit btn-sm" onclick="editDemandType(${t.id})">✏️</button>
+                    <button class="btn-delete btn-sm" onclick="removeDemandType(${t.id}, '${escapeHtml(t.name)}')">🗑️</button>
+                </div>`).join('');
+        }
+
+        function showNewDemandTypeModal() {
+            document.getElementById('demandTypeId').value = '';
+            document.getElementById('demandTypeName').value = '';
+            document.getElementById('demandTypeEmoji').value = '📌';
+            document.getElementById('demandTypeColor').value = '#9aa0a7';
+            document.getElementById('demandTypeAlert').innerHTML = '';
+            document.getElementById('demandTypeModalTitle').textContent = '🏷️ Novo Tipo de Demanda';
+            document.getElementById('demandTypeModal').classList.add('show');
+        }
+
+        function editDemandType(id) {
+            const t = currentDemandTypes.find(t => t.id === id);
+            if (!t) return;
+            document.getElementById('demandTypeId').value = t.id;
+            document.getElementById('demandTypeName').value = t.name;
+            document.getElementById('demandTypeEmoji').value = t.emoji;
+            document.getElementById('demandTypeColor').value = t.color;
+            document.getElementById('demandTypeAlert').innerHTML = '';
+            document.getElementById('demandTypeModalTitle').textContent = '🏷️ Editar Tipo';
+            document.getElementById('demandTypeModal').classList.add('show');
+        }
+
+        function closeDemandTypeModal() {
+            document.getElementById('demandTypeModal').classList.remove('show');
+        }
+
+        async function saveDemandType() {
+            const id    = document.getElementById('demandTypeId').value;
+            const name  = document.getElementById('demandTypeName').value.trim();
+            const emoji = document.getElementById('demandTypeEmoji').value.trim() || '📌';
+            const color = document.getElementById('demandTypeColor').value;
+            if (!name) { showAlert('demandTypeAlert', 'Nome obrigatório', 'danger'); return; }
+            const isEdit = !!id;
+            const url    = isEdit ? `${API_URL}/demand-types/${id}` : `${API_URL}/demand-types`;
+            const method = isEdit ? 'PUT' : 'POST';
+            try {
+                const r = await fetchWithRetry(url, {
+                    method, headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ name, emoji, color })
+                }, 1);
+                if (r.ok) {
+                    closeDemandTypeModal();
+                    loadDemandTypes();
+                    renderDemands(); // atualiza badges nos cards
+                } else {
+                    const d = await r.json().catch(() => ({}));
+                    showAlert('demandTypeAlert', d.error || 'Erro ao salvar', 'danger');
+                }
+            } catch (e) { showAlert('demandTypeAlert', 'Erro de conexão', 'danger'); }
+        }
+
+        async function removeDemandType(id, name) {
+            if (!confirm(`Remover tipo "${name}"? As demandas com este tipo ficarão sem tipo.`)) return;
+            try {
+                const r = await fetchWithRetry(`${API_URL}/demand-types/${id}`, {
+                    method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (r.ok) { loadDemandTypes(); renderDemands(); }
+            } catch (e) { alert('Erro ao remover tipo'); }
+        }
 
         async function loadAdminUsers() {
             const container = document.getElementById('adminUsersList');
