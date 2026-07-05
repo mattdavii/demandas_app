@@ -1681,6 +1681,18 @@ def get_demands():
     """Listar demandas pendentes do workspace"""
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
+
+    # Garante coluna type_id (adicionada com os tipos de demanda)
+    for _col in [
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS type_id INTEGER",
+    ]:
+        try:
+            db.session.execute(text(_col))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
     terminal_keys = [s.key for s in ws_filter(StatusConfig, user_id, workspace_id, {'is_completed': True}).all()]
     query = ws_filter(Demand, user_id, workspace_id)
     if terminal_keys:
@@ -2221,6 +2233,18 @@ def get_history():
     location = request.args.get('location', '')
     activity = request.args.get('activity', '')
 
+    # Garante colunas novas que podem não existir ainda no banco
+    for _col in [
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS type_id INTEGER",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS action_type VARCHAR(30)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
+    ]:
+        try:
+            db.session.execute(text(_col))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
     # Inclui registros do workspace E registros ainda com workspace_id NULL mas
     # pertencentes ao user_id — esses são registros antigos que a migração ainda não
     # conseguiu popular (pode acontecer se o ALTER TABLE e o UPDATE rodaram em restarts
@@ -2316,12 +2340,16 @@ def get_activity_feed():
     workspace_id = get_user_workspace_id(user_id)
     limit = min(int(request.args.get('limit', 50)), 200)
 
-    # Garante a coluna action_type (pode não existir em deploys anteriores)
-    try:
-        db.session.execute(text("ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS action_type VARCHAR(30)"))
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
+    # Garante colunas novas que podem não existir ainda no banco
+    for _col in [
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS action_type VARCHAR(30)",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS type_id INTEGER",
+    ]:
+        try:
+            db.session.execute(text(_col))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
 
     history = ws_filter(DemandHistory, user_id, workspace_id)         .order_by(DemandHistory.timestamp.desc())         .limit(limit).all()
 
