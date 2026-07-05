@@ -1343,6 +1343,8 @@
 
     <div class="app-shell" id="appContainer">
 
+        <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebarMobile()"></div>
+
         <nav class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <div class="sidebar-brand">
@@ -2254,13 +2256,17 @@
         }
 
         function toggleSidebarMobile() {
-            document.getElementById('sidebar').classList.toggle('mobile-open');
-            document.getElementById('sidebarOverlay').classList.toggle('show');
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebarOverlay');
+            if (sidebar) sidebar.classList.toggle('mobile-open');
+            if (overlay) overlay.classList.toggle('show');
         }
 
         function closeSidebarMobile() {
-            document.getElementById('sidebar').classList.remove('mobile-open');
-            document.getElementById('sidebarOverlay').classList.remove('show');
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebarOverlay');
+            if (sidebar) sidebar.classList.remove('mobile-open');
+            if (overlay) overlay.classList.remove('show');
         }
 
         // Restaura o estado de colapso salvo (só importa no desktop; no mobile a sidebar
