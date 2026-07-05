@@ -2441,7 +2441,11 @@
             let lastError;
             for (let attempt = 0; attempt <= maxRetries; attempt++) {
                 try {
-                    const response = await fetch(url, options);
+                    // Timeout de 25s — evita ficar preso quando o Neon demora a responder
+                    const controller = new AbortController();
+                    const timeout = setTimeout(() => controller.abort(), 25000);
+                    const response = await fetch(url, { ...options, signal: controller.signal });
+                    clearTimeout(timeout);
                     if (response.status >= 500 && attempt < maxRetries) {
                         await sleep(Math.pow(2, attempt) * 1000);
                         continue;
