@@ -3113,6 +3113,28 @@ def cron_maintenance_notify():
 
 
 
+
+def ensure_agent_schema():
+    """Garante que todas as colunas novas existem antes de qualquer query ORM nos endpoints do agente.
+    Necessário porque o Neon/SQLAlchemy inclui TODAS as colunas do modelo no SELECT,
+    e colunas adicionadas em deploys recentes podem não existir ainda no banco."""
+    migrations = [
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS previous_status VARCHAR(50)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS rejection_note TEXT",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS type_id INTEGER",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS action_type VARCHAR(30)",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_approval BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE work_groups ADD COLUMN IF NOT EXISTS group_type VARCHAR(50)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP",
+    ]
+    for sql in migrations:
+        try:
+            db.session.execute(text(sql))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
 # ============= AGENTE IA (ACESSO EXTERNO VIA TOKEN) =============
 def get_agent_user(token_str):
     """Autentica um agente via token pessoal e retorna (user, workspace_id) ou None."""
@@ -3133,6 +3155,8 @@ def agent_summary():
     user, workspace_id = get_agent_user(token_str)
     if not user:
         return jsonify({'error': 'Token inválido ou expirado'}), 401
+
+    ensure_agent_schema()  # garante colunas novas antes de qualquer query ORM
 
     demands  = ws_filter(Demand, user.id, workspace_id).all()
     terminal = [s.key for s in ws_filter(StatusConfig, user.id, workspace_id, {'is_completed': True}).all()]
@@ -3182,6 +3206,8 @@ def agent_demands():
     if not user:
         return jsonify({'error': 'Token inválido'}), 401
 
+    ensure_agent_schema()  # garante colunas novas antes de qualquer query ORM
+
     terminal = [s.key for s in ws_filter(StatusConfig, user.id, workspace_id, {'is_completed': True}).all()]
     demands  = ws_filter(Demand, user.id, workspace_id).filter(~Demand.status.in_(terminal)).all()
 
@@ -3227,6 +3253,8 @@ def agent_history():
     user, workspace_id = get_agent_user(token_str)
     if not user:
         return jsonify({'error': 'Token inválido'}), 401
+
+    ensure_agent_schema()
 
     days   = min(int(request.args.get('dias', 30)), 90)
     cutoff = date.today() - __import__('datetime').timedelta(days=days)
