@@ -27,11 +27,11 @@ if DATABASE_URL.startswith('postgres://'):
 
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    'pool_pre_ping': True,
-    'pool_recycle': 240,
-    'pool_size': 1,
-    'max_overflow': 2,
-    'pool_timeout': 8,
+    'pool_pre_ping': True,    # reconecta automaticamente se conexão morreu
+    'pool_recycle': 240,      # recicla antes dos 300s que o Neon fecha ociosas
+    'pool_size': 4,           # 1 conexão por thread (4 threads no gthread)
+    'max_overflow': 2,        # margem extra em picos
+    'pool_timeout': 10,       # espera até 10s por conexão disponível
     'connect_args': {'connect_timeout': 8},
 }
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -2857,10 +2857,14 @@ def cron_maintenance_notify():
 
 
 
+_agent_schema_ok = False
+
 def ensure_agent_schema():
-    """Garante que todas as colunas novas existem antes de qualquer query ORM nos endpoints do agente.
-    Necessário porque o Neon/SQLAlchemy inclui TODAS as colunas do modelo no SELECT,
-    e colunas adicionadas em deploys recentes podem não existir ainda no banco."""
+    """Garante colunas novas nas tabelas usadas pelos endpoints do agente.
+    Roda apenas uma vez por startup do servidor (flag em memória)."""
+    global _agent_schema_ok
+    if _agent_schema_ok:
+        return
     migrations = [
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS previous_status VARCHAR(50)",
@@ -2877,6 +2881,7 @@ def ensure_agent_schema():
             db.session.commit()
         except Exception:
             db.session.rollback()
+    _agent_schema_ok = True
 
 # ============= AGENTE IA (ACESSO EXTERNO VIA TOKEN) =============
 def get_agent_user(token_str):
