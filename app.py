@@ -3134,16 +3134,6 @@ def agent_summary():
     if not user:
         return jsonify({'error': 'Token inválido ou expirado'}), 401
 
-    # Garante colunas novas que podem não existir no banco ainda
-    for _col in [
-        "ALTER TABLE work_groups ADD COLUMN IF NOT EXISTS group_type VARCHAR(50)",
-        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
-    ]:
-        try:
-            db.session.execute(text(_col)); db.session.commit()
-        except Exception:
-            db.session.rollback()
-
     demands  = ws_filter(Demand, user.id, workspace_id).all()
     terminal = [s.key for s in ws_filter(StatusConfig, user.id, workspace_id, {'is_completed': True}).all()]
     approval = [s.key for s in ws_filter(StatusConfig, user.id, workspace_id, {'is_approval': True}).all()]
@@ -3152,10 +3142,11 @@ def agent_summary():
     today_d  = [d for d in active if d.due_date and str(d.due_date) == str(date.today())]
     pending_appr = [d for d in active if d.status in approval]
 
-    groups   = {g.id: g.name for g in WorkGroup.query.filter(
-        db.or_(WorkGroup.workspace_id == workspace_id,
-               db.and_(WorkGroup.workspace_id == None, WorkGroup.user_id == user.id))
-    ).all()}
+    # SQL direto — evita falha se coluna nova (group_type) ainda não existe no banco
+    rows = db.session.execute(text(
+        "SELECT id, name FROM work_groups WHERE workspace_id = :ws OR (workspace_id IS NULL AND user_id = :uid)"
+    ), {'ws': workspace_id, 'uid': user.id}).fetchall()
+    groups = {r[0]: r[1] for r in rows}
 
     def fmt(d):
         return {
@@ -3191,22 +3182,14 @@ def agent_demands():
     if not user:
         return jsonify({'error': 'Token inválido'}), 401
 
-    # Garante colunas novas que podem não existir no banco ainda
-    for _col in [
-        "ALTER TABLE work_groups ADD COLUMN IF NOT EXISTS group_type VARCHAR(50)",
-        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
-    ]:
-        try:
-            db.session.execute(text(_col)); db.session.commit()
-        except Exception:
-            db.session.rollback()
-
     terminal = [s.key for s in ws_filter(StatusConfig, user.id, workspace_id, {'is_completed': True}).all()]
     demands  = ws_filter(Demand, user.id, workspace_id).filter(~Demand.status.in_(terminal)).all()
-    groups   = {g.id: g.name for g in WorkGroup.query.filter(
-        db.or_(WorkGroup.workspace_id == workspace_id,
-               db.and_(WorkGroup.workspace_id == None, WorkGroup.user_id == user.id))
-    ).all()}
+
+    # SQL direto — evita falha se coluna nova (group_type) ainda não existe no banco
+    rows = db.session.execute(text(
+        "SELECT id, name FROM work_groups WHERE workspace_id = :ws OR (workspace_id IS NULL AND user_id = :uid)"
+    ), {'ws': workspace_id, 'uid': user.id}).fetchall()
+    groups = {r[0]: r[1] for r in rows}
 
     # Filtros opcionais
     grupo_q   = (request.args.get('grupo')      or '').lower()
