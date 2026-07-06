@@ -617,181 +617,331 @@ def whiteboard():
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Whiteboard — Painel de Bordo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  :root {
-    --bg: #0d0d0d; --panel: #141414; --border: #222;
-    --amber: #f5a623; --amber-bright: #ffbc47;
-    --text: #e0e0e0; --text-secondary: #666;
-    --led-red: #ff5b5b; --led-green: #3ddc84; --led-blue: #60a5fa;
-    --radius: 8px;
-  }
-  body { background: var(--bg); color: var(--text); font-family: 'Courier New', monospace; min-height: 100vh; overflow: hidden; }
-  #header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 0.6rem 1.25rem; background: var(--panel);
-    border-bottom: 1px solid var(--amber); gap: 1rem; flex-wrap: wrap;
-  }
-  #header h1 { font-size: 0.9rem; color: var(--amber-bright); letter-spacing: 0.05em; }
-  .stats { display: flex; gap: 1rem; }
-  .stat { font-size: 0.72rem; padding: 2px 10px; border-radius: 12px; font-weight: 700; border: 1px solid; }
-  .stat.red { color: var(--led-red); border-color: var(--led-red); }
-  .stat.amber { color: var(--amber); border-color: var(--amber); }
-  .stat.blue { color: var(--led-blue); border-color: var(--led-blue); }
-  #ts { font-size: 0.65rem; color: var(--text-secondary); }
-  #refresh-btn { background: transparent; border: 1px solid var(--border); color: var(--text-secondary);
-    padding: 3px 10px; border-radius: 4px; cursor: pointer; font-size: 0.7rem; font-family: inherit; }
-  #refresh-btn:hover { border-color: var(--amber); color: var(--amber); }
-  #main { display: flex; height: calc(100vh - 46px); overflow: hidden; }
-  #board { flex: 1; padding: 1rem; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 1rem; align-content: flex-start; }
-  .group-col { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
-    min-width: 260px; max-width: 340px; flex: 1; display: flex; flex-direction: column; max-height: calc(100vh - 80px); }
-  .group-header { padding: 0.6rem 0.85rem; border-bottom: 1px solid var(--border);
-    display: flex; justify-content: space-between; align-items: center; }
-  .group-name { font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--amber-bright); }
-  .group-count { font-size: 0.65rem; background: var(--border); padding: 1px 8px; border-radius: 10px; color: var(--text-secondary); }
-  .group-cards { padding: 0.5rem; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 0.5rem; }
-  .card { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.6rem 0.75rem; border-left: 3px solid var(--border); }
-  .card.overdue { border-left-color: var(--led-red); }
-  .card.today { border-left-color: var(--amber); }
-  .card-loc { font-size: 0.65rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
-  .card-act { font-size: 0.78rem; color: var(--text); margin: 2px 0 4px; line-height: 1.3; }
-  .card-badges { display: flex; gap: 4px; flex-wrap: wrap; }
-  .badge { font-size: 0.6rem; padding: 1px 6px; border-radius: 3px; border: 1px solid; font-weight: 700; white-space: nowrap; }
-  .card-due { font-size: 0.6rem; margin-top: 4px; }
-  .card-due.late { color: var(--led-red); }
-  .card-due.soon { color: var(--amber); }
-  #sidebar { width: 240px; background: var(--panel); border-left: 1px solid var(--border); overflow-y: auto; padding: 0.75rem; flex-shrink: 0; }
-  #sidebar h2 { font-size: 0.72rem; color: var(--amber); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.75rem; }
-  .note-card { background: #1a1400; border: 1px solid var(--amber); border-radius: 6px; padding: 0.6rem 0.75rem; margin-bottom: 0.6rem; }
-  .note-title { font-size: 0.75rem; font-weight: 700; color: var(--amber-bright); margin-bottom: 4px; }
-  .note-body { font-size: 0.7rem; color: var(--text-secondary); line-height: 1.4; white-space: pre-wrap; }
-  .note-check { display: flex; gap: 5px; font-size: 0.68rem; margin-top: 2px; }
-  .note-check.done { opacity: 0.45; text-decoration: line-through; }
-  #empty { text-align: center; padding: 3rem 1rem; color: var(--text-secondary); font-size: 0.82rem; }
-  #error-msg { color: var(--led-red); text-align: center; padding: 2rem; font-size: 0.85rem; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg-deep: #0b0d0f;
+  --panel: #16191d;
+  --panel-raised: #1e2227;
+  --border: #2a2f35;
+  --amber: #f5a623;
+  --amber-bright: #ffc35c;
+  --amber-dim: #8a5d16;
+  --text-primary: #e9e6df;
+  --text-secondary: #868d95;
+  --led-green: #3ddc84;
+  --led-red: #ff5b5b;
+  --led-blue: #4fc3f7;
+  --led-purple: #b388ff;
+  --radius: 6px;
+}
+
+html, body {
+  height: 100%; overflow: hidden;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+/* ── Header ── */
+#header {
+  display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap;
+  padding: 0.55rem 1.25rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--amber-dim);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+}
+#header .brand {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--amber-bright);
+}
+.stats { display: flex; gap: 0.6rem; }
+.stat {
+  font-size: 0.65rem; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase; padding: 2px 10px;
+  border-radius: 3px; border: 1px solid; white-space: nowrap;
+}
+.stat.red   { color: var(--led-red);   border-color: var(--led-red); }
+.stat.amber { color: var(--amber);      border-color: var(--amber-dim); }
+.stat.blue  { color: var(--led-blue);  border-color: var(--led-blue); }
+.stat.green { color: var(--led-green); border-color: var(--led-green); }
+#ts { font-size: 0.6rem; color: var(--text-secondary); margin-left: auto; }
+#refresh-btn {
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-secondary); padding: 3px 12px;
+  border-radius: var(--radius); cursor: pointer;
+  font-size: 0.65rem; font-family: inherit;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  transition: all 0.15s;
+}
+#refresh-btn:hover { border-color: var(--amber); color: var(--amber); }
+
+/* ── Layout principal ── */
+#main { display: flex; height: calc(100vh - 43px); overflow: hidden; }
+
+/* ── Board (colunas por grupo) ── */
+#board {
+  flex: 1; padding: 1rem; overflow-y: auto;
+  display: flex; flex-wrap: wrap; gap: 0.85rem; align-content: flex-start;
+}
+#board::-webkit-scrollbar { width: 6px; }
+#board::-webkit-scrollbar-track { background: transparent; }
+#board::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ── Coluna de grupo ── */
+.group-col {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--amber-dim);
+  border-radius: var(--radius);
+  min-width: 240px; max-width: 320px; flex: 1;
+  display: flex; flex-direction: column;
+  max-height: calc(100vh - 75px);
+}
+.group-header {
+  padding: 0.55rem 0.85rem;
+  display: flex; justify-content: space-between; align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+.group-name {
+  font-size: 0.68rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--amber-bright);
+  display: flex; align-items: center; gap: 0.4rem;
+}
+.group-count {
+  font-size: 0.6rem; color: var(--text-secondary);
+  background: var(--panel-raised); padding: 1px 7px;
+  border-radius: 10px; border: 1px solid var(--border);
+}
+.group-cards {
+  padding: 0.5rem; overflow-y: auto; flex: 1;
+  display: flex; flex-direction: column; gap: 0.45rem;
+}
+.group-cards::-webkit-scrollbar { width: 4px; }
+.group-cards::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ── Card de demanda ── */
+.card {
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--amber-dim);
+  border-radius: var(--radius);
+  padding: 0.55rem 0.7rem;
+  transition: border-color 0.15s;
+}
+.card.overdue { border-left-color: var(--led-red); }
+.card.today   { border-left-color: var(--amber); }
+.card-loc {
+  font-size: 0.58rem; color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  margin-bottom: 2px;
+}
+.card-act {
+  font-size: 0.75rem; color: var(--text-primary);
+  line-height: 1.35; margin-bottom: 5px;
+}
+.card-badges { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.badge {
+  display: inline-flex; align-items: center;
+  padding: 1px 7px; border-radius: 3px;
+  font-size: 0.58rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.04em;
+  border: 1px solid currentColor; white-space: nowrap;
+}
+.card-due {
+  font-size: 0.58rem; margin-top: 4px; color: var(--text-secondary);
+}
+.card-due.late { color: var(--led-red); font-weight: 700; }
+.card-due.today-due { color: var(--amber); font-weight: 700; }
+
+/* ── Sidebar de notas ── */
+#sidebar {
+  width: 230px; flex-shrink: 0;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  overflow-y: auto; padding: 0.85rem 0.75rem;
+}
+#sidebar::-webkit-scrollbar { width: 4px; }
+#sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+#sidebar h2 {
+  font-size: 0.62rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--amber); margin-bottom: 0.75rem;
+  padding-bottom: 0.4rem; border-bottom: 1px solid var(--border);
+}
+.note-card {
+  background: #141000;
+  border: 1px solid var(--amber-dim);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.7rem; margin-bottom: 0.6rem;
+}
+.note-title {
+  font-size: 0.68rem; font-weight: 700;
+  color: var(--amber-bright); margin-bottom: 5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.note-desc {
+  font-size: 0.65rem; color: var(--text-secondary);
+  line-height: 1.45; white-space: pre-wrap;
+  margin-bottom: 4px;
+}
+.note-check {
+  display: flex; gap: 5px; align-items: flex-start;
+  font-size: 0.63rem; line-height: 1.3; padding: 1px 0;
+}
+.note-check.done { color: var(--text-secondary); opacity: 0.5; }
+.note-check .chk { flex-shrink: 0; color: var(--led-green); }
+.note-check.done .chk { color: var(--text-secondary); }
+.note-check .txt { }
+.note-check.done .txt { text-decoration: line-through; }
+.empty-notes { font-size: 0.65rem; color: var(--text-secondary); text-align: center; padding: 1rem 0; }
+
+/* ── Estados ── */
+#empty-board { width:100%; text-align:center; padding: 3rem 1rem; color: var(--text-secondary); font-size: 0.78rem; }
+#error-box { width:100%; text-align:center; padding: 2rem; color: var(--led-red); font-size: 0.78rem; }
 </style>
 </head>
 <body>
+
 <div id="header">
-  <h1>🎛️ <span id="ws-name">PAINEL DE BORDO</span></h1>
+  <div class="brand">
+    <span>🎛️</span>
+    <span>PAINEL DE BORDO</span>
+  </div>
   <div class="stats">
-    <span class="stat red" id="st-late">0 Atrasadas</span>
-    <span class="stat amber" id="st-today">0 Para Hoje</span>
-    <span class="stat blue" id="st-total">0 Abertas</span>
+    <span class="stat red"  id="st-late">— Atrasadas</span>
+    <span class="stat amber" id="st-today">— Para hoje</span>
+    <span class="stat blue"  id="st-total">— Abertas</span>
   </div>
-  <div style="display:flex; align-items:center; gap:0.75rem;">
-    <span id="ts"></span>
-    <button id="refresh-btn" onclick="loadData()">⟳ Atualizar</button>
-  </div>
+  <span id="ts">—</span>
+  <button id="refresh-btn" onclick="loadData()">⟳ Atualizar</button>
 </div>
+
 <div id="main">
-  <div id="board"><div id="empty">Carregando...</div></div>
-  <div id="sidebar"><h2>📌 Notas Fixadas</h2><div id="notes-list">—</div></div>
+  <div id="board"><div id="empty-board">⏳ Carregando...</div></div>
+  <div id="sidebar">
+    <h2>📌 Notas Fixadas</h2>
+    <div id="notes-list"><span class="empty-notes">—</span></div>
+  </div>
 </div>
+
 <script>
-const params = new URLSearchParams(location.search);
-const TOKEN  = params.get('token') || '';
-const PINNED = params.get('pinned') || '';
-const BASE   = location.origin;
+const params   = new URLSearchParams(location.search);
+const TOKEN    = params.get('token') || '';
+const PINNED   = params.get('pinned') || '';
+const BASE     = location.origin;
 
 if (!TOKEN) {
-  document.getElementById('board').innerHTML = '<div id="error-msg">❌ Token não informado.<br>Abra o Whiteboard pelo botão no Painel de Bordo.</div>';
+  document.getElementById('board').innerHTML =
+    '<div id="error-box">❌ Token não informado.<br><br>Abra o Whiteboard pelo botão 🗃️ na sidebar do Painel de Bordo.</div>';
 }
 
-const PRIORITY_COLORS = {urgente:'#ff5b5b', alta:'#f5a623', media:'#60a5fa', baixa:'#3ddc84'};
+const PCOLS = {
+  urgente: 'var(--led-red)',
+  alta:    'var(--led-orange, #ff9f43)',
+  media:   'var(--led-blue)',
+  baixa:   'var(--led-green)',
+};
 
 function fmtDate(iso) {
   if (!iso) return '';
-  return new Date(iso).toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'});
+  return new Date(iso + 'T12:00:00').toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit' });
 }
-function isOverdue(iso) {
-  if (!iso) return false;
-  return new Date(iso).toISOString().slice(0,10) < new Date().toISOString().slice(0,10);
-}
-function isToday(iso) {
-  if (!iso) return false;
-  return new Date(iso).toISOString().slice(0,10) === new Date().toISOString().slice(0,10);
-}
+function todayISO() { return new Date().toISOString().slice(0, 10); }
+function isLate(iso) { return iso && iso < todayISO(); }
+function isToday(iso) { return iso && iso === todayISO(); }
 
 async function loadData() {
   if (!TOKEN) return;
-  document.getElementById('ts').textContent = 'Atualizando...';
+  document.getElementById('ts').textContent = '⟳ Atualizando...';
   try {
     const [sumR, demR, notR] = await Promise.all([
-      fetch(`${BASE}/api/agent/summary?token=${TOKEN}`),
-      fetch(`${BASE}/api/agent/demands?token=${TOKEN}`),
-      PINNED ? fetch(`${BASE}/api/agent/notes?token=${TOKEN}&ids=${PINNED}`) : Promise.resolve(null),
+      fetch(`${BASE}/api/agent/summary?token=${encodeURIComponent(TOKEN)}`),
+      fetch(`${BASE}/api/agent/demands?token=${encodeURIComponent(TOKEN)}`),
+      PINNED ? fetch(`${BASE}/api/agent/notes?token=${encodeURIComponent(TOKEN)}&ids=${PINNED}`) : null,
     ]);
-    const sum = await sumR.json();
-    const dem = await demR.json();
+
+    if (!sumR.ok || !demR.ok) throw new Error('Falha na API');
+
+    const sum   = await sumR.json();
+    const dem   = await demR.json();
     const notes = notR ? await notR.json() : [];
 
-    // Header
-    document.getElementById('ws-name').textContent = 'PAINEL DE BORDO';
-    document.getElementById('st-late').textContent  = sum.totais?.atrasadas + ' Atrasadas';
-    document.getElementById('st-today').textContent = sum.totais?.para_hoje + ' Para Hoje';
-    document.getElementById('st-total').textContent = sum.totais?.ativas + ' Abertas';
-    document.getElementById('ts').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
+    // Stats
+    const t = sum.totais || {};
+    document.getElementById('st-late').textContent  = (t.atrasadas  ?? '—') + ' Atrasadas';
+    document.getElementById('st-today').textContent = (t.para_hoje  ?? '—') + ' Para hoje';
+    document.getElementById('st-total').textContent = (t.ativas     ?? '—') + ' Abertas';
+    document.getElementById('ts').textContent =
+      'Atualizado às ' + new Date().toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
 
     // Agrupar demandas por grupo
     const demands = dem.demandas || [];
     const groups  = {};
     demands.forEach(d => {
-      const g = d.grupo || 'Sem Grupo';
+      const g = d.grupo || '📌 Sem grupo';
       if (!groups[g]) groups[g] = [];
       groups[g].push(d);
     });
 
-    // Renderizar board
     const board = document.getElementById('board');
     if (!demands.length) {
-      board.innerHTML = '<div id="empty">✅ Nenhuma demanda aberta no momento.</div>';
+      board.innerHTML = '<div id="empty-board">✅ Nenhuma demanda aberta no momento.</div>';
     } else {
-      board.innerHTML = Object.entries(groups).map(([gname, gdemands]) => `
+      board.innerHTML = Object.entries(groups).map(([gname, items]) => `
         <div class="group-col">
           <div class="group-header">
             <span class="group-name">${gname}</span>
-            <span class="group-count">${gdemands.length}</span>
+            <span class="group-count">${items.length}</span>
           </div>
           <div class="group-cards">
-            ${gdemands.map(d => {
-              const late = isOverdue(d.vencimento);
+            ${items.map(d => {
+              const late = isLate(d.vencimento);
               const tod  = isToday(d.vencimento);
-              const pCol = PRIORITY_COLORS[d.prioridade?.toLowerCase()] || '#666';
-              return `<div class="card ${late?'overdue':tod?'today':''}">
-                <div class="card-loc">${d.local||''}</div>
+              const pCol = PCOLS[(d.prioridade||'').toLowerCase()] || 'var(--led-gray, #5b6168)';
+              const atr  = d.atrasada;
+              return `<div class="card ${late || atr ? 'overdue' : tod ? 'today' : ''}">
+                ${d.local ? `<div class="card-loc">${d.local}</div>` : ''}
                 <div class="card-act">${d.atividade}</div>
                 <div class="card-badges">
-                  <span class="badge" style="color:${pCol};border-color:${pCol};">${d.prioridade||''}</span>
-                  <span class="badge" style="color:#9aa0a7;border-color:#333;">${d.status}</span>
-                  ${d.atrasada ? '<span class="badge" style="color:#ff5b5b;border-color:#ff5b5b;">⚠️ Atrasada</span>' : ''}
+                  ${d.prioridade ? `<span class="badge" style="color:${pCol};border-color:${pCol};">${d.prioridade}</span>` : ''}
+                  <span class="badge" style="color:var(--text-secondary);border-color:var(--border);">${d.status}</span>
+                  ${atr ? '<span class="badge" style="color:var(--led-red);border-color:var(--led-red);">⚠ Atrasada</span>' : ''}
                 </div>
-                ${d.vencimento ? `<div class="card-due ${late?'late':tod?'soon':''}">📅 ${fmtDate(d.vencimento)}</div>` : ''}
+                ${d.vencimento ? `<div class="card-due ${late||atr?'late':tod?'today-due':''}">📅 ${fmtDate(d.vencimento)}</div>` : ''}
               </div>`;
             }).join('')}
           </div>
         </div>`).join('');
     }
 
-    // Notas
+    // Notas fixadas
     const nl = document.getElementById('notes-list');
-    if (!notes.length) {
-      nl.innerHTML = '<span style="font-size:0.7rem;color:var(--text-secondary);">Nenhuma nota fixada.</span>';
+    if (!notes || !notes.length) {
+      nl.innerHTML = '<span class="empty-notes">Nenhuma nota fixada.<br>Use o botão 📌 nas notas.</span>';
     } else {
       nl.innerHTML = notes.map(n => {
-        const checks = (n.checklist||[]).map(i =>
-          `<div class="note-check ${i.checked?'done':''}">${i.checked?'☑':'☐'} ${i.text}</div>`
+        const checks = (n.checklist || []).map(i =>
+          `<div class="note-check ${i.checked ? 'done' : ''}">
+            <span class="chk">${i.checked ? '☑' : '☐'}</span>
+            <span class="txt">${i.text}</span>
+          </div>`
         ).join('');
         return `<div class="note-card">
-          <div class="note-title">${n.subject||'Nota'}</div>
-          ${n.description ? `<div class="note-body">${n.description}</div>` : ''}
+          <div class="note-title">${n.subject || 'Nota'}</div>
+          ${n.description ? `<div class="note-desc">${n.description}</div>` : ''}
           ${checks}
         </div>`;
       }).join('');
     }
   } catch(e) {
-    document.getElementById('ts').textContent = 'Erro ao atualizar';
+    document.getElementById('ts').textContent = '⚠ Erro ao atualizar';
     console.error(e);
   }
 }
