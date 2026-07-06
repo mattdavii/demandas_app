@@ -805,6 +805,66 @@ html, body {
 /* ── Estados ── */
 #empty-board { width:100%; text-align:center; padding: 3rem 1rem; color: var(--text-secondary); font-size: 0.78rem; }
 #error-box { width:100%; text-align:center; padding: 2rem; color: var(--led-red); font-size: 0.78rem; }
+
+/* ── Painel de edição lateral ── */
+#edit-panel {
+  position: fixed; top: 43px; right: 0; bottom: 0;
+  width: 300px; background: var(--panel);
+  border-left: 1px solid var(--amber-dim);
+  transform: translateX(100%);
+  transition: transform 0.25s ease;
+  z-index: 100; overflow-y: auto; padding: 1rem;
+  display: flex; flex-direction: column; gap: 0.75rem;
+}
+#edit-panel.open { transform: translateX(0); }
+#edit-panel h3 {
+  font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--amber-bright);
+  border-bottom: 1px solid var(--border); padding-bottom: 0.4rem;
+}
+.edit-field label {
+  display: block; font-size: 0.58rem; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--text-secondary); margin-bottom: 3px;
+}
+.edit-field select, .edit-field input, .edit-field textarea {
+  width: 100%; background: var(--panel-raised); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 0.4rem 0.6rem;
+  color: var(--text-primary); font-family: inherit; font-size: 0.72rem;
+  outline: none;
+}
+.edit-field select:focus, .edit-field input:focus, .edit-field textarea:focus {
+  border-color: var(--amber-dim);
+}
+.edit-field textarea { resize: vertical; min-height: 60px; }
+.btn-save {
+  background: var(--amber); color: #1a1000; border: none;
+  border-radius: var(--radius); padding: 0.45rem 0; cursor: pointer;
+  font-family: inherit; font-size: 0.68rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.05em; width: 100%;
+  transition: opacity 0.15s;
+}
+.btn-save:hover { opacity: 0.85; }
+.btn-cancel {
+  background: transparent; color: var(--text-secondary);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 0.35rem 0; cursor: pointer; font-family: inherit;
+  font-size: 0.65rem; width: 100%; transition: border-color 0.15s;
+}
+.btn-cancel:hover { border-color: var(--led-red); color: var(--led-red); }
+.card { cursor: pointer; }
+.card:hover { border-color: var(--amber-dim); background: #1d2026; }
+.note-card { cursor: pointer; }
+.note-card:hover { border-color: var(--amber); }
+.edit-divider { border: none; border-top: 1px solid var(--border); margin: 0.25rem 0; }
+.checklist-edit { display: flex; flex-direction: column; gap: 4px; }
+.checklist-item { display: flex; gap: 6px; align-items: center; }
+.checklist-item input[type=checkbox] { accent-color: var(--amber); flex-shrink: 0; }
+.checklist-item input[type=text] { flex: 1; }
+.saved-tag {
+  font-size: 0.6rem; color: var(--led-green); text-align: center;
+  opacity: 0; transition: opacity 0.3s;
+}
+.saved-tag.show { opacity: 1; }
 </style>
 </head>
 <body>
@@ -949,6 +1009,10 @@ async function loadData() {
 loadData();
 setInterval(loadData, 120000); // auto-refresh 2 min
 </script>
+
+<div id="edit-panel">
+  <div id="edit-panel-content"></div>
+</div>
 </body>
 </html>""", 200, {'Content-Type': 'text/html; charset=utf-8'}
 
@@ -3509,6 +3573,64 @@ def agent_notes():
             query = query.filter(Note.id.in_(ids))
     notes = query.order_by(Note.updated_at.desc()).all()
     return jsonify([n.to_dict() for n in notes]), 200
+
+
+@app.route('/api/agent/demands/<int:demand_id>', methods=['PATCH'])
+def agent_update_demand(demand_id):
+    """Atualiza campos de uma demanda via token de agente (Whiteboard)."""
+    token_str = request.args.get('token') or (request.headers.get('Authorization','').replace('Bearer ','').strip())
+    user, workspace_id = get_agent_user(token_str)
+    if not user:
+        return jsonify({'error': 'Token inválido'}), 401
+    demand = ws_filter(Demand, user.id, workspace_id, {'id': demand_id}).first()
+    if not demand:
+        return jsonify({'error': 'Demanda não encontrada'}), 404
+    data = request.get_json() or {}
+    terminal_keys = [s.key for s in ws_filter(StatusConfig, user.id, workspace_id, {'is_completed': True}).all()]
+    if 'status' in data:
+        new_status = data['status']
+        if new_status in terminal_keys and demand.status not in terminal_keys:
+            history = DemandHistory(
+                user_id=user.id, workspace_id=workspace_id,
+                work_group_id=demand.work_group_id, demand_id=demand.id,
+                assigned_to_user_id=demand.assigned_to_user_id or demand.user_id,
+                priority=demand.priority, checklist=demand.checklist or [],
+                type_id=demand.type_id, location=demand.location,
+                activity=demand.activity, context=demand.context,
+                status=new_status, status_change_date=date.today(),
+                created_date=demand.created_date
+            )
+            db.session.add(history)
+            db.session.delete(demand)
+            db.session.commit()
+            return jsonify({'message': 'Demanda concluída', 'archived': True}), 200
+        demand.status = new_status
+    if 'priority' in data: demand.priority = data['priority']
+    if 'due_date'  in data: demand.due_date = data['due_date'] or None
+    if 'context'   in data: demand.context  = data['context']
+    demand.updated_at = datetime.now()
+    db.session.commit()
+    return jsonify(demand.to_dict()), 200
+
+
+@app.route('/api/agent/notes/<int:note_id>', methods=['PATCH'])
+def agent_update_note(note_id):
+    """Atualiza uma nota via token de agente (Whiteboard)."""
+    token_str = request.args.get('token') or (request.headers.get('Authorization','').replace('Bearer ','').strip())
+    user, workspace_id = get_agent_user(token_str)
+    if not user:
+        return jsonify({'error': 'Token inválido'}), 401
+    note = Note.query.filter_by(id=note_id, user_id=user.id).first()
+    if not note:
+        return jsonify({'error': 'Nota não encontrada'}), 404
+    data = request.get_json() or {}
+    if 'subject'     in data: note.subject     = data['subject']
+    if 'description' in data: note.description = data['description']
+    if 'checklist'   in data: note.checklist   = data['checklist']
+    note.updated_at = datetime.now()
+    db.session.commit()
+    return jsonify(note.to_dict()), 200
+
 
 # ============= ROTAS DE BACKUP =============
 @app.route('/api/export', methods=['GET'])
