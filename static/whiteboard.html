@@ -124,6 +124,10 @@ if (!TK) {
 }
 
 // ─── Utilitários ──────────────────────────────────────────────────────────────
+function hexToRgb(hex) {
+  var r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return r ? parseInt(r[1],16)+','+parseInt(r[2],16)+','+parseInt(r[3],16) : '245,166,35';
+}
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -201,22 +205,29 @@ function renderBoard(demands) {
   var groups = {};
   demands.forEach(function(d) {
     var k = d.grupo || 'Sem Grupo';
-    if (!groups[k]) groups[k] = [];
-    groups[k].push(d);
+    if (!groups[k]) groups[k] = {items: [], color: d.grupoColor || '#f5a623', emoji: d.grupoEmoji || ''};
+    groups[k].items.push(d);
   });
 
   var html = '';
   Object.keys(groups).forEach(function(gname) {
-    var items = groups[gname];
+    var gdata = groups[gname];
+    var items = gdata.items;
+    var color = gdata.color;
+    var emoji = gdata.emoji;
+    var borderColor = color;
+    // Derivar versão mais escura da cor para o card-overdue border
     var cards = '';
-    items.forEach(function(d, i) {
+    items.forEach(function(d) {
       var L  = isLate(d.vencimento) || d.atrasada;
       var T  = !L && isToday(d.vencimento);
       var pc = PCOLS[(d.prioridade || '').toLowerCase()] || 'var(--text2)';
-      var cls = 'card' + (L ? ' overdue' : T ? ' today' : '');
       var dataIdx = allDemands.indexOf(d);
+      var borderLeft = L ? 'var(--red)' : T ? color : 'rgba(' + hexToRgb(color) + ',0.5)';
 
-      cards += '<div class="' + cls + '" data-idx="' + dataIdx + '">';
+      cards += '<div class="card' + (L ? ' overdue' : T ? ' today' : '') + '"';
+      cards += ' style="border-left-color:' + borderLeft + ';"';
+      cards += ' data-idx="' + dataIdx + '">';
       if (d.local)      cards += '<div class="cloc">' + esc(d.local) + '</div>';
       cards += '<div class="cact">' + esc(d.atividade) + '</div>';
       cards += '<div class="cbadges">';
@@ -225,10 +236,39 @@ function renderBoard(demands) {
       if (L)            cards += '<span class="badge" style="color:var(--red);border-color:var(--red);">Atrasada</span>';
       cards += '</div>';
       if (d.vencimento) cards += '<div class="cdue' + (L ? ' late' : T ? ' tod' : '') + '">' + fmtDate(d.vencimento) + '</div>';
+
+      // Checklist
+      if (d.checklist && d.checklist.length > 0) {
+        var done  = d.checklist.filter(function(i) { return i.checked; }).length;
+        var total = d.checklist.length;
+        var pct   = Math.round(done / total * 100);
+        var barColor = pct === 100 ? 'var(--green)' : 'var(--amber)';
+        cards += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border);">';
+        cards += '<div style="display:flex;justify-content:space-between;font-size:.6rem;color:var(--text2);margin-bottom:3px;">';
+        cards += '<span>☑ Checklist</span>';
+        cards += '<span style="color:' + barColor + ';">' + done + '/' + total + '</span>';
+        cards += '</div>';
+        cards += '<div style="background:var(--border);height:3px;border-radius:2px;">';
+        cards += '<div style="background:' + barColor + ';height:3px;border-radius:2px;width:' + pct + '%;"></div>';
+        cards += '</div>';
+        d.checklist.slice(0, 4).forEach(function(item) {
+          cards += '<div style="display:flex;gap:4px;font-size:.65rem;margin-top:3px;' + (item.checked ? 'opacity:.45;' : '') + '">';
+          cards += '<span style="color:' + (item.checked ? 'var(--green)' : 'var(--text2)') + ';flex-shrink:0;">' + (item.checked ? '☑' : '☐') + '</span>';
+          cards += '<span style="' + (item.checked ? 'text-decoration:line-through;color:var(--text2);' : '') + '">' + esc(item.text) + '</span>';
+          cards += '</div>';
+        });
+        if (d.checklist.length > 4) {
+          cards += '<div style="font-size:.6rem;color:var(--text2);margin-top:2px;">+' + (d.checklist.length - 4) + ' itens</div>';
+        }
+        cards += '</div>';
+      }
+
       cards += '</div>';
     });
-    html += '<div class="gcol">';
-    html += '<div class="ghdr"><span class="gname">' + esc(gname) + '</span><span class="gcnt">' + items.length + '</span></div>';
+    html += '<div class="gcol" style="border-top-color:' + color + ';">';
+    html += '<div class="ghdr" style="border-bottom-color:rgba(' + hexToRgb(color) + ',0.3);">';
+    html += '<span class="gname" style="color:' + color + ';">' + (emoji ? esc(emoji) + ' ' : '') + esc(gname) + '</span>';
+    html += '<span class="gcnt">' + items.length + '</span></div>';
     html += '<div class="gcards">' + cards + '</div>';
     html += '</div>';
   });
