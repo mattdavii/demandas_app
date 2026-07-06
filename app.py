@@ -607,6 +607,201 @@ with app.app_context():
     db.create_all()
 
 
+
+@app.route('/whiteboard')
+def whiteboard():
+    """Whiteboard — visão em nova janela com demandas agrupadas e notas fixadas."""
+    return """<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Whiteboard — Painel de Bordo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0d0d0d; --panel: #141414; --border: #222;
+    --amber: #f5a623; --amber-bright: #ffbc47;
+    --text: #e0e0e0; --text-secondary: #666;
+    --led-red: #ff5b5b; --led-green: #3ddc84; --led-blue: #60a5fa;
+    --radius: 8px;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'Courier New', monospace; min-height: 100vh; overflow: hidden; }
+  #header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.6rem 1.25rem; background: var(--panel);
+    border-bottom: 1px solid var(--amber); gap: 1rem; flex-wrap: wrap;
+  }
+  #header h1 { font-size: 0.9rem; color: var(--amber-bright); letter-spacing: 0.05em; }
+  .stats { display: flex; gap: 1rem; }
+  .stat { font-size: 0.72rem; padding: 2px 10px; border-radius: 12px; font-weight: 700; border: 1px solid; }
+  .stat.red { color: var(--led-red); border-color: var(--led-red); }
+  .stat.amber { color: var(--amber); border-color: var(--amber); }
+  .stat.blue { color: var(--led-blue); border-color: var(--led-blue); }
+  #ts { font-size: 0.65rem; color: var(--text-secondary); }
+  #refresh-btn { background: transparent; border: 1px solid var(--border); color: var(--text-secondary);
+    padding: 3px 10px; border-radius: 4px; cursor: pointer; font-size: 0.7rem; font-family: inherit; }
+  #refresh-btn:hover { border-color: var(--amber); color: var(--amber); }
+  #main { display: flex; height: calc(100vh - 46px); overflow: hidden; }
+  #board { flex: 1; padding: 1rem; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 1rem; align-content: flex-start; }
+  .group-col { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    min-width: 260px; max-width: 340px; flex: 1; display: flex; flex-direction: column; max-height: calc(100vh - 80px); }
+  .group-header { padding: 0.6rem 0.85rem; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center; }
+  .group-name { font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--amber-bright); }
+  .group-count { font-size: 0.65rem; background: var(--border); padding: 1px 8px; border-radius: 10px; color: var(--text-secondary); }
+  .group-cards { padding: 0.5rem; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 0.5rem; }
+  .card { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.6rem 0.75rem; border-left: 3px solid var(--border); }
+  .card.overdue { border-left-color: var(--led-red); }
+  .card.today { border-left-color: var(--amber); }
+  .card-loc { font-size: 0.65rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
+  .card-act { font-size: 0.78rem; color: var(--text); margin: 2px 0 4px; line-height: 1.3; }
+  .card-badges { display: flex; gap: 4px; flex-wrap: wrap; }
+  .badge { font-size: 0.6rem; padding: 1px 6px; border-radius: 3px; border: 1px solid; font-weight: 700; white-space: nowrap; }
+  .card-due { font-size: 0.6rem; margin-top: 4px; }
+  .card-due.late { color: var(--led-red); }
+  .card-due.soon { color: var(--amber); }
+  #sidebar { width: 240px; background: var(--panel); border-left: 1px solid var(--border); overflow-y: auto; padding: 0.75rem; flex-shrink: 0; }
+  #sidebar h2 { font-size: 0.72rem; color: var(--amber); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.75rem; }
+  .note-card { background: #1a1400; border: 1px solid var(--amber); border-radius: 6px; padding: 0.6rem 0.75rem; margin-bottom: 0.6rem; }
+  .note-title { font-size: 0.75rem; font-weight: 700; color: var(--amber-bright); margin-bottom: 4px; }
+  .note-body { font-size: 0.7rem; color: var(--text-secondary); line-height: 1.4; white-space: pre-wrap; }
+  .note-check { display: flex; gap: 5px; font-size: 0.68rem; margin-top: 2px; }
+  .note-check.done { opacity: 0.45; text-decoration: line-through; }
+  #empty { text-align: center; padding: 3rem 1rem; color: var(--text-secondary); font-size: 0.82rem; }
+  #error-msg { color: var(--led-red); text-align: center; padding: 2rem; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<div id="header">
+  <h1>🎛️ <span id="ws-name">PAINEL DE BORDO</span></h1>
+  <div class="stats">
+    <span class="stat red" id="st-late">0 Atrasadas</span>
+    <span class="stat amber" id="st-today">0 Para Hoje</span>
+    <span class="stat blue" id="st-total">0 Abertas</span>
+  </div>
+  <div style="display:flex; align-items:center; gap:0.75rem;">
+    <span id="ts"></span>
+    <button id="refresh-btn" onclick="loadData()">⟳ Atualizar</button>
+  </div>
+</div>
+<div id="main">
+  <div id="board"><div id="empty">Carregando...</div></div>
+  <div id="sidebar"><h2>📌 Notas Fixadas</h2><div id="notes-list">—</div></div>
+</div>
+<script>
+const params = new URLSearchParams(location.search);
+const TOKEN  = params.get('token') || '';
+const PINNED = params.get('pinned') || '';
+const BASE   = location.origin;
+
+if (!TOKEN) {
+  document.getElementById('board').innerHTML = '<div id="error-msg">❌ Token não informado.<br>Abra o Whiteboard pelo botão no Painel de Bordo.</div>';
+}
+
+const PRIORITY_COLORS = {urgente:'#ff5b5b', alta:'#f5a623', media:'#60a5fa', baixa:'#3ddc84'};
+
+function fmtDate(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'});
+}
+function isOverdue(iso) {
+  if (!iso) return false;
+  return new Date(iso).toISOString().slice(0,10) < new Date().toISOString().slice(0,10);
+}
+function isToday(iso) {
+  if (!iso) return false;
+  return new Date(iso).toISOString().slice(0,10) === new Date().toISOString().slice(0,10);
+}
+
+async function loadData() {
+  if (!TOKEN) return;
+  document.getElementById('ts').textContent = 'Atualizando...';
+  try {
+    const [sumR, demR, notR] = await Promise.all([
+      fetch(`${BASE}/api/agent/summary?token=${TOKEN}`),
+      fetch(`${BASE}/api/agent/demands?token=${TOKEN}`),
+      PINNED ? fetch(`${BASE}/api/agent/notes?token=${TOKEN}&ids=${PINNED}`) : Promise.resolve(null),
+    ]);
+    const sum = await sumR.json();
+    const dem = await demR.json();
+    const notes = notR ? await notR.json() : [];
+
+    // Header
+    document.getElementById('ws-name').textContent = 'PAINEL DE BORDO';
+    document.getElementById('st-late').textContent  = sum.totais?.atrasadas + ' Atrasadas';
+    document.getElementById('st-today').textContent = sum.totais?.para_hoje + ' Para Hoje';
+    document.getElementById('st-total').textContent = sum.totais?.ativas + ' Abertas';
+    document.getElementById('ts').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
+
+    // Agrupar demandas por grupo
+    const demands = dem.demandas || [];
+    const groups  = {};
+    demands.forEach(d => {
+      const g = d.grupo || 'Sem Grupo';
+      if (!groups[g]) groups[g] = [];
+      groups[g].push(d);
+    });
+
+    // Renderizar board
+    const board = document.getElementById('board');
+    if (!demands.length) {
+      board.innerHTML = '<div id="empty">✅ Nenhuma demanda aberta no momento.</div>';
+    } else {
+      board.innerHTML = Object.entries(groups).map(([gname, gdemands]) => `
+        <div class="group-col">
+          <div class="group-header">
+            <span class="group-name">${gname}</span>
+            <span class="group-count">${gdemands.length}</span>
+          </div>
+          <div class="group-cards">
+            ${gdemands.map(d => {
+              const late = isOverdue(d.vencimento);
+              const tod  = isToday(d.vencimento);
+              const pCol = PRIORITY_COLORS[d.prioridade?.toLowerCase()] || '#666';
+              return `<div class="card ${late?'overdue':tod?'today':''}">
+                <div class="card-loc">${d.local||''}</div>
+                <div class="card-act">${d.atividade}</div>
+                <div class="card-badges">
+                  <span class="badge" style="color:${pCol};border-color:${pCol};">${d.prioridade||''}</span>
+                  <span class="badge" style="color:#9aa0a7;border-color:#333;">${d.status}</span>
+                  ${d.atrasada ? '<span class="badge" style="color:#ff5b5b;border-color:#ff5b5b;">⚠️ Atrasada</span>' : ''}
+                </div>
+                ${d.vencimento ? `<div class="card-due ${late?'late':tod?'soon':''}">📅 ${fmtDate(d.vencimento)}</div>` : ''}
+              </div>`;
+            }).join('')}
+          </div>
+        </div>`).join('');
+    }
+
+    // Notas
+    const nl = document.getElementById('notes-list');
+    if (!notes.length) {
+      nl.innerHTML = '<span style="font-size:0.7rem;color:var(--text-secondary);">Nenhuma nota fixada.</span>';
+    } else {
+      nl.innerHTML = notes.map(n => {
+        const checks = (n.checklist||[]).map(i =>
+          `<div class="note-check ${i.checked?'done':''}">${i.checked?'☑':'☐'} ${i.text}</div>`
+        ).join('');
+        return `<div class="note-card">
+          <div class="note-title">${n.subject||'Nota'}</div>
+          ${n.description ? `<div class="note-body">${n.description}</div>` : ''}
+          ${checks}
+        </div>`;
+      }).join('');
+    }
+  } catch(e) {
+    document.getElementById('ts').textContent = 'Erro ao atualizar';
+    console.error(e);
+  }
+}
+
+loadData();
+setInterval(loadData, 120000); // auto-refresh 2 min
+</script>
+</body>
+</html>""", 200, {'Content-Type': 'text/html; charset=utf-8'}
+
 # ============= ROTAS DE PÁGINA =============
 @app.route('/')
 def index():
@@ -3147,6 +3342,23 @@ def delete_demand_type(type_id):
     db.session.delete(dt)
     db.session.commit()
     return jsonify({'message': 'Tipo removido'}), 200
+
+
+@app.route('/api/agent/notes', methods=['GET'])
+def agent_notes():
+    """Retorna notas do usuário para o Whiteboard (autenticado via token de agente)."""
+    token_str = request.args.get('token') or (request.headers.get('Authorization','').replace('Bearer ','').strip())
+    user, workspace_id = get_agent_user(token_str)
+    if not user:
+        return jsonify({'error': 'Token inválido'}), 401
+    ids_param = request.args.get('ids', '')
+    query = Note.query.filter_by(user_id=user.id)
+    if ids_param:
+        ids = [int(i) for i in ids_param.split(',') if i.strip().isdigit()]
+        if ids:
+            query = query.filter(Note.id.in_(ids))
+    notes = query.order_by(Note.updated_at.desc()).all()
+    return jsonify([n.to_dict() for n in notes]), 200
 
 # ============= ROTAS DE BACKUP =============
 @app.route('/api/export', methods=['GET'])
