@@ -1,7 +1,10 @@
-# Configuração do Gunicorn para o Painel de Bordo
-# Coloque este arquivo na raiz do projeto (mesmo lugar que o app.py)
+# Configuração do Gunicorn — Painel de Bordo
+# gthread: 1 processo + N threads — suporta requisições concorrentes sem bloquear
+# Quando o Neon acorda (cold start 3-10s), outras requisições continuam sendo atendidas
 
-workers = 1
-timeout = 120       # Neon serverless pode levar até 60s pra acordar após inatividade
-keepalive = 5
-loglevel = 'info'
+workers      = 1
+worker_class = 'gthread'   # threads assíncronas dentro do mesmo processo
+threads      = 4            # até 4 requisições simultâneas
+timeout      = 90           # reduzido: Neon raramente passa de 60s
+keepalive    = 5
+loglevel     = 'info'
