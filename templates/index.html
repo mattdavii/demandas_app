@@ -1549,11 +1549,15 @@
                             <option value="all">Todas as Demandas</option>
                         </select>
                     </div>
-                    <div class="form-group" style="margin-bottom:0; flex:1; min-width:160px;">
-                        <label>Grupo</label>
-                        <select id="dashboardGroupFilter" onchange="loadDashboardStats()">
-                            <option value="">Todos os grupos</option>
-                        </select>
+                    <div class="form-group" style="margin-bottom:0; flex:1; min-width:180px;">
+                        <label>Grupos</label>
+                        <div id="dashboardGroupFilter" style="background:var(--panel-raised); border:1px solid var(--border);
+                            border-radius:var(--radius); padding:0.4rem 0.6rem; max-height:130px; overflow-y:auto; font-size:0.78rem;">
+                            <label style="display:flex; align-items:center; gap:0.5rem; padding:2px 0; cursor:pointer; color:var(--text-primary); font-size:0.78rem; text-transform:none; letter-spacing:0;">
+                                <input type="checkbox" id="dashGroupAll" checked onchange="onDashGroupAllChange()" style="accent-color:var(--amber);"> Todos os grupos
+                            </label>
+                            <div id="dashGroupCheckboxes" style="display:flex; flex-direction:column; gap:2px; margin-top:4px; border-top:1px solid var(--border); padding-top:4px;"></div>
+                        </div>
                     </div>
                     <div class="form-group" style="margin-bottom:0; flex-basis:100%; width:100%;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
@@ -2025,6 +2029,20 @@
             <div class="form-group">
                 <label>Cor</label>
                 <input type="color" id="editGroupColor">
+            </div>
+            <div class="form-group">
+                <label>Tipo do grupo</label>
+                <select id="editGroupType">
+                    <option value="">Sem tipo</option>
+                    <option value="Trabalho">💼 Trabalho</option>
+                    <option value="Pessoal">🏠 Pessoal</option>
+                    <option value="Freelancer">🚀 Freelancer</option>
+                    <option value="Estudos">📚 Estudos</option>
+                    <option value="Projeto">🎯 Projeto</option>
+                    <option value="Financeiro">💰 Financeiro</option>
+                    <option value="Saúde">❤️ Saúde</option>
+                    <option value="Outro">📌 Outro</option>
+                </select>
             </div>
             <div class="form-group">
                 <label>Descrição</label>
@@ -3669,33 +3687,30 @@
         function editGroup(id) {
             const group = currentGroups.find(g => g.id === id);
             if (!group) return;
-
             editingGroupId = id;
             document.getElementById('editGroupName').value = group.name;
             document.getElementById('editGroupEmoji').value = group.emoji || '';
             document.getElementById('editGroupColor').value = group.color || '#3b82f6';
             document.getElementById('editGroupDescription').value = group.description || '';
+            document.getElementById('editGroupType').value = group.groupType || '';
             document.getElementById('editGroupModal').classList.add('show');
         }
 
         async function saveGroupEdit() {
-            const name = document.getElementById('editGroupName').value;
-            const emoji = document.getElementById('editGroupEmoji').value;
-            const color = document.getElementById('editGroupColor').value;
+            const name        = document.getElementById('editGroupName').value;
+            const emoji       = document.getElementById('editGroupEmoji').value;
+            const color       = document.getElementById('editGroupColor').value;
             const description = document.getElementById('editGroupDescription').value;
+            const group_type  = document.getElementById('editGroupType').value;
 
             const btn = event.target;
             btn.disabled = true;
             try {
                 const response = await fetch(`${API_URL}/work-groups/${editingGroupId}`, {
                     method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`
-                    },
-                    body: JSON.stringify({ name, emoji, color, description })
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ name, emoji, color, description, group_type })
                 });
-
                 if (response.ok) {
                     closeEditGroup();
                     loadGroups();
@@ -3704,7 +3719,6 @@
                     alert(data.error || 'Erro ao salvar grupo');
                 }
             } catch (e) {
-                console.error('Erro:', e);
                 alert('Erro de conexão ao salvar grupo');
             } finally {
                 btn.disabled = false;
@@ -6414,14 +6428,41 @@
         }
 
         // ============= DASHBOARD =============
+        function getSelectedGroupIds() {
+            // Retorna array de IDs selecionados, ou [] se "Todos"
+            const allChk = document.getElementById('dashGroupAll');
+            if (!allChk || allChk.checked) return [];
+            return [...document.querySelectorAll('.dashGroupChk:checked')].map(c => c.value);
+        }
+
+        function onDashGroupAllChange() {
+            const allChk = document.getElementById('dashGroupAll');
+            document.querySelectorAll('.dashGroupChk').forEach(c => {
+                c.checked = false;
+                c.disabled = allChk.checked;
+            });
+            loadDashboardStats();
+        }
+
+        function onDashGroupChkChange() {
+            const anyChecked = [...document.querySelectorAll('.dashGroupChk:checked')].length > 0;
+            const allChk = document.getElementById('dashGroupAll');
+            if (allChk) allChk.checked = !anyChecked;
+            loadDashboardStats();
+        }
+
         function populateDashboardGroupFilter() {
-            const select = document.getElementById('dashboardGroupFilter');
-            const currentValue = select.value;
-            select.innerHTML = '<option value="">Todos os grupos</option>' +
-                currentGroups.map(g => `<option value="${g.id}">${escapeHtml(g.emoji || '')} ${escapeHtml(g.name)}</option>`).join('');
-            if (currentGroups.some(g => String(g.id) === currentValue)) {
-                select.value = currentValue;
-            }
+            const container = document.getElementById('dashGroupCheckboxes');
+            if (!container) return;
+            const selectedIds = getSelectedGroupIds();
+            container.innerHTML = currentGroups.map(g => {
+                const typeLabel = g.groupType ? ` <span style="color:var(--text-secondary);font-size:0.65rem;">[${g.groupType}]</span>` : '';
+                const checked = selectedIds.includes(String(g.id));
+                return `<label style="display:flex; align-items:center; gap:0.5rem; padding:2px 0; cursor:pointer; font-size:0.78rem; text-transform:none; letter-spacing:0; color:var(--text-primary);">
+                    <input type="checkbox" class="dashGroupChk" value="${g.id}" ${checked?'checked':''} onchange="onDashGroupChkChange()" style="accent-color:${g.color||'var(--amber)'};">
+                    ${escapeHtml(g.emoji||'')} ${escapeHtml(g.name)}${typeLabel}
+                </label>`;
+            }).join('');
         }
 
         // Set de locais selecionados no dashboard (multi-seleção)
@@ -6494,11 +6535,12 @@
 
         function getDashboardFilters() {
             const periodValue = document.getElementById('dashboardPeriod').value;
-            const groupFilterId = document.getElementById('dashboardGroupFilter').value;
+            // Multi-select: retorna array de IDs selecionados ([] = todos)
+            const selectedGroupIds = getSelectedGroupIds();
+            const groupFilterId = selectedGroupIds.length === 1 ? selectedGroupIds[0] : null; // legacy compat
             const locationFilter = document.getElementById('dashboardLocationFilter')
                 ? document.getElementById('dashboardLocationFilter').value
                 : null;
-            // Chips de localização têm prioridade sobre o select legado
             const activeLocations = _selectedLocations.size > 0 ? [..._selectedLocations] : (locationFilter ? [locationFilter] : []);
             const scope = document.getElementById('dashboardScope').value;
             const todayIso = toLocalISODate(new Date());
@@ -6556,12 +6598,16 @@
         // Calcula todos os números/gráficos do dashboard a partir do histórico e dos filtros atuais.
         // Usado tanto pela tela viva quanto pelo exportador de HTML (mesma fonte de verdade).
         function computeDashboardData(history, startIso, endIso, groupFilterId, scope, locationFilter) {
-            // locationFilter agora é um array de locais selecionados (vazio = todos)
+            // locationFilter: array de locais (vazio = todos)
             const hasLocFilter = Array.isArray(locationFilter) && locationFilter.length > 0;
             const locSet = hasLocFilter ? new Set(locationFilter.map(l => l.toLowerCase())) : null;
+            // selectedGroupIds: array de IDs selecionados (vazio = todos)
+            const selectedGroupIds = getSelectedGroupIds();
+            const hasGroupFilter = selectedGroupIds.length > 0;
+            const groupIdSet = hasGroupFilter ? new Set(selectedGroupIds.map(String)) : null;
 
-            let filteredDemands = groupFilterId
-                ? currentDemands.filter(d => String(d.workGroupId) === groupFilterId)
+            let filteredDemands = hasGroupFilter
+                ? currentDemands.filter(d => groupIdSet.has(String(d.workGroupId)))
                 : currentDemands;
             if (locSet) {
                 filteredDemands = filteredDemands.filter(d => d.location && locSet.has(d.location.trim().toLowerCase()));
@@ -6569,8 +6615,8 @@
             filteredDemands = filterByViewScope(filteredDemands);
 
             let periodHistory = (history || []).filter(h => h.statusChangeDate && h.statusChangeDate >= startIso && h.statusChangeDate <= endIso);
-            if (groupFilterId) {
-                periodHistory = periodHistory.filter(h => String(h.workGroupId) === groupFilterId);
+            if (hasGroupFilter) {
+                periodHistory = periodHistory.filter(h => groupIdSet.has(String(h.workGroupId)));
             }
             if (locSet) {
                 periodHistory = periodHistory.filter(h => h.location && locSet.has(h.location.trim().toLowerCase()));
@@ -6637,7 +6683,7 @@
                 count: compositionSet.filter(d => d.priority === p.key).length
             }));
 
-            const groupsToShow = groupFilterId ? currentGroups.filter(g => String(g.id) === groupFilterId) : currentGroups;
+            const groupsToShow = hasGroupFilter ? currentGroups.filter(g => groupIdSet.has(String(g.id))) : currentGroups;
             const groupCounts = groupsToShow.map(g => ({
                 label: escapeHtml(`${g.emoji || ''} ${g.name}`.trim()),
                 color: g.color || '#f5a623',
@@ -6657,7 +6703,7 @@
 
             let prevPeriodHistory = (history || []).filter(h => h.statusChangeDate && h.statusChangeDate >= prevStartIso && h.statusChangeDate <= prevEndIso);
             if (groupFilterId) {
-                prevPeriodHistory = prevPeriodHistory.filter(h => String(h.workGroupId) === groupFilterId);
+                prevPeriodHistory = prevPeriodHistory.filter(h => !hasGroupFilter || groupIdSet.has(String(h.workGroupId)));
             }
 
             const prevConcludedCount = prevPeriodHistory.filter(h => isStatusCompleted(h.status)).length;
