@@ -1366,6 +1366,7 @@
                 <button class="sidebar-link" id="adminKeysTabBtn" data-tab="adminkeys" style="display:none;" onclick="switchTab('adminkeys')">🔑 <span>Chaves</span></button>
                 <button class="sidebar-link" id="adminUsersTabBtn" data-tab="adminusers" style="display:none;" onclick="switchTab('adminusers')">👥 <span>Usuários</span></button>
                 <button class="sidebar-link" id="adminLogTabBtn" data-tab="adminlog" style="display:none;" onclick="switchTab('adminlog')">🪲 <span>Log</span></button>
+                <button class="sidebar-link" onclick="openWhiteboard()" title="Abrir Whiteboard em nova janela">🗃️ <span>Whiteboard</span></button>
                 <button class="sidebar-link" data-tab="settings" onclick="switchTab('settings')">⚙️ <span>Configurações</span></button>
             </div>
 
@@ -8098,6 +8099,36 @@
                 }, 1);
                 if (r.ok) { loadDemandTypes(); renderDemands(); }
             } catch (e) { alert('Erro ao remover tipo'); }
+        }
+
+        // ============= WHITEBOARD =============
+        async function openWhiteboard() {
+            // Verifica se o usuário tem token de agente
+            try {
+                const r = await fetchWithRetry(`${API_URL}/agent/tokens`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                const tokens = r.ok ? await r.json() : [];
+
+                if (!tokens.length) {
+                    if (confirm('Para usar o Whiteboard você precisa de um Token de Agente.\n\nCriar agora? (Vá em Configurações → Agentes de IA)')) {
+                        switchTab('settings');
+                    }
+                    return;
+                }
+
+                // Usa o primeiro token disponível
+                const agentToken = tokens[0].token;
+
+                // Passa os IDs das notas fixadas (pinnedGadgets)
+                const pinned = JSON.parse(localStorage.getItem('pinnedGadgets') || '[]');
+                const pinnedParam = pinned.length ? `&pinned=${pinned.join(',')}` : '';
+
+                const url = `/whiteboard?token=${agentToken}${pinnedParam}`;
+                window.open(url, 'whiteboard', 'width=1280,height=800,menubar=no,toolbar=no,status=no');
+            } catch (e) {
+                alert('Erro ao abrir Whiteboard. Verifique sua conexão.');
+            }
         }
 
         async function loadAdminUsers() {
