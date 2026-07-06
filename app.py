@@ -302,6 +302,7 @@ class WorkGroup(db.Model):
     description = db.Column(db.String(255))
     order = db.Column(db.Integer, default=0)
     is_active = db.Column(db.Boolean, default=True)
+    group_type = db.Column(db.String(50), nullable=True)  # Trabalho, Pessoal, Freelancer, Estudos, etc.
     created_at = db.Column(db.DateTime, default=datetime.now)
     
     # Relacionamento
@@ -317,6 +318,7 @@ class WorkGroup(db.Model):
             'color': self.color,
             'description': self.description,
             'order': self.order,
+            'groupType': self.group_type,
             'demandsCount': demands_count if demands_count is not None else 0
         }
 
@@ -1027,6 +1029,7 @@ def ping():
     """Health check leve. Também aplica migrations pendentes na primeira chamada."""
     _approval_cols = [
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS previous_status VARCHAR(50)",
+        "ALTER TABLE work_groups ADD COLUMN IF NOT EXISTS group_type VARCHAR(50)",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS action_type VARCHAR(30)",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS rejection_note TEXT",
@@ -2061,6 +2064,8 @@ def update_work_group(group_id):
         group.description = data['description']
     if 'order' in data:
         group.order = data['order']
+    if 'group_type' in data:
+        group.group_type = data['group_type'] or None
     
     db.session.commit()
     return jsonify(group.to_dict()), 200
