@@ -2911,9 +2911,9 @@ def agent_summary():
 
     # SQL direto — evita falha se coluna nova (group_type) ainda não existe no banco
     rows = db.session.execute(text(
-        "SELECT id, name FROM work_groups WHERE workspace_id = :ws OR (workspace_id IS NULL AND user_id = :uid)"
+        "SELECT id, name, emoji, color FROM work_groups WHERE workspace_id = :ws OR (workspace_id IS NULL AND user_id = :uid)"
     ), {'ws': workspace_id, 'uid': user.id}).fetchall()
-    groups = {r[0]: r[1] for r in rows}
+    groups = {r[0]: {'name': r[1], 'emoji': r[2] or '', 'color': r[3] or '#f5a623'} for r in rows}
 
     def fmt(d):
         return {
@@ -2921,7 +2921,7 @@ def agent_summary():
             'atividade': d.activity,
             'status': d.status,
             'prioridade': d.priority,
-            'grupo': groups.get(d.work_group_id, '—'),
+            'grupo': (groups.get(d.work_group_id) or {}).get('name', '—'),
             'vencimento': str(d.due_date) if d.due_date else None,
         }
 
@@ -2956,9 +2956,9 @@ def agent_demands():
 
     # SQL direto — evita falha se coluna nova (group_type) ainda não existe no banco
     rows = db.session.execute(text(
-        "SELECT id, name FROM work_groups WHERE workspace_id = :ws OR (workspace_id IS NULL AND user_id = :uid)"
+        "SELECT id, name, emoji, color FROM work_groups WHERE workspace_id = :ws OR (workspace_id IS NULL AND user_id = :uid)"
     ), {'ws': workspace_id, 'uid': user.id}).fetchall()
-    groups = {r[0]: r[1] for r in rows}
+    groups = {r[0]: {'name': r[1], 'emoji': r[2] or '', 'color': r[3] or '#f5a623'} for r in rows}
 
     # Filtros opcionais
     grupo_q   = (request.args.get('grupo')      or '').lower()
@@ -2968,7 +2968,8 @@ def agent_demands():
 
     result = []
     for d in demands:
-        nome_grupo = groups.get(d.work_group_id, '')
+        g_info = groups.get(d.work_group_id) or {}
+        nome_grupo = g_info.get('name', '') if isinstance(g_info, dict) else str(g_info)
         if grupo_q  and grupo_q  not in nome_grupo.lower(): continue
         if status_q and status_q not in d.status.lower():   continue
         if prior_q  and prior_q  not in (d.priority or '').lower(): continue
@@ -2981,6 +2982,9 @@ def agent_demands():
             'status': d.status,
             'prioridade': d.priority,
             'grupo': nome_grupo,
+            'grupoEmoji': g_info.get('emoji', '') if isinstance(g_info, dict) else '',
+            'grupoColor': g_info.get('color', '#f5a623') if isinstance(g_info, dict) else '#f5a623',
+            'checklist': d.checklist or [],
             'vencimento': str(d.due_date) if d.due_date else None,
             'atrasada': bool(d.due_date and str(d.due_date) < str(date.today())),
         })
