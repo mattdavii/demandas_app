@@ -3199,41 +3199,43 @@
 
         // ============= GRUPOS =============
         async function loadGroups() {
+            // Renderiza imediatamente do cache em memória (sem esperar API)
+            if (currentGroups && currentGroups.length > 0) {
+                renderGroups();
+                updateGroupSelect();
+            }
             try {
                 const response = await fetchWithRetry(`${API_URL}/work-groups`, {
                     headers: { 'Authorization': `Bearer ${token}` }
-                }, 2);
-
+                }, 1);
                 if (!response.ok) throw new Error('Resposta não-OK: ' + response.status);
                 currentGroups = await response.json();
                 sessionStorage.setItem('cache_groups', JSON.stringify(currentGroups));
                 renderGroups();
                 updateGroupSelect();
             } catch (e) {
-                console.error('Erro ao carregar grupos, tentando cache local:', e);
                 const cached = sessionStorage.getItem('cache_groups');
-                if (cached) {
+                if (cached && (!currentGroups || !currentGroups.length)) {
                     currentGroups = JSON.parse(cached);
                     renderGroups();
                     updateGroupSelect();
                 }
-                isOnline = false;
-                updateSyncIndicator();
             }
         }
 
         function renderGroups() {
             const container = document.getElementById('groupsList');
-            
-            if (currentGroups.length === 0) {
+
+            if (!currentGroups || currentGroups.length === 0) {
                 container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Nenhum grupo criado</div>';
                 return;
             }
 
+            const TYPE_EMOJIS = { Trabalho:'💼', Pessoal:'🏠', Freelancer:'🚀', Estudos:'📚', Projeto:'🎯', Financeiro:'💰', 'Saúde':'❤️', Outro:'📌' };
             container.innerHTML = currentGroups.map(g => `
                 <div class="group-item">
                     <div class="group-info">
-                        <div class="group-name">${escapeHtml(g.emoji)} ${escapeHtml(g.name)}</div>
+                        <div class="group-name">${escapeHtml(g.emoji || '')} ${escapeHtml(g.name)}${g.groupType ? ` <span style="font-size:0.65rem; color:var(--text-secondary); font-weight:400;">${TYPE_EMOJIS[g.groupType]||''} ${g.groupType}</span>` : ''}</div>
                         <div style="font-size: 0.85rem; color: var(--text-secondary);">${g.demandsCount} demandas ativas</div>
                         ${g.description ? `<div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 0.25rem; font-style: italic;">${escapeHtml(g.description)}</div>` : ''}
                     </div>
