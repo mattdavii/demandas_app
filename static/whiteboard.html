@@ -99,7 +99,7 @@ html, body { height:100%; overflow:hidden; font-family:'JetBrains Mono',monospac
 <div id="main">
   <div id="board"><div id="empty-board">⏳ Carregando...</div></div>
   <div id="sbar">
-    <h2>📌 Notas Fixadas</h2>
+    <h2 id="notes-title">📌 Notas</h2>
     <div id="nlist"><span style="font-size:.75rem;color:var(--text2)">—</span></div>
   </div>
 </div>
@@ -150,11 +150,9 @@ function loadData() {
 
   var urls = [
     BASE + '/api/agent/summary?token=' + encodeURIComponent(TK),
-    BASE + '/api/agent/demands?token='  + encodeURIComponent(TK)
+    BASE + '/api/agent/demands?token='  + encodeURIComponent(TK),
+    BASE + '/api/agent/notes?token='    + encodeURIComponent(TK) + (PINNED ? '&ids=' + encodeURIComponent(PINNED) : '')
   ];
-  if (PINNED) {
-    urls.push(BASE + '/api/agent/notes?token=' + encodeURIComponent(TK) + '&ids=' + encodeURIComponent(PINNED));
-  }
 
   Promise.all(urls.map(function(u) { return fetch(u); }))
     .then(function(responses) {
@@ -164,6 +162,12 @@ function loadData() {
       var sum   = data[0];
       var dem   = data[1];
       var notes = data[2] || [];
+
+      // Atualizar título da sidebar
+      var notesTitle = document.getElementById('notes-title');
+      if (notesTitle) {
+        notesTitle.textContent = PINNED ? '📌 Notas Fixadas' : '📝 Notas';
+      }
 
       allDemands = (dem.demandas || []);
       stList = [];
@@ -243,7 +247,8 @@ function renderBoard(demands) {
 function renderNotes(notes) {
   var nl = document.getElementById('nlist');
   if (!notes || notes.length === 0) {
-    nl.innerHTML = '<span style="font-size:.75rem;color:var(--text2)">Nenhuma nota fixada.</span>';
+    nl.innerHTML = '<span style="font-size:.75rem;color:var(--text2)">' +
+      (PINNED ? 'Nenhuma nota fixada.' : 'Nenhuma nota criada ainda.') + '</span>';
     return;
   }
   var html = '';
