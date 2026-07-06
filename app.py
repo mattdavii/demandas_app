@@ -3134,6 +3134,16 @@ def agent_summary():
     if not user:
         return jsonify({'error': 'Token inválido ou expirado'}), 401
 
+    # Garante colunas novas que podem não existir no banco ainda
+    for _col in [
+        "ALTER TABLE work_groups ADD COLUMN IF NOT EXISTS group_type VARCHAR(50)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
+    ]:
+        try:
+            db.session.execute(text(_col)); db.session.commit()
+        except Exception:
+            db.session.rollback()
+
     demands  = ws_filter(Demand, user.id, workspace_id).all()
     terminal = [s.key for s in ws_filter(StatusConfig, user.id, workspace_id, {'is_completed': True}).all()]
     approval = [s.key for s in ws_filter(StatusConfig, user.id, workspace_id, {'is_approval': True}).all()]
@@ -3180,6 +3190,16 @@ def agent_demands():
     user, workspace_id = get_agent_user(token_str)
     if not user:
         return jsonify({'error': 'Token inválido'}), 401
+
+    # Garante colunas novas que podem não existir no banco ainda
+    for _col in [
+        "ALTER TABLE work_groups ADD COLUMN IF NOT EXISTS group_type VARCHAR(50)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
+    ]:
+        try:
+            db.session.execute(text(_col)); db.session.commit()
+        except Exception:
+            db.session.rollback()
 
     terminal = [s.key for s in ws_filter(StatusConfig, user.id, workspace_id, {'is_completed': True}).all()]
     demands  = ws_filter(Demand, user.id, workspace_id).filter(~Demand.status.in_(terminal)).all()
