@@ -86,7 +86,7 @@ html, body { height:100%; overflow:hidden; font-family:'JetBrains Mono',monospac
 </head>
 <body>
 <div id="hdr">
-  <span class="brand">🎛️ PAINEL DE BORDO</span>
+  <span class="brand" id="brand">🎛️ PAINEL DE BORDO</span>
   <div class="stats">
     <span class="stat red"   id="st0">— Atrasadas</span>
     <span class="stat amber" id="st1">— Para hoje</span>
@@ -180,6 +180,15 @@ function loadData() {
       });
 
       var t = sum.totais || {};
+      // Header: logo + nome do workspace
+      var brandEl = document.getElementById('brand');
+      if (brandEl) {
+        var logoHtml = sum.logoUrl
+          ? '<img src="' + sum.logoUrl + '" style="max-height:32px;max-width:120px;object-fit:contain;vertical-align:middle;margin-right:0.5rem;" alt="Logo">'
+          : '🎛️ ';
+        var wsName = sum.workspace || 'PAINEL DE BORDO';
+        brandEl.innerHTML = logoHtml + '<span>' + wsName.toUpperCase() + '</span>';
+      }
       document.getElementById('st0').textContent = (t.atrasadas  != null ? t.atrasadas  : '?') + ' Atrasadas';
       document.getElementById('st1').textContent = (t.para_hoje  != null ? t.para_hoje  : '?') + ' Para hoje';
       document.getElementById('st2').textContent = (t.ativas     != null ? t.ativas     : '?') + ' Abertas';
