@@ -2930,8 +2930,12 @@ def agent_summary():
             'vencimento': str(d.due_date) if d.due_date else None,
         }
 
+    workspace = Workspace.query.get(workspace_id)
+
     return jsonify({
         'usuario': user.full_name or user.username,
+        'workspace': workspace.name if workspace else '',
+        'logoUrl': workspace.logo_url if workspace else None,
         'data_hoje': str(date.today()),
         'totais': {
             'ativas': len(active),
