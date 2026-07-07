@@ -222,6 +222,27 @@ class DemandType(db.Model):
             'workspaceId': self.workspace_id,
         }
 
+
+class DemandNote(db.Model):
+    """Anotações timestampadas dentro de uma demanda."""
+    __tablename__ = 'demand_notes'
+    id         = db.Column(db.Integer, primary_key=True)
+    demand_id  = db.Column(db.Integer, db.ForeignKey('demands.id', ondelete='CASCADE'), nullable=False)
+    user_id    = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    username   = db.Column(db.String(80), nullable=True)  # snapshot do autor
+    content    = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now, index=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'demandId': self.demand_id,
+            'userId': self.user_id,
+            'username': self.username,
+            'content': self.content,
+            'createdAt': self.created_at.isoformat() if self.created_at else None,
+        }
+
 class MaintenanceNotice(db.Model):
     """Aviso de manutenção programada. Apenas um registro ativo por vez."""
     __tablename__ = 'maintenance_notices'
@@ -3293,6 +3314,55 @@ def agent_update_note(note_id):
     db.session.commit()
     return jsonify(note.to_dict()), 200
 
+
+
+# ============= ANOTAÇÕES DE DEMANDA =============
+@app.route('/api/demands/<int:demand_id>/notes', methods=['GET'])
+@jwt_required()
+def get_demand_notes(demand_id):
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    demand = ws_filter(Demand, user_id, workspace_id, {'id': demand_id}).first_or_404()
+    notes = DemandNote.query.filter_by(demand_id=demand_id).order_by(DemandNote.created_at.asc()).all()
+    return jsonify([n.to_dict() for n in notes]), 200
+
+
+@app.route('/api/demands/<int:demand_id>/notes', methods=['POST'])
+@jwt_required()
+def add_demand_note(demand_id):
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    demand = ws_filter(Demand, user_id, workspace_id, {'id': demand_id}).first_or_404()
+    data = request.get_json() or {}
+    content = (data.get('content') or '').strip()
+    if not content:
+        return jsonify({'error': 'Conteúdo obrigatório'}), 400
+    user = User.query.get(user_id)
+    note = DemandNote(
+        demand_id=demand_id,
+        user_id=user_id,
+        username=user.full_name or user.username if user else str(user_id),
+        content=content
+    )
+    db.session.add(note)
+    db.session.commit()
+    return jsonify(note.to_dict()), 201
+
+
+@app.route('/api/demands/<int:demand_id>/notes/<int:note_id>', methods=['DELETE'])
+@jwt_required()
+def delete_demand_note(demand_id, note_id):
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    ws_filter(Demand, user_id, workspace_id, {'id': demand_id}).first_or_404()
+    note = DemandNote.query.filter_by(id=note_id, demand_id=demand_id).first_or_404()
+    # Só o autor ou admin pode deletar
+    user = User.query.get(user_id)
+    if note.user_id != user_id and not (user and user.is_admin):
+        return jsonify({'error': 'Sem permissão'}), 403
+    db.session.delete(note)
+    db.session.commit()
+    return jsonify({'message': 'Nota removida'}), 200
 
 # ============= ROTAS DE BACKUP =============
 @app.route('/api/export', methods=['GET'])
