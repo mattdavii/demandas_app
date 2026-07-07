@@ -1576,12 +1576,28 @@
                             <div id="dashGroupCheckboxes"></div>
                         </div>
                     </div>
-                    <div class="form-group" style="margin-bottom:0; flex-basis:100%; width:100%;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
-                            <label style="margin-bottom:0;">📍 Locais</label>
-                            <span id="locationChipsClear" onclick="clearLocationChips()" style="font-size:0.68rem; color:var(--amber-bright); cursor:pointer; display:none;">Limpar seleção</span>
+                    <div class="form-group" style="margin-bottom:0; flex-basis:100%; width:100%; position:relative;">
+                        <label>📍 Locais</label>
+                        <button id="dashLocBtn" onclick="toggleDashLocDropdown()"
+                            style="width:100%; background:var(--panel-raised); border:1px solid var(--border);
+                            border-radius:var(--radius); padding:0.5rem 0.85rem; text-align:left;
+                            color:var(--text-primary); font-family:inherit; font-size:0.82rem;
+                            cursor:pointer; display:flex; justify-content:space-between; align-items:center;">
+                            <span id="dashLocBtnLabel">Todos os locais</span>
+                            <span style="color:var(--text-secondary); font-size:0.7rem;">▼</span>
+                        </button>
+                        <div id="dashLocDropdown" style="display:none; position:absolute; top:calc(100% + 4px); left:0; right:0;
+                            background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+                            z-index:500; box-shadow:0 8px 24px rgba(0,0,0,0.5); max-height:240px; overflow-y:auto;">
+                            <label style="display:flex; align-items:center; gap:0.6rem; padding:0.6rem 0.85rem;
+                                cursor:pointer; border-bottom:1px solid var(--border); font-size:0.78rem;
+                                color:var(--amber); font-weight:600; position:sticky; top:0; background:var(--panel);">
+                                <input type="checkbox" id="dashLocAll" checked onchange="onDashLocAllChange()"
+                                    style="accent-color:var(--amber); width:14px; height:14px;">
+                                Todos os locais
+                            </label>
+                            <div id="dashLocCheckboxes"></div>
                         </div>
-                        <div id="locationChipsContainer" style="display:flex; flex-wrap:wrap; gap:0.35rem; max-height:90px; overflow-y:auto; padding:2px 0;"></div>
                     </div>
                     <button class="btn btn-sm" style="width:auto; background:transparent; color:var(--led-blue); border:1px solid var(--led-blue);" onclick="downloadDashboardHtml()">📊 Exportar Dashboard (HTML)</button>
                 </div>
@@ -6561,51 +6577,99 @@
             }).join('');
         }
 
-        // Set de locais selecionados no dashboard (multi-seleção)
+        // Set de locais selecionados no dashboard
         const _selectedLocations = new Set();
 
-        function populateDashboardLocationFilter() {
-            const container = document.getElementById('locationChipsContainer');
-            if (!container) return;
+        function toggleDashLocDropdown() {
+            const dd = document.getElementById('dashLocDropdown');
+            if (!dd) return;
+            dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+        }
 
-            // Coleta locais únicos de demandas ativas + histórico
+        document.addEventListener('click', function(e) {
+            const btn = document.getElementById('dashLocBtn');
+            const dd  = document.getElementById('dashLocDropdown');
+            if (dd && btn && !btn.contains(e.target) && !dd.contains(e.target)) {
+                dd.style.display = 'none';
+            }
+        });
+
+        function updateDashLocBtnLabel() {
+            const label = document.getElementById('dashLocBtnLabel');
+            if (!label) return;
+            if (_selectedLocations.size === 0) {
+                label.textContent = 'Todos os locais';
+            } else if (_selectedLocations.size === 1) {
+                label.textContent = [..._selectedLocations][0];
+            } else {
+                label.textContent = `${_selectedLocations.size} locais selecionados`;
+            }
+        }
+
+        function onDashLocAllChange() {
+            _selectedLocations.clear();
+            document.querySelectorAll('.dashLocChk').forEach(c => {
+                c.checked = false;
+                c.disabled = true;
+            });
+            updateDashLocBtnLabel();
+            loadDashboardStats();
+        }
+
+        function onDashLocChkChange(loc, checked) {
+            if (checked) { _selectedLocations.add(loc); }
+            else { _selectedLocations.delete(loc); }
+            const allChk = document.getElementById('dashLocAll');
+            if (allChk) allChk.checked = _selectedLocations.size === 0;
+            document.querySelectorAll('.dashLocChk').forEach(c => c.disabled = false);
+            updateDashLocBtnLabel();
+            loadDashboardStats();
+        }
+
+        function populateDashboardLocationFilter() {
+            const container = document.getElementById('dashLocCheckboxes');
+            if (!container) return;
             const locs = new Set();
             currentDemands.forEach(d => { if (d.location) locs.add(d.location.trim()); });
             if (window._cachedHistory) {
                 window._cachedHistory.forEach(h => { if (h.location) locs.add(h.location.trim()); });
             }
             const sorted = [...locs].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+            const allChecked = _selectedLocations.size === 0;
 
-            container.innerHTML = sorted.map(loc => `
-                <button class="location-chip${_selectedLocations.has(loc) ? ' active' : ''}"
-                    onclick="toggleLocationChip('${escapeForAttr(loc)}')"
-                    title="${escapeHtml(loc)}">
-                    ${escapeHtml(loc.length > 28 ? loc.slice(0, 26) + '…' : loc)}
-                </button>
-            `).join('');
+            container.innerHTML = sorted.map(loc => {
+                const sel = _selectedLocations.has(loc);
+                const short = loc.length > 30 ? loc.slice(0, 28) + '…' : loc;
+                return `<label style="display:flex; align-items:center; gap:0.6rem; padding:0.45rem 0.85rem;
+                    cursor:pointer; font-size:0.78rem; color:var(--text-primary);
+                    border-bottom:1px solid rgba(255,255,255,0.04);"
+                    onmouseover="this.style.background='var(--panel-raised)'"
+                    onmouseout="this.style.background=''">
+                    <input type="checkbox" class="dashLocChk" ${sel ? 'checked' : ''} ${allChecked ? 'disabled' : ''}
+                        onchange="onDashLocChkChange('${loc.replace(/'/g,"\\'").replace(/"/g,'&quot;')}', this.checked)"
+                        style="accent-color:var(--amber); width:14px; height:14px; flex-shrink:0;">
+                    <span title="${escapeHtml(loc)}" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(short)}</span>
+                </label>`;
+            }).join('');
 
-            // Mostrar/ocultar botão de limpar
-            const clearBtn = document.getElementById('locationChipsClear');
-            if (clearBtn) clearBtn.style.display = _selectedLocations.size > 0 ? '' : 'none';
+            if (!sorted.length) {
+                container.innerHTML = '<div style="padding:0.75rem 0.85rem; font-size:0.75rem; color:var(--text-secondary);">Nenhum local encontrado</div>';
+            }
         }
 
         function escapeForAttr(str) {
             return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
         }
 
+        // Manter compatibilidade com código antigo que usa toggleLocationChip
         function toggleLocationChip(loc) {
-            if (_selectedLocations.has(loc)) {
-                _selectedLocations.delete(loc);
-            } else {
-                _selectedLocations.add(loc);
-            }
-            populateDashboardLocationFilter();
-            loadDashboardStats();
+            onDashLocChkChange(loc, !_selectedLocations.has(loc));
         }
 
         function clearLocationChips() {
             _selectedLocations.clear();
             populateDashboardLocationFilter();
+            updateDashLocBtnLabel();
             loadDashboardStats();
         }
 
