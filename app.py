@@ -413,8 +413,9 @@ class DemandHistory(db.Model):
     status = db.Column(db.String(20), nullable=False)
     priority = db.Column(db.String(20), nullable=True)  # snapshot da prioridade no momento da mudança (registros novos)
     checklist = db.Column(db.JSON, nullable=True)  # snapshot do checklist da demanda ao concluir
-    action_type = db.Column(db.String(30), nullable=True)
-    type_id = db.Column(db.Integer, nullable=True)  # snapshot do tipo ao concluir  # 'approved' | null (mudança normal)
+    action_type     = db.Column(db.String(30), nullable=True)   # 'approved' | null (mudança normal)
+    type_id         = db.Column(db.Integer, nullable=True)       # snapshot do tipo ao concluir
+    notes_snapshot  = db.Column(db.JSON, nullable=True)          # snapshot das anotações ao concluir
     status_change_date = db.Column(db.Date, nullable=False)
     created_date = db.Column(db.Date, nullable=True)
     timestamp = db.Column(db.DateTime, default=datetime.now)
@@ -433,9 +434,10 @@ class DemandHistory(db.Model):
             'status': self.status,
             'statusChangeDate': self.status_change_date.isoformat() if self.status_change_date else None,
             'createdDate': self.created_date.isoformat() if self.created_date else None,
-            'checklist': self.checklist,  # None = dado não disponível (registro antigo); [] = sem checklist
+            'checklist': self.checklist,
             'actionType': self.action_type,
-            'typeId': self.type_id
+            'typeId': self.type_id,
+            'notesSnapshot': self.notes_snapshot or []
         }
 
 class Note(db.Model):
@@ -647,6 +649,7 @@ def ping():
     """Health check leve. Também aplica migrations pendentes na primeira chamada."""
     _approval_cols = [
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS previous_status VARCHAR(50)",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS notes_snapshot JSON",
         "ALTER TABLE work_groups ADD COLUMN IF NOT EXISTS group_type VARCHAR(50)",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS action_type VARCHAR(30)",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP",
@@ -1909,9 +1912,10 @@ def update_demand_status(demand_id):
         workspace_id=workspace_id,
         work_group_id=demand.work_group_id,
         demand_id=demand.id,
-        assigned_to_user_id=demand.assigned_to_user_id or demand.user_id,  # snapshot do responsável (ou criador se sem responsável)
+        assigned_to_user_id=demand.assigned_to_user_id or demand.user_id,
         priority=demand.priority,
-        checklist=demand.checklist or [],  # snapshot do checklist — preservado mesmo após deletar a demanda
+        checklist=demand.checklist or [],
+        notes_snapshot=get_demand_notes_snapshot(demand.id),
         location=demand.location,
         activity=demand.activity,
         context=demand.context,
@@ -2581,7 +2585,8 @@ def approve_demand(demand_id):
             assigned_to_user_id=demand.assigned_to_user_id or demand.user_id,
             priority=demand.priority,
             checklist=demand.checklist or [],
-            action_type='approved',  # sinaliza que foi via fluxo de aprovação
+            action_type='approved',
+            notes_snapshot=get_demand_notes_snapshot(demand.id),
             location=demand.location,
             activity=demand.activity,
             context=demand.context,
@@ -2895,6 +2900,13 @@ def cron_maintenance_notify():
 
 
 _agent_schema_ok = False
+
+def get_demand_notes_snapshot(demand_id):
+    """Captura snapshot das anotações de uma demanda ao ser concluída."""
+    notes = DemandNote.query.filter_by(demand_id=demand_id).order_by(DemandNote.created_at.asc()).all()
+    return [{'username': n.username, 'content': n.content,
+             'createdAt': n.created_at.isoformat() if n.created_at else None} for n in notes]
+
 
 def ensure_agent_schema():
     """Garante colunas novas nas tabelas usadas pelos endpoints do agente.
@@ -3281,6 +3293,7 @@ def agent_update_demand(demand_id):
                 type_id=demand.type_id, location=demand.location,
                 activity=demand.activity, context=demand.context,
                 status=new_status, status_change_date=date.today(),
+                notes_snapshot=get_demand_notes_snapshot(demand.id),
                 created_date=demand.created_date
             )
             db.session.add(history)
