@@ -2084,40 +2084,56 @@ def notify_assignment(demand, assigned_user, assigner_user_id):
 @app.route('/api/reminders/check', methods=['POST'])
 @jwt_required()
 def check_reminders():
-    """Verifica lembretes vencidos e os processa em BACKGROUND para não travar
-    o único worker do Gunicorn. O push notification externo pode demorar; com isso
-    a resposta é imediata e o worker fica livre para outras requisições."""
+    """Verifica e dispara lembretes vencidos do usuário logado.
+    Push é enviado em thread separada mas a lista de disparados é retornada imediatamente."""
     user_id = int(get_jwt_identity())
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'triggered': []}), 200
 
-    import threading as _th
-    def _process():
-        with app.app_context():
-            try:
-                user = User.query.get(user_id)
-                if not user:
-                    return
-                workspace_id = get_user_workspace_id(user_id)
-                terminal_keys = [s.key for s in ws_filter(StatusConfig, user_id, workspace_id, {'is_completed': True}).all()]
-                now = datetime.now()
-                query = ws_filter(Demand, user_id, workspace_id).filter(
-                    Demand.reminder_at.isnot(None),
-                    Demand.reminder_at <= now,
-                    Demand.reminder_sent == False
-                )
-                if terminal_keys:
-                    query = query.filter(~Demand.status.in_(terminal_keys))
-                due_demands = query.all()
-                for demand in due_demands:
-                    send_reminder_notification(demand, user)
-                    demand.reminder_sent = True
-                if due_demands:
-                    db.session.commit()
-            except Exception as e:
-                db.session.rollback()
-                print(f'[reminders] erro: {e}')
+        workspace_id = get_user_workspace_id(user_id)
+        terminal_keys = [s.key for s in ws_filter(StatusConfig, user_id, workspace_id, {'is_completed': True}).all()]
+        now = datetime.now()
 
-    _th.Thread(target=_process, daemon=True).start()
-    return jsonify({'triggered': []}), 200
+        query = ws_filter(Demand, user_id, workspace_id).filter(
+            Demand.reminder_at.isnot(None),
+            Demand.reminder_at <= now,
+            Demand.reminder_sent == False
+        )
+        if terminal_keys:
+            query = query.filter(~Demand.status.in_(terminal_keys))
+
+        due_demands = query.all()
+        triggered = []
+        for demand in due_demands:
+            # Push em thread separada para não bloquear
+            import threading as _th
+            _d, _u = demand, user
+            _th.Thread(target=lambda d=_d, u=_u: send_push_in_context(d, u), daemon=True).start()
+            demand.reminder_sent = True
+            triggered.append({
+                'id': demand.id,
+                'location': demand.location,
+                'activity': demand.activity,
+                'status': demand.status,
+            })
+
+        if due_demands:
+            db.session.commit()
+
+        return jsonify({'triggered': triggered}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print(f'[reminders] erro: {e}')
+        return jsonify({'triggered': [], 'error': str(e)}), 200
+
+
+def send_push_in_context(demand, user):
+    """Envia push + email de lembrete em contexto de app Flask."""
+    with app.app_context():
+        send_reminder_notification(demand, user)
 
 @app.route('/api/cron/check-all-reminders', methods=['POST', 'GET'])
 def cron_check_all_reminders():
