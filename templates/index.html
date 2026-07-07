@@ -2371,8 +2371,29 @@
                 <div id="editDemandChecklistItems"></div>
                 <button class="btn btn-sm btn-secondary" style="width:auto; margin-top:0.5rem;" onclick="addDemandChecklistItemField(true)">➕ Adicionar item</button>
             </div>
-            <button class="btn btn-primary" onclick="saveDemandEdit()">Salvar</button>
-            <button class="btn btn-secondary" onclick="closeEditDemand()" style="margin-left: 0.5rem;">Cancelar</button>
+
+            <!-- Bloco de Anotações da Demanda -->
+            <div style="margin-top:1.25rem; border-top:1px solid var(--border); padding-top:1rem;">
+                <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem;">
+                    <span style="font-size:0.75rem; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:var(--amber);">📝 Anotações</span>
+                    <span style="font-size:0.65rem; color:var(--text-secondary);">Visível só para a equipe</span>
+                </div>
+                <!-- Histórico de anotações -->
+                <div id="demandNotesList" style="display:flex; flex-direction:column; gap:0.5rem; margin-bottom:0.75rem; max-height:200px; overflow-y:auto;"></div>
+                <!-- Nova anotação -->
+                <div style="display:flex; gap:0.5rem; align-items:flex-start;">
+                    <textarea id="demandNoteInput" placeholder="Escreva uma anotação..." rows="2"
+                        style="flex:1; resize:none; font-size:0.78rem;"
+                        onkeydown="if(event.ctrlKey && event.key==='Enter') addDemandNote()"></textarea>
+                    <button class="btn btn-primary btn-sm" style="width:auto; flex-shrink:0; padding:0.4rem 0.75rem;" onclick="addDemandNote()">Anotar</button>
+                </div>
+                <div style="font-size:0.62rem; color:var(--text-secondary); margin-top:0.3rem; opacity:0.7;">Ctrl+Enter para anotar rapidamente</div>
+            </div>
+
+            <div style="margin-top:1rem;">
+                <button class="btn btn-primary" onclick="saveDemandEdit()">Salvar</button>
+                <button class="btn btn-secondary" onclick="closeEditDemand()" style="margin-left: 0.5rem;">Cancelar</button>
+            </div>
         </div>
     </div>
 
@@ -4621,6 +4642,10 @@
             renderDemandChecklistDraftEditor(true);
 
             document.getElementById('editDemandModal').classList.add('show');
+            // Limpar e carregar anotações
+            const notesInput = document.getElementById('demandNoteInput');
+            if (notesInput) notesInput.value = '';
+            loadDemandNotes(id);
         }
 
         function closeEditDemand() {
@@ -8183,6 +8208,68 @@
             } catch (e) {
                 alert('Erro ao abrir Whiteboard. Verifique sua conexão.');
             }
+        }
+
+        // ============= ANOTAÇÕES DE DEMANDA =============
+        async function loadDemandNotes(demandId) {
+            const container = document.getElementById('demandNotesList');
+            if (!container) return;
+            container.innerHTML = '<span style="font-size:0.72rem; color:var(--text-secondary);">Carregando...</span>';
+            try {
+                const r = await fetchWithRetry(`${API_URL}/demands/${demandId}/notes`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (!r.ok) { container.innerHTML = ''; return; }
+                const notes = await r.json();
+                if (!notes.length) {
+                    container.innerHTML = '<span style="font-size:0.72rem; color:var(--text-secondary); font-style:italic;">Nenhuma anotação ainda.</span>';
+                    return;
+                }
+                container.innerHTML = notes.map(n => {
+                    const dt = n.createdAt
+                        ? new Date(n.createdAt + (n.createdAt.endsWith('Z') ? '' : 'Z'))
+                            .toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})
+                        : '';
+                    const canDelete = currentUser && (n.userId === currentUser.id || currentUser.isAdmin);
+                    return `<div style="background:var(--panel-raised); border-radius:var(--radius); padding:0.55rem 0.7rem; border-left:2px solid var(--amber-dim);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
+                            <span style="font-size:0.65rem; font-weight:700; color:var(--amber);">${escapeHtml(n.username || '?')}</span>
+                            <div style="display:flex; align-items:center; gap:0.5rem;">
+                                <span style="font-size:0.6rem; color:var(--text-secondary);">${dt}</span>
+                                ${canDelete ? `<button onclick="deleteDemandNote(${n.demandId},${n.id})" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:0.75rem;padding:0;line-height:1;" title="Remover">✕</button>` : ''}
+                            </div>
+                        </div>
+                        <div style="font-size:0.78rem; color:var(--text-primary); white-space:pre-wrap; line-height:1.4;">${escapeHtml(n.content)}</div>
+                    </div>`;
+                }).join('');
+                container.scrollTop = container.scrollHeight;
+            } catch (e) { container.innerHTML = ''; }
+        }
+
+        async function addDemandNote() {
+            if (!editingDemandId) return;
+            const input = document.getElementById('demandNoteInput');
+            const content = (input.value || '').trim();
+            if (!content) return;
+            input.disabled = true;
+            try {
+                const r = await fetchWithRetry(`${API_URL}/demands/${editingDemandId}/notes`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ content })
+                }, 1);
+                if (r.ok) { input.value = ''; loadDemandNotes(editingDemandId); }
+            } catch (e) {} finally { input.disabled = false; input.focus(); }
+        }
+
+        async function deleteDemandNote(demandId, noteId) {
+            if (!confirm('Remover esta anotação?')) return;
+            try {
+                const r = await fetchWithRetry(`${API_URL}/demands/${demandId}/notes/${noteId}`, {
+                    method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (r.ok) loadDemandNotes(demandId);
+            } catch (e) {}
         }
 
         async function loadAdminUsers() {
