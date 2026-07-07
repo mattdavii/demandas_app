@@ -1553,14 +1553,27 @@
                             <option value="all">Todas as Demandas</option>
                         </select>
                     </div>
-                    <div class="form-group" style="margin-bottom:0; flex:1; min-width:180px;">
+                    <div class="form-group" style="margin-bottom:0; flex:1; min-width:180px; position:relative;">
                         <label>Grupos</label>
-                        <div id="dashboardGroupFilter" style="background:var(--panel-raised); border:1px solid var(--border);
-                            border-radius:var(--radius); padding:0.4rem 0.6rem; max-height:130px; overflow-y:auto; font-size:0.78rem;">
-                            <label style="display:flex; align-items:center; gap:0.5rem; padding:2px 0; cursor:pointer; color:var(--text-primary); font-size:0.78rem; text-transform:none; letter-spacing:0;">
-                                <input type="checkbox" id="dashGroupAll" checked onchange="onDashGroupAllChange()" style="accent-color:var(--amber);"> Todos os grupos
+                        <button id="dashGroupBtn" onclick="toggleDashGroupDropdown()"
+                            style="width:100%; background:var(--panel-raised); border:1px solid var(--border);
+                            border-radius:var(--radius); padding:0.5rem 0.85rem; text-align:left;
+                            color:var(--text-primary); font-family:inherit; font-size:0.82rem;
+                            cursor:pointer; display:flex; justify-content:space-between; align-items:center;">
+                            <span id="dashGroupBtnLabel">Todos os grupos</span>
+                            <span style="color:var(--text-secondary); font-size:0.7rem;">▼</span>
+                        </button>
+                        <div id="dashGroupDropdown" style="display:none; position:absolute; top:calc(100% + 4px); left:0; right:0;
+                            background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+                            z-index:500; box-shadow:0 8px 24px rgba(0,0,0,0.5); max-height:220px; overflow-y:auto;">
+                            <label style="display:flex; align-items:center; gap:0.6rem; padding:0.6rem 0.85rem;
+                                cursor:pointer; border-bottom:1px solid var(--border); font-size:0.78rem;
+                                color:var(--amber); font-weight:600;">
+                                <input type="checkbox" id="dashGroupAll" checked onchange="onDashGroupAllChange()"
+                                    style="accent-color:var(--amber); width:14px; height:14px;">
+                                Todos os grupos
                             </label>
-                            <div id="dashGroupCheckboxes" style="display:flex; flex-direction:column; gap:2px; margin-top:4px; border-top:1px solid var(--border); padding-top:4px;"></div>
+                            <div id="dashGroupCheckboxes"></div>
                         </div>
                     </div>
                     <div class="form-group" style="margin-bottom:0; flex-basis:100%; width:100%;">
@@ -6461,8 +6474,42 @@
         }
 
         // ============= DASHBOARD =============
+        function toggleDashGroupDropdown() {
+            const dd = document.getElementById('dashGroupDropdown');
+            if (!dd) return;
+            const isOpen = dd.style.display !== 'none';
+            dd.style.display = isOpen ? 'none' : 'block';
+        }
+
+        // Fechar dropdown ao clicar fora
+        document.addEventListener('click', function(e) {
+            const btn = document.getElementById('dashGroupBtn');
+            const dd  = document.getElementById('dashGroupDropdown');
+            if (dd && btn && !btn.contains(e.target) && !dd.contains(e.target)) {
+                dd.style.display = 'none';
+            }
+        });
+
+        function updateDashGroupBtnLabel() {
+            const label = document.getElementById('dashGroupBtnLabel');
+            if (!label) return;
+            const allChk = document.getElementById('dashGroupAll');
+            if (allChk && allChk.checked) {
+                label.textContent = 'Todos os grupos';
+                return;
+            }
+            const selected = [...document.querySelectorAll('.dashGroupChk:checked')];
+            if (selected.length === 0) {
+                label.textContent = 'Todos os grupos';
+            } else if (selected.length === 1) {
+                const g = currentGroups.find(g => String(g.id) === selected[0].value);
+                label.textContent = g ? `${g.emoji || ''} ${g.name}`.trim() : '1 grupo';
+            } else {
+                label.textContent = `${selected.length} grupos selecionados`;
+            }
+        }
+
         function getSelectedGroupIds() {
-            // Retorna array de IDs selecionados, ou [] se "Todos"
             const allChk = document.getElementById('dashGroupAll');
             if (!allChk || allChk.checked) return [];
             return [...document.querySelectorAll('.dashGroupChk:checked')].map(c => c.value);
@@ -6474,6 +6521,7 @@
                 c.checked = false;
                 c.disabled = allChk.checked;
             });
+            updateDashGroupBtnLabel();
             loadDashboardStats();
         }
 
@@ -6481,6 +6529,7 @@
             const anyChecked = [...document.querySelectorAll('.dashGroupChk:checked')].length > 0;
             const allChk = document.getElementById('dashGroupAll');
             if (allChk) allChk.checked = !anyChecked;
+            updateDashGroupBtnLabel();
             loadDashboardStats();
         }
 
@@ -6489,11 +6538,25 @@
             if (!container) return;
             const selectedIds = getSelectedGroupIds();
             container.innerHTML = currentGroups.map(g => {
-                const typeLabel = g.groupType ? ` <span style="color:var(--text-secondary);font-size:0.65rem;">[${g.groupType}]</span>` : '';
+                const typeLabel = g.groupType
+                    ? `<span style="font-size:0.6rem; color:var(--text-secondary);">[${g.groupType}]</span>`
+                    : '';
                 const checked = selectedIds.includes(String(g.id));
-                return `<label style="display:flex; align-items:center; gap:0.5rem; padding:2px 0; cursor:pointer; font-size:0.78rem; text-transform:none; letter-spacing:0; color:var(--text-primary);">
-                    <input type="checkbox" class="dashGroupChk" value="${g.id}" ${checked?'checked':''} onchange="onDashGroupChkChange()" style="accent-color:${g.color||'var(--amber)'};">
-                    ${escapeHtml(g.emoji||'')} ${escapeHtml(g.name)}${typeLabel}
+                const dotColor = g.color || 'var(--amber)';
+                return `<label style="display:flex; align-items:center; gap:0.6rem; padding:0.5rem 0.85rem;
+                    cursor:pointer; font-size:0.78rem; color:var(--text-primary);
+                    border-bottom:1px solid rgba(255,255,255,0.04); transition:background .1s;"
+                    onmouseover="this.style.background='var(--panel-raised)'"
+                    onmouseout="this.style.background=''"
+                    >
+                    <input type="checkbox" class="dashGroupChk" value="${g.id}"
+                        ${checked ? 'checked' : ''}
+                        ${document.getElementById('dashGroupAll')?.checked ? 'disabled' : ''}
+                        onchange="onDashGroupChkChange()"
+                        style="accent-color:${dotColor}; width:14px; height:14px; flex-shrink:0;">
+                    <span style="width:8px; height:8px; border-radius:50%; background:${dotColor}; flex-shrink:0;"></span>
+                    <span style="flex:1;">${escapeHtml(g.emoji || '')} ${escapeHtml(g.name)}</span>
+                    ${typeLabel}
                 </label>`;
             }).join('');
         }
