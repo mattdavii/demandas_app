@@ -2289,6 +2289,7 @@ def get_history():
     for _col in [
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS type_id INTEGER",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS action_type VARCHAR(30)",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS notes_snapshot JSON",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
     ]:
         try:
@@ -2396,6 +2397,7 @@ def get_activity_feed():
     for _col in [
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS action_type VARCHAR(30)",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS type_id INTEGER",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS notes_snapshot JSON",
     ]:
         try:
             db.session.execute(text(_col))
