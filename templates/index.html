@@ -6628,10 +6628,11 @@
         }
 
         function onDashLocAllChange() {
+            const allChk = document.getElementById('dashLocAll');
             _selectedLocations.clear();
             document.querySelectorAll('.dashLocChk').forEach(c => {
                 c.checked = false;
-                c.disabled = true;
+                c.disabled = allChk.checked; // desabilita só quando "Todos" está marcado
             });
             updateDashLocBtnLabel();
             loadDashboardStats();
