@@ -6630,10 +6630,8 @@
         function onDashLocAllChange() {
             const allChk = document.getElementById('dashLocAll');
             _selectedLocations.clear();
-            document.querySelectorAll('.dashLocChk').forEach(c => {
-                c.checked = false;
-                c.disabled = allChk.checked; // desabilita só quando "Todos" está marcado
-            });
+            // Re-renderiza com todosChecked refletindo o novo estado
+            populateDashboardLocationFilter();
             updateDashLocBtnLabel();
             loadDashboardStats();
         }
@@ -6657,7 +6655,10 @@
                 window._cachedHistory.forEach(h => { if (h.location) locs.add(h.location.trim()); });
             }
             const sorted = [...locs].sort((a, b) => a.localeCompare(b, 'pt-BR'));
-            const allChecked = _selectedLocations.size === 0;
+
+            // Usa o estado do checkbox "Todos" para saber se individuais devem estar disabled
+            const allChkEl = document.getElementById('dashLocAll');
+            const todosChecked = allChkEl ? allChkEl.checked : (_selectedLocations.size === 0);
 
             container.innerHTML = sorted.map(loc => {
                 const sel = _selectedLocations.has(loc);
@@ -6667,8 +6668,8 @@
                     border-bottom:1px solid rgba(255,255,255,0.04);"
                     onmouseover="this.style.background='var(--panel-raised)'"
                     onmouseout="this.style.background=''">
-                    <input type="checkbox" class="dashLocChk" ${sel ? 'checked' : ''} ${allChecked ? 'disabled' : ''}
-                        onchange="onDashLocChkChange('${loc.replace(/'/g,"\\'").replace(/"/g,'&quot;')}', this.checked)"
+                    <input type="checkbox" class="dashLocChk" ${sel ? 'checked' : ''} ${todosChecked ? 'disabled' : ''}
+                        onchange="onDashLocChkChange('${loc.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;')}', this.checked)"
                         style="accent-color:var(--amber); width:14px; height:14px; flex-shrink:0;">
                     <span title="${escapeHtml(loc)}" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(short)}</span>
                 </label>`;
@@ -6677,6 +6678,9 @@
             if (!sorted.length) {
                 container.innerHTML = '<div style="padding:0.75rem 0.85rem; font-size:0.75rem; color:var(--text-secondary);">Nenhum local encontrado</div>';
             }
+
+            // Sincroniza o checkbox "Todos"
+            if (allChkEl) allChkEl.checked = todosChecked;
         }
 
         function escapeForAttr(str) {
