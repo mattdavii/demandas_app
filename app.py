@@ -2904,10 +2904,29 @@ def cron_maintenance_notify():
 _agent_schema_ok = False
 
 def get_demand_notes_snapshot(demand_id):
-    """Captura snapshot das anotações de uma demanda ao ser concluída."""
-    notes = DemandNote.query.filter_by(demand_id=demand_id).order_by(DemandNote.created_at.asc()).all()
-    return [{'username': n.username, 'content': n.content,
-             'createdAt': n.created_at.isoformat() if n.created_at else None} for n in notes]
+    """Captura snapshot das anotações de uma demanda ao ser concluída.
+    Cria a tabela se não existir e retorna [] em caso de qualquer erro."""
+    try:
+        # Garante que a tabela existe antes de consultar
+        db.session.execute(text("""
+            CREATE TABLE IF NOT EXISTS demand_notes (
+                id SERIAL PRIMARY KEY,
+                demand_id INTEGER NOT NULL REFERENCES demands(id) ON DELETE CASCADE,
+                user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                username VARCHAR(80),
+                content TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW()
+            )"""))
+        db.session.commit()
+        notes = DemandNote.query.filter_by(demand_id=demand_id)\
+            .order_by(DemandNote.created_at.asc()).all()
+        return [{'username': n.username, 'content': n.content,
+                 'createdAt': n.created_at.isoformat() if n.created_at else None}
+                for n in notes]
+    except Exception as e:
+        db.session.rollback()
+        print(f'[demand_notes] erro ao capturar snapshot: {e}')
+        return []
 
 
 def ensure_agent_schema():
@@ -3338,6 +3357,12 @@ def get_demand_notes(demand_id):
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
     demand = ws_filter(Demand, user_id, workspace_id, {'id': demand_id}).first_or_404()
+    # Garante que a tabela demand_notes existe
+    try:
+        db.session.execute(text("CREATE TABLE IF NOT EXISTS demand_notes (id SERIAL PRIMARY KEY, demand_id INTEGER NOT NULL REFERENCES demands(id) ON DELETE CASCADE, user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, username VARCHAR(80), content TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW())"))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
     notes = DemandNote.query.filter_by(demand_id=demand_id).order_by(DemandNote.created_at.asc()).all()
     return jsonify([n.to_dict() for n in notes]), 200
 
@@ -3352,6 +3377,12 @@ def add_demand_note(demand_id):
     content = (data.get('content') or '').strip()
     if not content:
         return jsonify({'error': 'Conteúdo obrigatório'}), 400
+    # Garante que a tabela demand_notes existe antes de inserir
+    try:
+        db.session.execute(text("CREATE TABLE IF NOT EXISTS demand_notes (id SERIAL PRIMARY KEY, demand_id INTEGER NOT NULL REFERENCES demands(id) ON DELETE CASCADE, user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, username VARCHAR(80), content TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW())"))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
     user = User.query.get(user_id)
     note = DemandNote(
         demand_id=demand_id,
