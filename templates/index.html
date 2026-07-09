@@ -4517,7 +4517,7 @@
             const priority = document.getElementById('newPriority').value;
             const status = document.getElementById('newStatus').value;
             const due_date = document.getElementById('newDueDate').value;
-            const reminder_at = document.getElementById('newReminderAt').value;
+            const reminder_at = localDatetimeToUTC(document.getElementById('newReminderAt').value);
             const assigned_to_user_id = document.getElementById('newAssignedToUserId').value;
             const type_id = document.getElementById('newTypeId')?.value || null;
 
@@ -4666,7 +4666,7 @@
             }
             document.getElementById('editDemandRecurrenceType').value = demand.recurrenceType || '';
             document.getElementById('editDemandDueDate').value = demand.dueDate || '';
-            document.getElementById('editDemandReminderAt').value = demand.reminderAt ? demand.reminderAt.slice(0, 16) : '';
+            document.getElementById('editDemandReminderAt').value = demand.reminderAt ? utcToLocalDatetimeInput(demand.reminderAt) : '';
             editDemandChecklistDraft = (demand.checklist || []).map(item => ({ text: item.text, checked: !!item.checked }));
             renderDemandChecklistDraftEditor(true);
 
@@ -4689,7 +4689,7 @@
             const newStatus = document.getElementById('editDemandStatus').value;
             const statusChanged = newStatus !== editingDemandOriginalStatus;
             const dueDate = document.getElementById('editDemandDueDate').value;
-            const reminderAt = document.getElementById('editDemandReminderAt').value;
+            const reminderAt = localDatetimeToUTC(document.getElementById('editDemandReminderAt').value);
             const assignedToUserId = document.getElementById('editDemandAssignedToUserId').value;
 
             const btn = event.target;
@@ -5054,6 +5054,22 @@
             const m = String(date.getMonth() + 1).padStart(2, '0');
             const d = String(date.getDate()).padStart(2, '0');
             return `${y}-${m}-${d}`;
+        }
+
+        // Converte valor de datetime-local (horário local do usuário) para ISO UTC
+        // Ex: "2026-07-08T17:00" em Brasília (UTC-3) → "2026-07-08T20:00:00.000Z"
+        function localDatetimeToUTC(localStr) {
+            if (!localStr) return null;
+            return new Date(localStr).toISOString();
+        }
+
+        // Converte ISO UTC para string compatível com input datetime-local (horário local)
+        // Ex: "2026-07-08T20:00:00Z" → "2026-07-08T17:00" (Brasília)
+        function utcToLocalDatetimeInput(isoUtc) {
+            if (!isoUtc) return '';
+            const d = new Date(isoUtc);
+            const pad = n => String(n).padStart(2, '0');
+            return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
         }
 
         // ============= NOTAS =============
