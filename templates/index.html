@@ -4615,8 +4615,9 @@
 
                 if (response.ok) {
                     closeDemandDetailModal();
-                    invalidateHistoryCache(); // demanda concluída → histórico desatualizado
+                    invalidateHistoryCache();
                     await loadDemands();
+                    loadTodayPage();
                 } else {
                     const data = await response.json().catch(() => ({}));
                     alert(data.error || 'Erro ao concluir demanda');
@@ -4743,7 +4744,9 @@
                 }
 
                 closeEditDemand();
+                invalidateHistoryCache();
                 loadDemands();
+                loadTodayPage();
                 if (currentWorkspaceRole === 'admin') loadPendingApprovals();
             } catch (e) {
                 console.error('Erro de conexão, salvando localmente para sincronizar depois:', e);
