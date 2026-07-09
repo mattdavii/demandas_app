@@ -1785,7 +1785,7 @@ def create_demand():
         due_date=datetime.strptime(data['due_date'], '%Y-%m-%d').date() if data.get('due_date') else None,
         assigned_to=data.get('assigned_to', ''),
         assigned_to_user_id=assigned_to_user_id,
-        reminder_at=datetime.strptime(data['reminder_at'], '%Y-%m-%dT%H:%M') if data.get('reminder_at') else None,
+        reminder_at=parse_reminder_at(data.get('reminder_at')),
         checklist=data.get('checklist', []),
         is_recurring=bool(data.get('is_recurring', False)),
         recurrence_type=data.get('recurrence_type') or None
@@ -1836,7 +1836,7 @@ def update_demand(demand_id):
             notify_assignment(demand, User.query.get(new_assignee_id), user_id)
     if 'reminder_at' in data:
         if data['reminder_at']:
-            demand.reminder_at = datetime.strptime(data['reminder_at'], '%Y-%m-%dT%H:%M')
+            demand.reminder_at = parse_reminder_at(data['reminder_at'])
             demand.reminder_sent = False  # rearma o lembrete se a data/hora mudou
         else:
             demand.reminder_at = None
@@ -2902,6 +2902,40 @@ def cron_maintenance_notify():
 
 
 _agent_schema_ok = False
+
+def parse_reminder_at(value):
+    """Parse de reminder_at enviado pelo frontend.
+    Aceita múltiplos formatos:
+      "2026-07-08T17:00"          (datetime-local sem timezone — legado)
+      "2026-07-08T20:00:00.000Z"  (ISO UTC com Z — novo formato)
+      "2026-07-08T20:00:00+00:00" (ISO UTC com offset)
+    Sempre retorna datetime naive em UTC (para comparar com datetime.now() no servidor UTC).
+    """
+    if not value:
+        return None
+    try:
+        # Remove sufixo Z e substitui por offset +00:00 para fromisoformat funcionar
+        s = str(value).strip()
+        if s.endswith('Z'):
+            s = s[:-1] + '+00:00'
+        # Remove milissegundos se presentes (ex: .000)
+        import re as _re
+        s = _re.sub(r'\.\d+(\+)', r'\1', s)
+        s = _re.sub(r'\.\d+$', '', s)
+        dt = datetime.fromisoformat(s)
+        # Se tem timezone, converte para UTC naive
+        if dt.tzinfo is not None:
+            import datetime as _dt
+            utc = _dt.timezone.utc
+            dt = dt.astimezone(utc).replace(tzinfo=None)
+        return dt
+    except Exception:
+        # Fallback para formato legado sem timezone
+        try:
+            return datetime.strptime(value[:16], '%Y-%m-%dT%H:%M')
+        except Exception:
+            return None
+
 
 def get_demand_notes_snapshot(demand_id):
     """Captura snapshot das anotações de uma demanda ao ser concluída.
