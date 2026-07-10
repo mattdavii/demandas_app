@@ -1436,6 +1436,7 @@
                     <button class="btn btn-sm" style="width: auto; background: transparent; color: var(--led-green); border: 1px solid var(--led-green);" onclick="showWhatsAppText()">💬 Gerar Texto WhatsApp</button>
                     <input type="date" id="exportReportDate" style="width: auto; padding: 0.4rem 0.6rem; font-size: 0.75rem;">
                     <button class="btn btn-sm" style="width: auto; background: transparent; color: var(--led-blue); border: 1px solid var(--led-blue);" onclick="downloadDemandsHtml()">📄 Exportar HTML</button>
+                    <button class="btn btn-sm" style="width: auto; background: transparent; color: var(--led-purple, #b388ff); border: 1px solid var(--led-purple, #b388ff);" onclick="showExportByStatusModal()">📋 Exportar por Status</button>
                 </div>
             </div>
 
@@ -2422,6 +2423,40 @@
             <div style="margin-top:1rem;">
                 <button class="btn btn-primary" onclick="saveDemandEdit()">Salvar</button>
                 <button class="btn btn-secondary" onclick="closeEditDemand()" style="margin-left: 0.5rem;">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: EXPORTAR POR STATUS -->
+    <div id="exportByStatusModal" class="modal">
+        <div class="modal-content" style="max-width:500px;">
+            <span class="close-modal" onclick="document.getElementById('exportByStatusModal').classList.remove('show')">&times;</span>
+            <div class="modal-header">📋 Exportar Demandas por Status</div>
+            <p style="font-size:0.78rem; color:var(--text-secondary); margin-bottom:1rem;">
+                Selecione os status que deseja incluir no relatório. Todas as informações serão exportadas, incluindo checklist e anotações.
+            </p>
+            <div class="form-group">
+                <label>Status a incluir</label>
+                <div id="exportStatusCheckboxes" style="background:var(--panel-raised); border:1px solid var(--border); border-radius:var(--radius); padding:0.5rem; max-height:200px; overflow-y:auto; display:flex; flex-direction:column; gap:0.3rem;"></div>
+            </div>
+            <div class="form-group">
+                <label>Ordenar por</label>
+                <select id="exportStatusOrderBy">
+                    <option value="group">Grupo</option>
+                    <option value="priority">Prioridade</option>
+                    <option value="due">Prazo</option>
+                    <option value="location">Local</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label style="display:flex; align-items:center; gap:0.5rem; font-size:0.82rem; text-transform:none; letter-spacing:0; cursor:pointer;">
+                    <input type="checkbox" id="exportIncludeNotes" checked style="accent-color:var(--amber);"> Incluir anotações das demandas
+                </label>
+            </div>
+            <div id="exportByStatusAlert" class="alert"></div>
+            <div style="display:flex; gap:0.75rem;">
+                <button class="btn btn-primary" style="flex:2;" onclick="downloadByStatusHtml()">📥 Gerar Relatório</button>
+                <button class="btn btn-secondary" style="flex:1;" onclick="document.getElementById('exportByStatusModal').classList.remove('show')">Cancelar</button>
             </div>
         </div>
     </div>
@@ -7978,6 +8013,195 @@
   ${statusSectionsHtml}
 </body>
 </html>`;
+        }
+
+        // ============= EXPORTAÇÃO POR STATUS =============
+        function showExportByStatusModal() {
+            const container = document.getElementById('exportStatusCheckboxes');
+            if (!container) return;
+            // Todos os status configurados
+            container.innerHTML = currentStatusConfigs.map(s => `
+                <label style="display:flex; align-items:center; gap:0.6rem; padding:3px 2px; cursor:pointer; font-size:0.78rem; text-transform:none; letter-spacing:0; color:var(--text-primary);">
+                    <input type="checkbox" class="exportStatusChk" value="${escapeHtml(s.key)}" ${!s.isCompleted ? 'checked' : ''}
+                        style="accent-color:${s.color || 'var(--amber)'}; width:14px; height:14px;">
+                    <span style="width:8px; height:8px; border-radius:50%; background:${s.color || 'var(--text-secondary)'}; flex-shrink:0;"></span>
+                    ${escapeHtml(s.emoji || '')} ${escapeHtml(s.label || s.key)}
+                    ${s.isCompleted ? '<span style="font-size:0.62rem; color:var(--text-secondary);">(conclusivo)</span>' : ''}
+                </label>`).join('');
+            document.getElementById('exportByStatusAlert').innerHTML = '';
+            document.getElementById('exportByStatusModal').classList.add('show');
+        }
+
+        async function downloadByStatusHtml() {
+            const selected = [...document.querySelectorAll('.exportStatusChk:checked')].map(c => c.value);
+            if (!selected.length) {
+                showAlert('exportByStatusAlert', 'Selecione pelo menos um status', 'danger');
+                return;
+            }
+            const orderBy     = document.getElementById('exportStatusOrderBy').value;
+            const inclNotes   = document.getElementById('exportIncludeNotes').checked;
+            const btn = event.target; btn.disabled = true; btn.textContent = 'Gerando...';
+
+            try {
+                // Filtrar demandas pelos status selecionados
+                let demands = currentDemands.filter(d => selected.includes(d.status));
+
+                // Ordenar
+                const termKeys = new Set(currentStatusConfigs.filter(s => s.isCompleted).map(s => s.key));
+                if (orderBy === 'priority') {
+                    const pOrder = currentPriorityConfigs.map(p => p.key);
+                    demands = demands.sort((a, b) => pOrder.indexOf(a.priority) - pOrder.indexOf(b.priority));
+                } else if (orderBy === 'due') {
+                    demands = demands.sort((a, b) => {
+                        if (!a.dueDate) return 1; if (!b.dueDate) return -1;
+                        return a.dueDate.localeCompare(b.dueDate);
+                    });
+                } else if (orderBy === 'location') {
+                    demands = demands.sort((a, b) => (a.location || '').localeCompare(b.location || '', 'pt-BR'));
+                } else {
+                    // Por grupo
+                    demands = demands.sort((a, b) => {
+                        const gA = currentGroups.findIndex(g => g.id === a.workGroupId);
+                        const gB = currentGroups.findIndex(g => g.id === b.workGroupId);
+                        return gA - gB;
+                    });
+                }
+
+                // Buscar anotações se solicitado
+                let notesMap = {};
+                if (inclNotes && demands.length > 0) {
+                    try {
+                        const ids = demands.map(d => d.id).join(',');
+                        const r = await fetchWithRetry(`${API_URL}/demands/export-notes?ids=${ids}`, {
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        }, 1);
+                        if (r.ok) notesMap = await r.json();
+                    } catch (e) { console.error('Erro ao buscar notas:', e); }
+                }
+
+                // Gerar HTML
+                const html = generateStatusExportHtml(demands, notesMap, selected, orderBy);
+                const blob = new Blob([html], { type: 'text/html; charset=utf-8' });
+                const url  = URL.createObjectURL(blob);
+                const a    = document.createElement('a');
+                a.href = url;
+                a.download = `demandas_${selected.join('-')}_${toLocalISODate(new Date())}.html`;
+                a.click();
+                URL.revokeObjectURL(url);
+                document.getElementById('exportByStatusModal').classList.remove('show');
+            } catch (e) {
+                showAlert('exportByStatusAlert', 'Erro ao gerar relatório: ' + e.message, 'danger');
+            } finally {
+                btn.disabled = false; btn.textContent = '📥 Gerar Relatório';
+            }
+        }
+
+        function generateStatusExportHtml(demands, notesMap, selectedStatuses, orderBy) {
+            const today = toLocalISODate(new Date());
+            const logoHtml = getReportLogoHtml();
+            const wsName = currentWorkspace?.name || 'Painel de Bordo';
+            const statusLabels = selectedStatuses.map(k => {
+                const s = currentStatusConfigs.find(sc => sc.key === k);
+                return s ? `${s.emoji || ''} ${s.label || k}`.trim() : k;
+            }).join(', ');
+
+            const orderLabels = {group:'Grupo', priority:'Prioridade', due:'Prazo', location:'Local'};
+
+            const demandCards = demands.map(d => {
+                const group = currentGroups.find(g => g.id === d.workGroupId);
+                const groupColor = group?.color || '#5b6168';
+                const groupName = group ? `${group.emoji || '📌'} ${group.name}` : 'Sem Grupo';
+                const status = currentStatusConfigs.find(s => s.key === d.status);
+                const statusColor = status?.color || '#9aa0a7';
+                const priority = currentPriorityConfigs.find(p => p.key === d.priority);
+                const priorityColor = priority?.color || '#9aa0a7';
+                const overdue = d.dueDate && d.dueDate < today;
+
+                // Checklist
+                let checklistHtml = '';
+                if (d.checklist?.length) {
+                    const done = d.checklist.filter(i => i.checked).length;
+                    const pct  = Math.round(done / d.checklist.length * 100);
+                    checklistHtml = `
+                        <div style="margin-top:10px; padding:8px 10px; background:#161b22; border-radius:4px; border:1px solid #30363d;">
+                            <div style="font-size:10px; color:#868d95; display:flex; justify-content:space-between; margin-bottom:6px;">
+                                <span>☑ Checklist</span>
+                                <span style="color:${pct===100?'#3ddc84':'#f5a623'};">${done}/${d.checklist.length} (${pct}%)</span>
+                            </div>
+                            <div style="background:#30363d; height:3px; border-radius:2px; margin-bottom:6px;">
+                                <div style="background:${pct===100?'#3ddc84':'#f5a623'}; height:3px; border-radius:2px; width:${pct}%;"></div>
+                            </div>
+                            ${d.checklist.map(i => `
+                                <div style="display:flex; gap:6px; font-size:11px; margin:2px 0; ${i.checked?'opacity:.5':''}">
+                                    <span style="color:${i.checked?'#3ddc84':'#555'}; flex-shrink:0;">${i.checked?'☑':'☐'}</span>
+                                    <span style="${i.checked?'text-decoration:line-through;color:#868d95;':''}">${escapeHtml(i.text)}</span>
+                                </div>`).join('')}
+                        </div>`;
+                }
+
+                // Anotações
+                let notesHtml = '';
+                const demandNotes = notesMap[String(d.id)] || [];
+                if (demandNotes.length) {
+                    notesHtml = `
+                        <div style="margin-top:10px; padding:8px 10px; background:#0d1117; border-radius:4px; border:1px solid #f5a623; border-left:3px solid #f5a623;">
+                            <div style="font-size:10px; color:#f5a623; font-weight:700; margin-bottom:6px;">📝 ANOTAÇÕES</div>
+                            ${demandNotes.map(n => {
+                                const dt = n.createdAt
+                                    ? new Date(n.createdAt + (n.createdAt.endsWith('Z')?'':'Z'))
+                                        .toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})
+                                    : '';
+                                return `<div style="margin-bottom:6px; padding-bottom:6px; border-bottom:1px solid #1f2937;">
+                                    <div style="display:flex; justify-content:space-between; font-size:9px; color:#868d95; margin-bottom:2px;">
+                                        <span style="color:#f5a623;">${escapeHtml(n.username||'?')}</span>
+                                        <span>${dt}</span>
+                                    </div>
+                                    <div style="font-size:11px; color:#c9d1d9; white-space:pre-wrap;">${escapeHtml(n.content)}</div>
+                                </div>`;
+                            }).join('')}
+                        </div>`;
+                }
+
+                return `
+                <div style="background:#1c2128; border:1px solid #30363d; border-left:4px solid ${groupColor}; border-radius:6px; padding:14px 16px; margin-bottom:12px;">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
+                        <div>
+                            <span style="font-size:10px; background:${groupColor}22; color:${groupColor}; border:1px solid ${groupColor}55; border-radius:3px; padding:2px 8px;">${escapeHtml(groupName)}</span>
+                            ${d.assignedToName ? `<span style="font-size:10px; color:#868d95; margin-left:6px;">👤 ${escapeHtml(d.assignedToName)}</span>` : ''}
+                        </div>
+                        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                            <span style="font-size:10px; font-weight:700; padding:2px 8px; border-radius:3px; border:1px solid ${statusColor}; color:${statusColor};">${escapeHtml(status?.label||d.status)}</span>
+                            ${d.priority ? `<span style="font-size:10px; font-weight:700; padding:2px 8px; border-radius:3px; border:1px solid ${priorityColor}; color:${priorityColor};">${escapeHtml(d.priority)}</span>` : ''}
+                        </div>
+                    </div>
+                    ${d.location ? `<div style="font-size:11px; color:#868d95; text-transform:uppercase; letter-spacing:.04em; margin-bottom:4px;">${escapeHtml(d.location)}</div>` : ''}
+                    <div style="font-size:14px; font-weight:700; color:#e6edf3; margin-bottom:6px;">${escapeHtml(d.activity)}</div>
+                    ${d.context ? `<div style="font-size:12px; color:#8b949e; margin-bottom:6px;">📌 ${escapeHtml(d.context)}</div>` : ''}
+                    ${d.dueDate ? `<div style="font-size:11px; ${overdue?'color:#ff5b5b;font-weight:700;':'color:#868d95;'}">📅 ${overdue?'⚠️ Atrasada — Vence':'Vence'} em ${formatDateBR(d.dueDate)}</div>` : ''}
+                    ${checklistHtml}
+                    ${notesHtml}
+                </div>`;
+            }).join('');
+
+            return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><title>Demandas — ${escapeHtml(wsName)}</title>
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:#0d1117; color:#c9d1d9; font-family:'Courier New',monospace; padding:2rem; }
+  @media print { body { padding:1rem; } }
+</style></head>
+<body>
+<div style="max-width:860px; margin:0 auto;">
+  ${logoHtml}
+  <h1 style="color:#f5a623; font-size:1.4rem; margin-bottom:4px;">${escapeHtml(wsName)}</h1>
+  <div style="font-size:12px; color:#868d95; margin-bottom:4px;">Gerado em ${new Date().toLocaleString('pt-BR')}</div>
+  <div style="font-size:12px; color:#868d95; margin-bottom:4px;">Status: ${escapeHtml(statusLabels)}</div>
+  <div style="font-size:12px; color:#868d95; margin-bottom:2rem;">Ordenado por: ${orderLabels[orderBy] || orderBy} · ${demands.length} demanda(s)</div>
+  ${demands.length ? demandCards : '<div style="text-align:center; padding:3rem; color:#868d95;">Nenhuma demanda encontrada para os status selecionados.</div>'}
+  <div style="margin-top:2rem; border-top:1px solid #30363d; padding-top:1rem; font-size:10px; color:#555; text-align:center;">PAINEL DE BORDO · MD SOLUÇÕES TECNOLÓGICAS</div>
+</div>
+</body></html>`;
         }
 
         async function downloadDemandsHtml() {
