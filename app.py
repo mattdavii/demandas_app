@@ -3429,6 +3429,21 @@ def get_demand_notes(demand_id):
     return jsonify([n.to_dict() for n in notes]), 200
 
 
+@app.route('/api/demands/<int:demand_id>/notes', methods=['GET'])
+@jwt_required()
+def get_demand_notes(demand_id):
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    ws_filter(Demand, user_id, workspace_id, {'id': demand_id}).first_or_404()
+    try:
+        db.session.execute(text("CREATE TABLE IF NOT EXISTS demand_notes (id SERIAL PRIMARY KEY, demand_id INTEGER NOT NULL REFERENCES demands(id) ON DELETE CASCADE, user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, username VARCHAR(80), content TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW())"))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+    notes = DemandNote.query.filter_by(demand_id=demand_id).order_by(DemandNote.created_at.asc()).all()
+    return jsonify([n.to_dict() for n in notes]), 200
+
+
 @app.route('/api/demands/<int:demand_id>/notes', methods=['POST'])
 @jwt_required()
 def add_demand_note(demand_id):
