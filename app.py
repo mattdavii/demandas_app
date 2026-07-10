@@ -3385,7 +3385,35 @@ def agent_update_note(note_id):
 
 
 # ============= ANOTAÇÕES DE DEMANDA =============
-@app.route('/api/demands/<int:demand_id>/notes', methods=['GET'])
+@app.route('/api/demands/export-notes', methods=['GET'])
+@jwt_required()
+def export_demand_notes():
+    """Retorna todas as notas de um conjunto de demandas (para exportação HTML)."""
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    ids_param = request.args.get('ids', '')
+    if not ids_param:
+        return jsonify({}), 200
+    ids = [int(i) for i in ids_param.split(',') if i.strip().isdigit()]
+    if not ids:
+        return jsonify({}), 200
+    try:
+        db.session.execute(text("CREATE TABLE IF NOT EXISTS demand_notes (id SERIAL PRIMARY KEY, demand_id INTEGER NOT NULL REFERENCES demands(id) ON DELETE CASCADE, user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, username VARCHAR(80), content TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW())"))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+    notes = DemandNote.query.filter(DemandNote.demand_id.in_(ids)).order_by(DemandNote.demand_id, DemandNote.created_at.asc()).all()
+    # Agrupar por demand_id
+    result = {}
+    for n in notes:
+        key = str(n.demand_id)
+        if key not in result:
+            result[key] = []
+        result[key].append({'username': n.username, 'content': n.content,
+                             'createdAt': n.created_at.isoformat() if n.created_at else None})
+    return jsonify(result), 200
+
+
 @jwt_required()
 def get_demand_notes(demand_id):
     user_id = int(get_jwt_identity())
