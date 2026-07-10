@@ -8615,7 +8615,11 @@
                 const r = await fetchWithRetry(`${API_URL}/demands/${demandId}/notes`, {
                     headers: { 'Authorization': `Bearer ${token}` }
                 }, 1);
-                if (!r.ok) { container.innerHTML = ''; return; }
+                if (!r.ok) {
+                    const err = await r.json().catch(() => ({}));
+                    container.innerHTML = `<span style="font-size:0.72rem; color:var(--led-red);">⚠️ Erro ao carregar anotações: ${err.error || r.status}</span>`;
+                    return;
+                }
                 const notes = await r.json();
                 if (!notes.length) {
                     container.innerHTML = '<span style="font-size:0.72rem; color:var(--text-secondary); font-style:italic;">Nenhuma anotação ainda.</span>';
@@ -8639,7 +8643,9 @@
                     </div>`;
                 }).join('');
                 container.scrollTop = container.scrollHeight;
-            } catch (e) { container.innerHTML = ''; }
+            } catch (e) {
+                container.innerHTML = `<span style="font-size:0.72rem; color:var(--led-red);">⚠️ Erro de conexão: ${e.message}</span>`;
+            }
         }
 
         async function addDemandNote() {
@@ -8654,8 +8660,16 @@
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                     body: JSON.stringify({ content })
                 }, 1);
-                if (r.ok) { input.value = ''; loadDemandNotes(editingDemandId); }
-            } catch (e) {} finally { input.disabled = false; input.focus(); }
+                if (r.ok) {
+                    input.value = '';
+                    loadDemandNotes(editingDemandId);
+                } else {
+                    const err = await r.json().catch(() => ({}));
+                    alert(`Erro ao salvar anotação: ${err.error || r.status}`);
+                }
+            } catch (e) {
+                alert(`Erro de conexão ao salvar anotação: ${e.message}`);
+            } finally { input.disabled = false; input.focus(); }
         }
 
         async function deleteDemandNote(demandId, noteId) {
