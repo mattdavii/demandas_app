@@ -3,6 +3,8 @@ import secrets
 import json
 import re
 import threading
+import urllib.request
+import urllib.error
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
@@ -3499,6 +3501,10 @@ def ai_chat():
 
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
+
+    # Garante colunas novas antes de qualquer query ORM
+    ensure_agent_schema()
+
     data = request.get_json() or {}
 
     message  = (data.get('message') or '').strip()
@@ -3508,13 +3514,17 @@ def ai_chat():
 
     user = User.query.get(user_id)
 
-    # Contexto das demandas
+    # Contexto das demandas — SQL direto para WorkGroup evita erro de coluna nova
     terminal_keys = [s.key for s in ws_filter(StatusConfig, user_id, workspace_id, {'is_completed': True}).all()]
-    demands  = ws_filter(Demand, user_id, workspace_id).filter(~Demand.status.in_(terminal_keys)).all() if terminal_keys else ws_filter(Demand, user_id, workspace_id).all()
-    statuses = ws_filter(StatusConfig, user_id, workspace_id).order_by(StatusConfig.order).all()
+    demands   = ws_filter(Demand, user_id, workspace_id).filter(~Demand.status.in_(terminal_keys)).all() if terminal_keys else ws_filter(Demand, user_id, workspace_id).all()
+    statuses  = ws_filter(StatusConfig, user_id, workspace_id).order_by(StatusConfig.order).all()
     priorities = ws_filter(PriorityConfig, user_id, workspace_id).order_by(PriorityConfig.order).all()
-    groups   = ws_filter(WorkGroup, user_id, workspace_id).all()
-    group_map = {g.id: g.name for g in groups}
+    # Raw SQL para WorkGroup (evita erro se group_type não existe no banco ainda)
+    grp_rows = db.session.execute(text(
+        "SELECT id, name, emoji FROM work_groups WHERE workspace_id = :ws OR (workspace_id IS NULL AND user_id = :uid) ORDER BY \"order\" ASC"
+    ), {'ws': workspace_id, 'uid': user_id}).fetchall()
+    groups    = [{'id': r[0], 'name': r[1], 'emoji': r[2] or ''} for r in grp_rows]
+    group_map = {g['id']: g['name'] for g in groups}
 
     demands_ctx = '\n'.join([
         f"- ID:{d.id} [{group_map.get(d.work_group_id,'?')}] {d.location} · {d.activity} | {d.status} | {d.priority or '-'}" +
@@ -3523,7 +3533,7 @@ def ai_chat():
         for d in demands[:60]
     ]) or 'Nenhuma demanda ativa.'
 
-    grupos_ctx = ', '.join([f"ID:{g.id} {g.name}" for g in groups])
+    grupos_ctx = ', '.join([f"ID:{g['id']} {g['name']}" for g in groups])
     status_ctx = ', '.join([s.key for s in statuses])
     prio_ctx   = ', '.join([p.key for p in priorities])
 
@@ -3581,7 +3591,7 @@ REGRAS:
                 action = action_data.get('action')
 
                 if action == 'create_demand':
-                    wg_id = action_data.get('work_group_id') or (groups[0].id if groups else None)
+                    wg_id = action_data.get('work_group_id') or (groups[0]['id'] if groups else None)
                     first_status = statuses[0].key if statuses else 'agendado'
                     first_prio   = priorities[0].key if priorities else 'media'
                     new_demand = Demand(
