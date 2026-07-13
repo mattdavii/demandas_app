@@ -3487,6 +3487,143 @@ def delete_demand_note(demand_id, note_id):
     db.session.commit()
     return jsonify({'message': 'Nota removida'}), 200
 
+
+# ============= ASSISTENTE IA (GEMINI) =============
+@app.route('/api/ai/chat', methods=['POST'])
+@jwt_required()
+def ai_chat():
+    """Chat com Gemini Flash. Requer GEMINI_API_KEY nas variáveis de ambiente."""
+    api_key = os.getenv('GEMINI_API_KEY')
+    if not api_key:
+        return jsonify({'error': 'Assistente IA não configurado. Adicione GEMINI_API_KEY no Render.'}), 503
+
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    data = request.get_json() or {}
+
+    message  = (data.get('message') or '').strip()
+    history  = data.get('history', [])   # [{role: 'user'|'model', text: '...'}]
+    if not message:
+        return jsonify({'error': 'Mensagem vazia'}), 400
+
+    user = User.query.get(user_id)
+
+    # Contexto das demandas
+    terminal_keys = [s.key for s in ws_filter(StatusConfig, user_id, workspace_id, {'is_completed': True}).all()]
+    demands  = ws_filter(Demand, user_id, workspace_id).filter(~Demand.status.in_(terminal_keys)).all() if terminal_keys else ws_filter(Demand, user_id, workspace_id).all()
+    statuses = ws_filter(StatusConfig, user_id, workspace_id).order_by(StatusConfig.order).all()
+    priorities = ws_filter(PriorityConfig, user_id, workspace_id).order_by(PriorityConfig.order).all()
+    groups   = ws_filter(WorkGroup, user_id, workspace_id).all()
+    group_map = {g.id: g.name for g in groups}
+
+    demands_ctx = '\n'.join([
+        f"- ID:{d.id} [{group_map.get(d.work_group_id,'?')}] {d.location} · {d.activity} | {d.status} | {d.priority or '-'}" +
+        (f' | Vence:{d.due_date}' if d.due_date else '') +
+        (' ⚠️ ATRASADA' if d.due_date and str(d.due_date) < str(date.today()) else '')
+        for d in demands[:60]
+    ]) or 'Nenhuma demanda ativa.'
+
+    grupos_ctx = ', '.join([f"ID:{g.id} {g.name}" for g in groups])
+    status_ctx = ', '.join([s.key for s in statuses])
+    prio_ctx   = ', '.join([p.key for p in priorities])
+
+    system_prompt = f"""Você é o Assistente do Painel de Bordo, plataforma de gestão de demandas de {user.full_name or user.username}.
+
+DADOS ATUAIS ({date.today().strftime('%d/%m/%Y')}):
+Grupos disponíveis: {grupos_ctx}
+Status disponíveis: {status_ctx}
+Prioridades disponíveis: {prio_ctx}
+Demandas ativas ({len(demands)}):
+{demands_ctx}
+
+SUAS CAPACIDADES:
+1. Responder perguntas sobre demandas, status, atrasos, resumos
+2. CRIAR DEMANDA — quando pedido, responda SOMENTE o JSON abaixo (sem texto extra):
+   {{"action":"create_demand","location":"LOCAL","activity":"ATIVIDADE","context":"DETALHES OPCIONAIS","work_group_id":ID_DO_GRUPO,"priority":"CHAVE_PRIORIDADE","status":"CHAVE_STATUS"}}
+3. CRIAR NOTA — quando pedido, responda SOMENTE o JSON abaixo:
+   {{"action":"create_note","subject":"TITULO","description":"CONTEUDO"}}
+
+REGRAS:
+- Responda SEMPRE em português brasileiro
+- Para criar demanda/nota: responda APENAS o JSON, sem markdown nem texto adicional
+- Para perguntas normais: responda em texto direto e útil
+- Seja conciso e prático
+- Se o usuário não especificar grupo, use o primeiro disponível
+- Se não especificar prioridade ou status, use o primeiro da lista"""
+
+    # Montar histórico no formato Gemini
+    contents = []
+    for h in history[-10:]:
+        role = 'user' if h.get('role') == 'user' else 'model'
+        contents.append({'role': role, 'parts': [{'text': h.get('text', '')}]})
+    contents.append({'role': 'user', 'parts': [{'text': message}]})
+
+    payload = json.dumps({
+        'system_instruction': {'parts': [{'text': system_prompt}]},
+        'contents': contents,
+        'generationConfig': {'maxOutputTokens': 1024, 'temperature': 0.7}
+    }).encode()
+
+    url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}'
+    req = urllib.request.Request(url, data=payload,
+        headers={'Content-Type': 'application/json'}, method='POST')
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read())
+        reply_text = result['candidates'][0]['content']['parts'][0]['text'].strip()
+
+        # Verificar se é uma ação (JSON)
+        action_result = None
+        if reply_text.startswith('{') and 'action' in reply_text:
+            try:
+                action_data = json.loads(reply_text)
+                action = action_data.get('action')
+
+                if action == 'create_demand':
+                    wg_id = action_data.get('work_group_id') or (groups[0].id if groups else None)
+                    first_status = statuses[0].key if statuses else 'agendado'
+                    first_prio   = priorities[0].key if priorities else 'media'
+                    new_demand = Demand(
+                        user_id=user_id, workspace_id=workspace_id,
+                        work_group_id=wg_id,
+                        location=action_data.get('location',''),
+                        activity=action_data.get('activity',''),
+                        context=action_data.get('context',''),
+                        status=action_data.get('status') or first_status,
+                        priority=action_data.get('priority') or first_prio,
+                        created_date=date.today()
+                    )
+                    db.session.add(new_demand)
+                    db.session.commit()
+                    action_result = {'type': 'demand_created', 'id': new_demand.id,
+                                     'activity': new_demand.activity, 'location': new_demand.location}
+                    reply_text = f"✅ Demanda criada: **{new_demand.location} — {new_demand.activity}**"
+
+                elif action == 'create_note':
+                    new_note = Note(
+                        user_id=user_id,
+                        subject=action_data.get('subject','Nota rápida'),
+                        description=action_data.get('description',''),
+                        checklist=[]
+                    )
+                    db.session.add(new_note)
+                    db.session.commit()
+                    action_result = {'type': 'note_created', 'id': new_note.id,
+                                     'subject': new_note.subject}
+                    reply_text = f"📝 Nota criada: **{new_note.subject}**"
+
+            except (json.JSONDecodeError, Exception) as e:
+                pass  # Não era JSON válido, tratar como texto normal
+
+        return jsonify({'reply': reply_text, 'action': action_result}), 200
+
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode()
+        return jsonify({'error': f'Gemini API error {e.code}: {err_body[:200]}'}), 502
+    except Exception as e:
+        return jsonify({'error': f'Erro: {str(e)[:150]}'}), 502
+
 # ============= ROTAS DE BACKUP =============
 @app.route('/api/export', methods=['GET'])
 @jwt_required()
