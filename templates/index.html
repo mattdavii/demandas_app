@@ -891,6 +891,17 @@
         .note-gadget-body { color: var(--text-secondary); line-height: 1.5; user-select: text; }
 
 
+        /* Chat IA */
+        .ai-msg { padding:0.55rem 0.75rem; border-radius:10px; font-size:0.8rem; line-height:1.55; max-width:90%; word-break:break-word; }
+        .ai-msg-user { background:#0d1f3c; color:#82b4ff; align-self:flex-end; border-bottom-right-radius:3px; }
+        .ai-msg-ai   { background:var(--panel-raised); color:var(--text-primary); align-self:flex-start; border-bottom-left-radius:3px; border:1px solid rgba(26,115,232,0.25); }
+        .ai-msg-ai strong { color:#82b4ff; }
+        .ai-msg-system { font-size:0.7rem; color:var(--text-secondary); align-self:center; font-style:italic; }
+        .ai-msg-typing { background:var(--panel-raised); color:var(--text-secondary); align-self:flex-start; border-radius:10px; padding:0.55rem 0.9rem; font-size:0.8rem; border:1px solid rgba(26,115,232,0.2); }
+        .ai-sugg { background:transparent; border:1px solid rgba(26,115,232,0.4); color:#4a86e8; border-radius:12px; padding:3px 10px; font-size:0.68rem; cursor:pointer; font-family:inherit; white-space:nowrap; }
+        .ai-sugg:hover { background:rgba(26,115,232,0.15); }
+        .ai-action-card { background:#0a1628; border:1px solid #1a73e8; border-radius:8px; padding:0.6rem 0.75rem; margin-top:0.4rem; font-size:0.75rem; color:#82b4ff; }
+
         .role-badge-admin { color: var(--amber-bright); border: 1px solid var(--amber); }
         .role-badge-member { color: var(--text-secondary); border: 1px solid var(--border); }
 
@@ -1192,7 +1203,57 @@
         <button onclick="document.getElementById('updatePopup').style.display='none'" style="background:transparent; border:none; color:var(--text-secondary); cursor:pointer; font-size:1rem; padding:0;">✕</button>
     </div>
 
-        <!-- Gadgets flutuantes: notas fixadas que ficam visíveis em todas as telas -->
+        <!-- Botão flutuante do Assistente IA -->
+    <button id="aiChatBtn" onclick="toggleAiChat()"
+        style="position:fixed; bottom:1.5rem; right:1.5rem; z-index:4500;
+               width:52px; height:52px; border-radius:50%; border:none; cursor:pointer;
+               background:linear-gradient(135deg, #1a73e8, #0d47a1);
+               box-shadow:0 4px 20px rgba(26,115,232,0.5); display:none;
+               align-items:center; justify-content:center; font-size:1.4rem;
+               transition:transform 0.2s, box-shadow 0.2s;"
+        title="Assistente IA"
+        onmouseover="this.style.transform='scale(1.1)'; this.style.boxShadow='0 6px 28px rgba(26,115,232,0.7)'"
+        onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='0 4px 20px rgba(26,115,232,0.5)'">
+        ✨
+    </button>
+
+    <!-- Painel de chat -->
+    <div id="aiChatPanel" style="display:none; position:fixed; bottom:5rem; right:1.5rem; z-index:4400;
+         width:370px; max-width:calc(100vw - 2rem); height:520px; max-height:calc(100vh - 8rem);
+         background:var(--panel); border:1px solid #1a73e8; border-radius:12px;
+         box-shadow:0 12px 40px rgba(0,0,0,0.7); flex-direction:column; overflow:hidden;">
+        <!-- Header -->
+        <div style="padding:0.85rem 1rem; background:linear-gradient(135deg,#0d1f3c,#0a0f1e);
+                    display:flex; align-items:center; gap:0.6rem; border-bottom:1px solid #1a73e8; flex-shrink:0;">
+            <span style="font-size:1.1rem;">✨</span>
+            <div style="flex:1;">
+                <div style="font-size:0.82rem; font-weight:700; color:#82b4ff;">Assistente IA</div>
+                <div style="font-size:0.65rem; color:#4a86e8;">Gemini · Suas demandas em contexto</div>
+            </div>
+            <button onclick="clearAiChat()" title="Limpar" style="background:transparent;border:none;color:#4a86e8;cursor:pointer;font-size:0.8rem;">🗑️</button>
+            <button onclick="toggleAiChat()" style="background:transparent;border:none;color:#4a86e8;cursor:pointer;font-size:1rem;">✕</button>
+        </div>
+        <!-- Mensagens -->
+        <div id="aiChatMessages" style="flex:1; overflow-y:auto; padding:0.75rem; display:flex; flex-direction:column; gap:0.6rem;"></div>
+        <!-- Sugestões rápidas -->
+        <div id="aiChatSuggestions" style="padding:0 0.75rem 0.4rem; display:flex; gap:0.4rem; flex-wrap:wrap; flex-shrink:0;">
+            <button onclick="sendAiSuggestion('Resumo do que está atrasado')" class="ai-sugg">📋 Atrasadas</button>
+            <button onclick="sendAiSuggestion('O que tenho para hoje?')" class="ai-sugg">📅 Hoje</button>
+            <button onclick="sendAiSuggestion('Crie uma nota rápida:')" class="ai-sugg">📝 Nova nota</button>
+        </div>
+        <!-- Input -->
+        <div style="padding:0.6rem 0.75rem; border-top:1px solid var(--border); flex-shrink:0; display:flex; gap:0.5rem;">
+            <input type="text" id="aiChatInput" placeholder="Pergunte ou peça algo..."
+                style="flex:1; background:var(--panel-raised); border:1px solid var(--border);
+                       border-radius:8px; padding:0.5rem 0.75rem; font-size:0.82rem; color:var(--text-primary);"
+                onkeydown="if(event.key==='Enter') sendAiMessage()">
+            <button onclick="sendAiMessage()" id="aiSendBtn"
+                style="background:#1a73e8; border:none; border-radius:8px; padding:0.5rem 0.85rem;
+                       cursor:pointer; color:#fff; font-size:0.9rem; flex-shrink:0;">➤</button>
+        </div>
+    </div>
+
+    <!-- Gadgets flutuantes: notas fixadas que ficam visíveis em todas as telas -->
     <div id="gadgetsContainer" style="position:fixed; z-index:3000; pointer-events:none;"></div>
 
     <div class="container" id="authContainer">
@@ -3198,6 +3259,8 @@
             else loadMyApprovals();
             checkMaintenanceBanner();
             restorePinnedGadgets();
+            // Mostrar botão de IA se GEMINI estiver configurado (tentativa silenciosa)
+            document.getElementById('aiChatBtn').style.display = 'flex';
             document.getElementById('exportReportDate').value = toLocalISODate(new Date());
             updateSyncIndicator();
             checkOnboarding();
@@ -8680,6 +8743,123 @@
                 }, 1);
                 if (r.ok) loadDemandNotes(demandId);
             } catch (e) {}
+        }
+
+        // ============= ASSISTENTE IA (GEMINI) =============
+        let _aiHistory = [];
+
+        function toggleAiChat() {
+            const panel = document.getElementById('aiChatPanel');
+            const isOpen = panel.style.display === 'flex';
+            panel.style.display = isOpen ? 'none' : 'flex';
+            if (!isOpen) {
+                if (!_aiHistory.length) showAiWelcome();
+                setTimeout(() => document.getElementById('aiChatInput')?.focus(), 100);
+            }
+        }
+
+        function showAiWelcome() {
+            const msgs = document.getElementById('aiChatMessages');
+            if (!msgs) return;
+            msgs.innerHTML = `<div class="ai-msg ai-msg-ai">
+                ✨ Olá, <strong>${escapeHtml(currentUser?.fullName || currentUser?.username || '')}</strong>!<br><br>
+                Estou aqui pra ajudar com suas demandas. Posso:<br>
+                • Responder perguntas sobre o que está pendente<br>
+                • <strong>Criar demandas</strong> — só me diga o que precisa<br>
+                • <strong>Criar notas</strong> rápidas<br>
+                • Fazer resumos e análises<br><br>
+                Como posso ajudar?
+            </div>`;
+        }
+
+        function clearAiChat() {
+            _aiHistory = [];
+            const msgs = document.getElementById('aiChatMessages');
+            if (msgs) msgs.innerHTML = '';
+            showAiWelcome();
+        }
+
+        function sendAiSuggestion(text) {
+            const input = document.getElementById('aiChatInput');
+            if (input) { input.value = text; input.focus(); }
+            // Esconder sugestões após usar
+            const sugg = document.getElementById('aiChatSuggestions');
+            if (sugg) sugg.style.display = 'none';
+        }
+
+        function renderAiMarkdown(text) {
+            return text
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                .replace(/`(.+?)`/g, '<code style="background:rgba(255,255,255,0.1);padding:1px 4px;border-radius:3px;">$1</code>')
+                .replace(/^• (.+)$/gm, '<div style="display:flex;gap:6px;margin:2px 0;"><span>•</span><span>$1</span></div>')
+                .replace(/\n/g, '<br>');
+        }
+
+        async function sendAiMessage() {
+            const input  = document.getElementById('aiChatInput');
+            const msgs   = document.getElementById('aiChatMessages');
+            const sendBtn = document.getElementById('aiSendBtn');
+            if (!input || !msgs) return;
+            const message = input.value.trim();
+            if (!message) return;
+
+            // Esconder sugestões
+            const sugg = document.getElementById('aiChatSuggestions');
+            if (sugg) sugg.style.display = 'none';
+
+            // Adicionar mensagem do usuário
+            input.value = '';
+            sendBtn.disabled = true;
+            msgs.innerHTML += `<div class="ai-msg ai-msg-user">${escapeHtml(message)}</div>`;
+
+            // Indicador de digitação
+            const typingId = 'ai-t-' + Date.now();
+            msgs.innerHTML += `<div class="ai-msg-typing" id="${typingId}">✨ Pensando...</div>`;
+            msgs.scrollTop = msgs.scrollHeight;
+
+            try {
+                const resp = await fetchWithRetry(`${API_URL}/ai/chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ message, history: _aiHistory })
+                }, 1);
+
+                const data = await resp.json();
+                document.getElementById(typingId)?.remove();
+
+                if (resp.ok) {
+                    _aiHistory.push({ role: 'user', text: message });
+                    _aiHistory.push({ role: 'model', text: data.reply });
+                    if (_aiHistory.length > 20) _aiHistory = _aiHistory.slice(-20);
+
+                    let replyHtml = `<div class="ai-msg ai-msg-ai">${renderAiMarkdown(data.reply)}</div>`;
+
+                    // Mostrar card de ação executada
+                    if (data.action) {
+                        const a = data.action;
+                        if (a.type === 'demand_created') {
+                            replyHtml += `<div class="ai-action-card">📋 Demanda adicionada ao Kanban — <strong>${escapeHtml(a.location)} · ${escapeHtml(a.activity)}</strong></div>`;
+                            // Atualizar o Kanban
+                            setTimeout(() => { loadDemands(); loadTodayPage(); }, 500);
+                        } else if (a.type === 'note_created') {
+                            replyHtml += `<div class="ai-action-card">📝 Nota salva — <strong>${escapeHtml(a.subject)}</strong></div>`;
+                            if (document.getElementById('tab-notes')?.classList.contains('active')) loadNotes();
+                        }
+                    }
+
+                    msgs.innerHTML += replyHtml;
+                } else {
+                    msgs.innerHTML += `<div class="ai-msg ai-msg-ai" style="color:var(--led-red);">⚠️ ${escapeHtml(data.error || 'Erro ao processar')}</div>`;
+                }
+            } catch (e) {
+                document.getElementById(typingId)?.remove();
+                msgs.innerHTML += `<div class="ai-msg ai-msg-ai" style="color:var(--led-red);">⚠️ Erro de conexão</div>`;
+            }
+
+            sendBtn.disabled = false;
+            msgs.scrollTop = msgs.scrollHeight;
+            input.focus();
         }
 
         async function loadAdminUsers() {
