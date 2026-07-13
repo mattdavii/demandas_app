@@ -3611,61 +3611,74 @@ Prioridades disponíveis: {prio_ctx}
     req = urllib.request.Request(url, data=payload,
         headers={'Content-Type': 'application/json'}, method='POST')
 
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            result = json.loads(resp.read())
-        reply_text = result['candidates'][0]['content']['parts'][0]['text'].strip()
+    MODELS = ['gemini-2.5-flash']
+    last_error = None
 
-        # Verificar se é uma ação (JSON)
-        action_result = None
-        if reply_text.startswith('{') and 'action' in reply_text:
+    for model in MODELS:
+        for attempt in range(2):  # até 2 tentativas por modelo
             try:
-                action_data = json.loads(reply_text)
-                action = action_data.get('action')
+                url = f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}'
+                req = urllib.request.Request(url, data=payload,
+                    headers={'Content-Type': 'application/json'}, method='POST')
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    result = json.loads(resp.read())
+                reply_text = result['candidates'][0]['content']['parts'][0]['text'].strip()
 
-                if action == 'create_demand':
-                    wg_id = action_data.get('work_group_id') or (groups[0]['id'] if groups else None)
-                    first_status = statuses[0].key if statuses else 'agendado'
-                    first_prio   = priorities[0].key if priorities else 'media'
-                    new_demand = Demand(
-                        user_id=user_id, workspace_id=workspace_id,
-                        work_group_id=wg_id,
-                        location=action_data.get('location',''),
-                        activity=action_data.get('activity',''),
-                        context=action_data.get('context',''),
-                        status=action_data.get('status') or first_status,
-                        priority=action_data.get('priority') or first_prio,
-                        created_date=date.today()
-                    )
-                    db.session.add(new_demand)
-                    db.session.commit()
-                    action_result = {'type': 'demand_created', 'id': new_demand.id,
-                                     'activity': new_demand.activity, 'location': new_demand.location}
-                    reply_text = f"✅ Demanda criada: **{new_demand.location} — {new_demand.activity}**"
+                # Verificar se é uma ação (JSON)
+                action_result = None
+                if reply_text.startswith('{') and 'action' in reply_text:
+                    try:
+                        action_data = json.loads(reply_text)
+                        action = action_data.get('action')
+                        if action == 'create_demand':
+                            wg_id = action_data.get('work_group_id') or (groups[0]['id'] if groups else None)
+                            first_status = statuses[0].key if statuses else 'agendado'
+                            first_prio   = priorities[0].key if priorities else 'media'
+                            new_demand = Demand(
+                                user_id=user_id, workspace_id=workspace_id,
+                                work_group_id=wg_id,
+                                location=action_data.get('location',''),
+                                activity=action_data.get('activity',''),
+                                context=action_data.get('context',''),
+                                status=action_data.get('status') or first_status,
+                                priority=action_data.get('priority') or first_prio,
+                                created_date=date.today()
+                            )
+                            db.session.add(new_demand)
+                            db.session.commit()
+                            action_result = {'type': 'demand_created', 'id': new_demand.id,
+                                             'activity': new_demand.activity, 'location': new_demand.location}
+                            reply_text = f"✅ Demanda criada: **{new_demand.location} — {new_demand.activity}**"
+                        elif action == 'create_note':
+                            new_note = Note(
+                                user_id=user_id,
+                                subject=action_data.get('subject','Nota rápida'),
+                                description=action_data.get('description',''),
+                                checklist=[]
+                            )
+                            db.session.add(new_note)
+                            db.session.commit()
+                            action_result = {'type': 'note_created', 'id': new_note.id,
+                                             'subject': new_note.subject}
+                            reply_text = f"📝 Nota criada: **{new_note.subject}**"
+                    except (json.JSONDecodeError, Exception):
+                        pass
 
-                elif action == 'create_note':
-                    new_note = Note(
-                        user_id=user_id,
-                        subject=action_data.get('subject','Nota rápida'),
-                        description=action_data.get('description',''),
-                        checklist=[]
-                    )
-                    db.session.add(new_note)
-                    db.session.commit()
-                    action_result = {'type': 'note_created', 'id': new_note.id,
-                                     'subject': new_note.subject}
-                    reply_text = f"📝 Nota criada: **{new_note.subject}**"
+                return jsonify({'reply': reply_text, 'action': action_result, 'model': model}), 200
 
-            except (json.JSONDecodeError, Exception) as e:
-                pass  # Não era JSON válido, tratar como texto normal
+            except urllib.error.HTTPError as e:
+                err_body = e.read().decode()
+                last_error = f'{model} error {e.code}: {err_body[:200]}'
+                if e.code in (429, 503):
+                    import time; time.sleep(1)  # aguarda 1s antes de tentar o próximo
+                    break  # tenta próximo modelo
+                else:
+                    break  # erro diferente, tenta próximo modelo
+            except Exception as e:
+                last_error = str(e)[:150]
+                break
 
-        return jsonify({'reply': reply_text, 'action': action_result}), 200
-
-    except urllib.error.HTTPError as e:
-        err_body = e.read().decode()
-        return jsonify({'error': f'Gemini API error {e.code}: {err_body[:200]}'}), 502
-    except Exception as e:
-        return jsonify({'error': f'Erro: {str(e)[:150]}'}), 502
+    return jsonify({'error': f'Serviço temporariamente indisponível. Tente novamente em instantes.\nDetalhe: {last_error}'}), 502
 
 # ============= ROTAS DE BACKUP =============
 @app.route('/api/export', methods=['GET'])
