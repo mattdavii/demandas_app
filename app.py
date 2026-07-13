@@ -3624,11 +3624,17 @@ Prioridades disponíveis: {prio_ctx}
                     result = json.loads(resp.read())
                 reply_text = result['candidates'][0]['content']['parts'][0]['text'].strip()
 
+                # Limpar possível bloco markdown (```json ... ```) que o modelo pode gerar
+                clean = reply_text
+                if clean.startswith('```'):
+                    clean = re.sub(r'^```(?:json)?\s*', '', clean)
+                    clean = re.sub(r'\s*```$', '', clean).strip()
+
                 # Verificar se é uma ação (JSON)
                 action_result = None
-                if reply_text.startswith('{') and 'action' in reply_text:
+                if clean.startswith('{') and 'action' in clean:
                     try:
-                        action_data = json.loads(reply_text)
+                        action_data = json.loads(clean)
                         action = action_data.get('action')
                         if action == 'create_demand':
                             wg_id = action_data.get('work_group_id') or (groups[0]['id'] if groups else None)
