@@ -3513,12 +3513,13 @@ def ai_chat():
         return jsonify({'error': 'Mensagem vazia'}), 400
 
     user = User.query.get(user_id)
+    today = str(date.today())
 
     # Contexto das demandas — SQL direto para WorkGroup evita erro de coluna nova
     terminal_keys = [s.key for s in ws_filter(StatusConfig, user_id, workspace_id, {'is_completed': True}).all()]
-    demands   = ws_filter(Demand, user_id, workspace_id).filter(~Demand.status.in_(terminal_keys)).all() if terminal_keys else ws_filter(Demand, user_id, workspace_id).all()
-    statuses  = ws_filter(StatusConfig, user_id, workspace_id).order_by(StatusConfig.order).all()
-    priorities = ws_filter(PriorityConfig, user_id, workspace_id).order_by(PriorityConfig.order).all()
+    all_active    = ws_filter(Demand, user_id, workspace_id).filter(~Demand.status.in_(terminal_keys)).all() if terminal_keys else ws_filter(Demand, user_id, workspace_id).all()
+    statuses      = ws_filter(StatusConfig, user_id, workspace_id).order_by(StatusConfig.order).all()
+    priorities    = ws_filter(PriorityConfig, user_id, workspace_id).order_by(PriorityConfig.order).all()
     # Raw SQL para WorkGroup (evita erro se group_type não existe no banco ainda)
     grp_rows = db.session.execute(text(
         "SELECT id, name, emoji FROM work_groups WHERE workspace_id = :ws OR (workspace_id IS NULL AND user_id = :uid) ORDER BY \"order\" ASC"
@@ -3526,40 +3527,72 @@ def ai_chat():
     groups    = [{'id': r[0], 'name': r[1], 'emoji': r[2] or ''} for r in grp_rows]
     group_map = {g['id']: g['name'] for g in groups}
 
-    demands_ctx = '\n'.join([
-        f"- ID:{d.id} [{group_map.get(d.work_group_id,'?')}] {d.location} · {d.activity} | {d.status} | {d.priority or '-'}" +
-        (f' | Vence:{d.due_date}' if d.due_date else '') +
-        (' ⚠️ ATRASADA' if d.due_date and str(d.due_date) < str(date.today()) else '')
-        for d in demands[:60]
-    ]) or 'Nenhuma demanda ativa.'
+    # Categorizar demandas para contexto mais rico
+    atrasadas = [d for d in all_active if d.due_date and str(d.due_date) < today]
+    para_hoje = [d for d in all_active if d.due_date and str(d.due_date) == today]
+    proximas  = [d for d in all_active if d.due_date and str(d.due_date) > today]
+    sem_prazo = [d for d in all_active if not d.due_date]
 
-    grupos_ctx = ', '.join([f"ID:{g['id']} {g['name']}" for g in groups])
-    status_ctx = ', '.join([s.key for s in statuses])
-    prio_ctx   = ', '.join([p.key for p in priorities])
+    def fmt_demand(d):
+        g = group_map.get(d.work_group_id, 'Sem grupo')
+        chk = ''
+        if d.checklist:
+            done = sum(1 for i in d.checklist if i.get('checked'))
+            chk = f' [Checklist: {done}/{len(d.checklist)}]'
+        responsavel = ''
+        if d.assigned_to_user_id and d.assigned_to_user_id != user_id:
+            responsavel = f' [Responsável: outro usuário]'
+        return f"  • ID:{d.id} [{g}] {d.location or '—'} | {d.activity} | Status:{d.status} | Prioridade:{d.priority or '—'}{chk}{responsavel}"
 
-    system_prompt = f"""Você é o Assistente do Painel de Bordo, plataforma de gestão de demandas de {user.full_name or user.username}.
+    ctx_parts = [f"DATA HOJE: {date.today().strftime('%d/%m/%Y (%A)')}"]
 
-DADOS ATUAIS ({date.today().strftime('%d/%m/%Y')}):
-Grupos disponíveis: {grupos_ctx}
-Status disponíveis: {status_ctx}
-Prioridades disponíveis: {prio_ctx}
-Demandas ativas ({len(demands)}):
+    if atrasadas:
+        ctx_parts.append(f"\n⚠️ ATRASADAS ({len(atrasadas)}):")
+        ctx_parts.extend([fmt_demand(d) + f' [VENCEU: {d.due_date}]' for d in atrasadas[:20]])
+
+    if para_hoje:
+        ctx_parts.append(f"\n📅 PARA HOJE ({len(para_hoje)}):")
+        ctx_parts.extend([fmt_demand(d) for d in para_hoje[:20]])
+
+    if proximas:
+        ctx_parts.append(f"\n🗓️ PRÓXIMAS ({len(proximas)}):")
+        ctx_parts.extend([fmt_demand(d) + f' [Vence: {d.due_date}]' for d in proximas[:20]])
+
+    if sem_prazo:
+        ctx_parts.append(f"\n📋 SEM PRAZO ({len(sem_prazo)}):")
+        ctx_parts.extend([fmt_demand(d) for d in sem_prazo[:15]])
+
+    demands_ctx = '\n'.join(ctx_parts) if len(ctx_parts) > 1 else 'Nenhuma demanda ativa no momento.'
+    grupos_ctx  = ', '.join([f"{g['name']} (ID:{g['id']})" for g in groups])
+    status_ctx  = ' → '.join([s.key for s in statuses])
+    prio_ctx    = ', '.join([p.key for p in priorities])
+
+    system_prompt = f"""Você é o Assistente do Painel de Bordo de {user.full_name or user.username}.
+Responda SEMPRE em português, de forma direta e útil. Sem rodeios.
+
+=== CONTEXTO DAS DEMANDAS ===
 {demands_ctx}
 
-SUAS CAPACIDADES:
-1. Responder perguntas sobre demandas, status, atrasos, resumos
-2. CRIAR DEMANDA — quando pedido, responda SOMENTE o JSON abaixo (sem texto extra):
-   {{"action":"create_demand","location":"LOCAL","activity":"ATIVIDADE","context":"DETALHES OPCIONAIS","work_group_id":ID_DO_GRUPO,"priority":"CHAVE_PRIORIDADE","status":"CHAVE_STATUS"}}
-3. CRIAR NOTA — quando pedido, responda SOMENTE o JSON abaixo:
-   {{"action":"create_note","subject":"TITULO","description":"CONTEUDO"}}
+=== CONFIGURAÇÃO DO WORKSPACE ===
+Grupos: {grupos_ctx}
+Fluxo de status: {status_ctx}
+Prioridades disponíveis: {prio_ctx}
 
-REGRAS:
-- Responda SEMPRE em português brasileiro
-- Para criar demanda/nota: responda APENAS o JSON, sem markdown nem texto adicional
-- Para perguntas normais: responda em texto direto e útil
-- Seja conciso e prático
-- Se o usuário não especificar grupo, use o primeiro disponível
-- Se não especificar prioridade ou status, use o primeiro da lista"""
+=== SUAS CAPACIDADES ===
+1. Responder perguntas sobre demandas — use os dados acima como fonte da verdade
+2. CRIAR DEMANDA — responda APENAS o JSON (sem texto antes ou depois):
+   {{"action":"create_demand","location":"LOCAL","activity":"ATIVIDADE","context":"DETALHES","work_group_id":ID,"priority":"PRIORIDADE","status":"STATUS"}}
+3. CRIAR NOTA RÁPIDA — responda APENAS o JSON:
+   {{"action":"create_note","subject":"TÍTULO","description":"CONTEÚDO"}}
+
+=== REGRAS ===
+- Para criar: responda SOMENTE o JSON, nada mais
+- Para perguntas sobre "hoje": use a seção "📅 PARA HOJE" do contexto
+- Para atrasadas: use a seção "⚠️ ATRASADAS"  
+- Seja específico — cite local, atividade e status das demandas
+- Se não houver demandas na categoria perguntada, diga isso claramente
+- Se o usuário não especificar grupo, use o primeiro da lista
+- Se não especificar prioridade/status, use o primeiro disponível"""
 
     # Montar histórico no formato Gemini
     contents = []
@@ -3571,10 +3604,10 @@ REGRAS:
     payload = json.dumps({
         'system_instruction': {'parts': [{'text': system_prompt}]},
         'contents': contents,
-        'generationConfig': {'maxOutputTokens': 1024, 'temperature': 0.7}
+        'generationConfig': {'maxOutputTokens': 1024}
     }).encode()
 
-    url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}'
+    url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={api_key}'
     req = urllib.request.Request(url, data=payload,
         headers={'Content-Type': 'application/json'}, method='POST')
 
