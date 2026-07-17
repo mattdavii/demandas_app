@@ -4600,6 +4600,7 @@
                 .filter(col => !_activeStatusFilter || col.key === _activeStatusFilter)
                 .map(col => {
                 const items = demandsToShow
+                    .filter(d => d.status === col.key)
                     .sort((a, b) => (PRIORITY_RANK[b.priority] || 0) - (PRIORITY_RANK[a.priority] || 0));
                 return `
                     <div class="kanban-column">
