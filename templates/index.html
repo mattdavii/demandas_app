@@ -624,6 +624,31 @@
             gap: 1rem;
         }
 
+        /* Barra de contadores por status */
+        .status-counters {
+            display: flex; gap: 0.6rem; flex-wrap: wrap;
+            margin-bottom: 1.25rem;
+        }
+        .status-counter-card {
+            flex: 1; min-width: 90px; max-width: 160px;
+            background: var(--panel); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 0.65rem 0.85rem;
+            cursor: pointer; transition: transform 0.15s, border-color 0.15s, background 0.15s;
+            border-top: 3px solid transparent; user-select: none;
+        }
+        .status-counter-card:hover { transform: translateY(-2px); background: var(--panel-raised); }
+        .status-counter-card.active { background: var(--panel-raised); }
+        .status-counter-card .sc-label {
+            font-size: 0.62rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.05em; color: var(--text-secondary);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            margin-bottom: 4px;
+        }
+        .status-counter-card .sc-count {
+            font-size: 1.5rem; font-weight: 700; color: var(--text-primary);
+            line-height: 1; font-family: 'JetBrains Mono', 'Courier New', monospace;
+        }
+
         .kanban-column {
             background: var(--panel-raised);
             border: 1px solid var(--border);
@@ -4503,6 +4528,8 @@
             }
         }
 
+        let _activeStatusFilter = null; // null = todos, 'key' = filtrado
+
         function renderDemands() {
             const container = document.getElementById('demandsList');
 
@@ -4523,6 +4550,7 @@
                             Vá em Configurações → Grupos
                         </div>
                     </div>`;
+                document.getElementById('demandSummary').innerHTML = '';
                 return;
             }
 
@@ -4535,14 +4563,43 @@
                 renderGroups();
             }
 
-            if (currentDemands.length === 0) {
-                container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Nenhuma demanda pendente</div>';
+            // ── Barra de contadores por status ───────────────────────────────
+            const summary = document.getElementById('demandSummary');
+            if (summary && STATUS_COLUMNS && STATUS_COLUMNS.length > 0) {
+                const counts = {};
+                STATUS_COLUMNS.forEach(col => { counts[col.key] = 0; });
+                currentDemands.forEach(d => { if (counts[d.status] !== undefined) counts[d.status]++; });
+
+                summary.innerHTML = '<div class="status-counters">' +
+                    STATUS_COLUMNS.map(col => {
+                        const isActive = _activeStatusFilter === col.key;
+                        const color = col.color || 'var(--text-secondary)';
+                        return `<div class="status-counter-card${isActive ? ' active' : ''}"
+                            style="border-top-color:${color};"
+                            onclick="toggleStatusFilter('${col.key}')"
+                            title="Filtrar por ${escapeHtml(col.label)}">
+                            <div class="sc-label" style="color:${color};">${escapeHtml(col.emoji || '')} ${escapeHtml(col.label)}</div>
+                            <div class="sc-count">${counts[col.key]}</div>
+                        </div>`;
+                    }).join('') +
+                '</div>';
+            }
+
+            // ── Filtro por status (clique no counter) ─────────────────────────
+            let demandsToShow = currentDemands;
+            if (_activeStatusFilter) {
+                demandsToShow = currentDemands.filter(d => d.status === _activeStatusFilter);
+            }
+
+            if (demandsToShow.length === 0) {
+                container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Nenhuma demanda neste status</div>';
                 return;
             }
 
-            container.innerHTML = '<div class="kanban-board">' + STATUS_COLUMNS.map(col => {
-                const items = currentDemands
-                    .filter(d => d.status === col.key)
+            container.innerHTML = '<div class="kanban-board">' + STATUS_COLUMNS
+                .filter(col => !_activeStatusFilter || col.key === _activeStatusFilter)
+                .map(col => {
+                const items = demandsToShow
                     .sort((a, b) => (PRIORITY_RANK[b.priority] || 0) - (PRIORITY_RANK[a.priority] || 0));
                 return `
                     <div class="kanban-column">
@@ -8667,6 +8724,11 @@
             } catch (e) {
                 alert('Erro ao abrir Whiteboard. Verifique sua conexão.');
             }
+        }
+
+        function toggleStatusFilter(key) {
+            _activeStatusFilter = (_activeStatusFilter === key) ? null : key;
+            renderDemands();
         }
 
         // ============= ANOTAÇÕES DE DEMANDA =============
