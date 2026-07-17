@@ -7501,20 +7501,20 @@
             return `
                 <div class="demand-card${d._pendingSync ? ' pending-sync' : ''}" style="margin-bottom: 0.75rem; border-left-color: ${finalBorderColor}; cursor: pointer;" onclick="showDemandDetailModal(${idArg})">
                     ${d._pendingSync ? `<div class="pending-sync-tag">🔄 ${pendingLabel}</div>` : ''}
-                    <div class="demand-header">
-                        <div>
-                            <div class="demand-location" style="margin-bottom: 0.4rem;">${getGroupBadge(d.workGroupId, d.workGroupName)}</div>
-                            <div class="demand-title">${escapeHtml(d.location)} - ${escapeHtml(d.activity)}</div>
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:0.5rem; margin-bottom:0.35rem;">
+                        <div style="flex:1; min-width:0;">
+                            <div class="demand-location" style="margin-bottom:0.3rem;">${getGroupBadge(d.workGroupId, d.workGroupName)}</div>
+                            <div class="demand-title" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(d.location)} - ${escapeHtml(d.activity)}</div>
                         </div>
-                        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.4rem;">
-                            ${getPriorityBadge(d.priority)}
-                            ${typeBadge}
-                            ${recurringBadge}
-                            ${approvalBadge}
-                            ${assigneeAvatar}
-                        </div>
+                        ${assigneeAvatar ? `<div style="flex-shrink:0; margin-top:2px;">${assigneeAvatar}</div>` : ''}
                     </div>
-                    ${isOverdue(d.dueDate) ? `<div style="font-size:0.7rem; font-weight:700; color: var(--led-red);">⚠️ Atrasada</div>` : ''}
+                    <div style="display:flex; flex-wrap:wrap; align-items:center; gap:0.3rem; margin-bottom:0.3rem;">
+                        ${getPriorityBadge(d.priority)}
+                        ${typeBadge}
+                        ${recurringBadge}
+                        ${approvalBadge}
+                    </div>
+                    ${isOverdue(d.dueDate) ? `<div style="font-size:0.7rem; font-weight:700; color:var(--led-red); margin-bottom:0.25rem;">⚠️ Atrasada</div>` : ''}
                     ${getChecklistProgressHtml(d.checklist)}
                 </div>
             `;
