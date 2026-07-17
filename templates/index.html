@@ -652,9 +652,11 @@
         .kanban-column {
             background: var(--panel-raised);
             border: 1px solid var(--border);
+            border-top: 3px solid var(--border);
             border-radius: var(--radius);
             padding: 0.85rem;
             min-height: 100px;
+            transition: border-top-color 0.2s;
         }
         .kanban-column-header {
             display: flex;
@@ -664,10 +666,10 @@
             text-transform: uppercase;
             letter-spacing: 0.05em;
             font-weight: 700;
-            color: var(--text-secondary);
-            padding-bottom: 0.6rem;
-            margin-bottom: 0.6rem;
+            padding: 0.4rem 0.5rem 0.6rem;
+            margin: -0.85rem -0.85rem 0.6rem;
             border-bottom: 1px solid var(--border);
+            border-radius: calc(var(--radius) - 3px) calc(var(--radius) - 3px) 0 0;
         }
         .kanban-led-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
         .kanban-column-count {
@@ -4591,8 +4593,10 @@
                 demandsToShow = currentDemands.filter(d => d.status === _activeStatusFilter);
             }
 
-            if (demandsToShow.length === 0) {
-                container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Nenhuma demanda neste status</div>';
+            // ── Kanban Board ─────────────────────────────────────────────────
+            // Verificar se há demandas no total (antes do filtro de status)
+            if (currentDemands.length === 0) {
+                container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Nenhuma demanda pendente</div>';
                 return;
             }
 
@@ -4602,9 +4606,10 @@
                 const items = demandsToShow
                     .filter(d => d.status === col.key)
                     .sort((a, b) => (PRIORITY_RANK[b.priority] || 0) - (PRIORITY_RANK[a.priority] || 0));
+                const headerBg = col.color ? col.color + '18' : 'transparent';
                 return `
-                    <div class="kanban-column">
-                        <div class="kanban-column-header">
+                    <div class="kanban-column" style="border-top-color:${col.color || 'var(--border)'};">
+                        <div class="kanban-column-header" style="background:${headerBg}; color:${col.color || 'var(--text-secondary)'} ;">
                             <span class="kanban-led-dot" style="background:${col.color}; box-shadow:0 0 6px ${col.color};"></span>
                             <span>${col.label}</span>
                             <span class="kanban-column-count">${items.length}</span>
