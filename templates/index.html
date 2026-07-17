@@ -4623,30 +4623,8 @@
         }
 
         function updateSummary() {
-            const summary = document.getElementById('demandSummary');
-            const total = currentDemands.length;
-            const byStatus = {};
-
-            currentDemands.forEach(d => {
-                byStatus[d.status] = (byStatus[d.status] || 0) + 1;
-            });
-
-            const statusCardsHtml = STATUS_COLUMNS.map(col => `
-                <div class="stat-card" style="border-color: ${col.color};">
-                    <div class="stat-value" style="color: ${col.color};">${byStatus[col.key] || 0}</div>
-                    <div class="stat-label">${col.label}</div>
-                </div>
-            `).join('');
-
-            summary.innerHTML = `
-                <div class="stat-grid">
-                    <div class="stat-card">
-                        <div class="stat-value">${total}</div>
-                        <div class="stat-label">Total</div>
-                    </div>
-                    ${statusCardsHtml}
-                </div>
-            `;
+            // Delega para renderDemands que agora cuida do demandSummary e do kanban
+            renderDemands();
         }
 
         function showNewDemandModal() {
@@ -7644,9 +7622,19 @@
 
         function getChecklistProgressHtml(checklist) {
             if (!checklist || checklist.length === 0) return '';
-            const checkedCount = checklist.filter(i => i.checked).length;
-            const allDone = checkedCount === checklist.length;
-            return `<div style="font-size: 0.7rem; color: ${allDone ? 'var(--led-green)' : 'var(--text-secondary)'}; margin-bottom: 0.5rem;">☑️ ${checkedCount}/${checklist.length} itens da checklist</div>`;
+            const done  = checklist.filter(i => i.checked).length;
+            const total = checklist.length;
+            const pct   = Math.round(done / total * 100);
+            const color = pct === 100 ? 'var(--led-green)' : pct > 0 ? 'var(--amber)' : 'var(--border)';
+            return `<div style="margin-top:6px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
+                    <span style="font-size:0.62rem; color:var(--text-secondary);">☑ Checklist</span>
+                    <span style="font-size:0.62rem; color:${color}; font-weight:700;">${done}/${total}</span>
+                </div>
+                <div style="background:var(--border); height:3px; border-radius:2px;">
+                    <div style="background:${color}; height:3px; border-radius:2px; width:${pct}%; transition:width 0.3s;"></div>
+                </div>
+            </div>`;
         }
 
         function getPriorityBadge(priority) {
