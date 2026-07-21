@@ -168,10 +168,23 @@ def ws_filter(model, user_id, workspace_id, extra=None):
     return q
 
 def get_user_workspace_id(user_id):
-    """Resolve o workspace de uma conta. Hoje cada conta pertence a exatamente um
-    workspace (o próprio, ou aquele pra que foi convidada) — não há troca de
-    workspace ainda, então sempre pega o primeiro vínculo encontrado."""
-    membership = WorkspaceMember.query.filter_by(user_id=user_id).first()
+    """Resolve o workspace ativo para a requisição atual.
+    Prioridade: header X-Workspace-ID → primeiro vínculo do usuário.
+    Valida que o usuário é membro do workspace solicitado."""
+    try:
+        ws_header = request.headers.get('X-Workspace-ID')
+        if ws_header:
+            ws_id = int(ws_header)
+            has_access = WorkspaceMember.query.filter_by(
+                user_id=user_id, workspace_id=ws_id
+            ).first()
+            if has_access:
+                return ws_id
+    except (ValueError, TypeError, RuntimeError):
+        pass
+    # Fallback: primeiro workspace do usuário (workspace pessoal)
+    membership = WorkspaceMember.query.filter_by(user_id=user_id)\
+        .order_by(WorkspaceMember.id.asc()).first()
     return membership.workspace_id if membership else None
 
 def get_user_workspace_role(user_id, workspace_id=None):
@@ -1073,7 +1086,58 @@ def generate_unique_username(base_text):
         counter += 1
     return candidate
 
-@app.route('/api/workspace', methods=['GET'])
+@app.route('/api/workspaces', methods=['GET'])
+@jwt_required()
+def get_all_user_workspaces():
+    """Lista todos os workspaces que o usuário pertence ou criou."""
+    user_id = int(get_jwt_identity())
+    memberships = WorkspaceMember.query.filter_by(user_id=user_id)\
+        .order_by(WorkspaceMember.id.asc()).all()
+    result = []
+    seen = set()
+    for m in memberships:
+        ws = Workspace.query.get(m.workspace_id)
+        if not ws or ws.id in seen:
+            continue
+        seen.add(ws.id)
+        member_count = WorkspaceMember.query.filter_by(workspace_id=ws.id).count()
+        is_personal = (ws.user_id == user_id)
+        result.append({
+            'id': ws.id,
+            'name': ws.name,
+            'logoUrl': ws.logo_url,
+            'role': m.role,
+            'isPersonal': is_personal,
+            'memberCount': member_count,
+        })
+    # Workspace pessoal primeiro, depois os demais
+    result.sort(key=lambda w: (0 if w['isPersonal'] else 1, w['name']))
+    return jsonify(result), 200
+
+
+@app.route('/api/workspaces', methods=['POST'])
+@jwt_required()
+def create_workspace():
+    """Cria um novo workspace e vincula o criador como admin."""
+    user_id = int(get_jwt_identity())
+    data = request.get_json() or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'Nome obrigatório'}), 400
+    new_ws = Workspace(name=name, user_id=user_id)
+    db.session.add(new_ws)
+    db.session.flush()
+    member = WorkspaceMember(
+        user_id=user_id, workspace_id=new_ws.id,
+        role='admin', joined_at=datetime.now()
+    )
+    db.session.add(member)
+    seed_default_status_and_priority(user_id, new_ws.id)
+    db.session.commit()
+    return jsonify({
+        'id': new_ws.id, 'name': new_ws.name,
+        'role': 'admin', 'isPersonal': False, 'memberCount': 1,
+    }), 201
 @jwt_required()
 def get_workspace_info():
     """Dados do workspace atual (nome, logo) — qualquer membro pode ver."""
