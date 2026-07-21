@@ -1446,6 +1446,31 @@
                 <button class="sidebar-collapse-btn" onclick="toggleSidebarCollapse()" title="Encolher menu">«</button>
             </div>
 
+            <!-- Seletor de Workspace -->
+            <div id="workspaceSelectorWrap" style="padding:0.5rem 0.75rem 0; display:none; position:relative;">
+                <button id="workspaceSelectorBtn" onclick="toggleWorkspaceDropdown()"
+                    style="width:100%; background:var(--panel-raised); border:1px solid var(--border);
+                    border-radius:var(--radius); padding:0.45rem 0.7rem; text-align:left;
+                    cursor:pointer; font-family:inherit; font-size:0.75rem; color:var(--text-primary);
+                    display:flex; align-items:center; gap:0.5rem; transition:border-color .15s;">
+                    <span id="wsActiveDot" style="width:7px;height:7px;border-radius:50%;background:var(--amber);flex-shrink:0;"></span>
+                    <span id="wsActiveName" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">—</span>
+                    <span style="color:var(--text-secondary);font-size:0.65rem;">▼</span>
+                </button>
+                <div id="workspaceDropdown" style="display:none;position:absolute;top:calc(100% + 4px);left:0.75rem;right:0.75rem;
+                    background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+                    z-index:600;box-shadow:0 8px 24px rgba(0,0,0,0.5);overflow:hidden;">
+                    <div id="workspaceDropdownList"></div>
+                    <div style="border-top:1px solid var(--border);padding:0.5rem;">
+                        <button onclick="showCreateWorkspaceModal()" style="width:100%;background:transparent;border:none;
+                            color:var(--amber);font-size:0.72rem;cursor:pointer;font-family:inherit;
+                            padding:0.3rem;text-align:left;">
+                            ➕ Criar novo workspace
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <div class="sidebar-nav">
                 <button class="sidebar-link active" data-tab="today" onclick="switchTab('today')">🌅 <span>Hoje</span></button>
                 <button class="sidebar-link" data-tab="demands" onclick="switchTab('demands')">📋 <span>Demandas</span></button>
@@ -2549,6 +2574,24 @@
         </div>
     </div>
 
+    <!-- MODAL: CRIAR WORKSPACE -->
+    <div id="createWorkspaceModal" class="modal">
+        <div class="modal-content" style="max-width:420px;">
+            <span class="close-modal" onclick="document.getElementById('createWorkspaceModal').classList.remove('show')">&times;</span>
+            <div class="modal-header">🏢 Novo Workspace</div>
+            <p style="font-size:0.78rem; color:var(--text-secondary); margin-bottom:1rem;">
+                Crie um workspace para um time, empresa ou projeto. Você será o administrador e poderá convidar pessoas.
+            </p>
+            <div class="form-group">
+                <label>Nome do workspace <span style="color:var(--led-red)">*</span></label>
+                <input type="text" id="newWorkspaceName" placeholder="Ex: Empresa XYZ, Projeto Alpha...">
+            </div>
+            <div id="createWorkspaceAlert" class="alert"></div>
+            <button class="btn btn-primary" onclick="createNewWorkspace()">Criar Workspace</button>
+            <button class="btn btn-secondary" onclick="document.getElementById('createWorkspaceModal').classList.remove('show')" style="margin-left:.5rem;">Cancelar</button>
+        </div>
+    </div>
+
     <!-- MODAL ALTERAR SENHA -->
     <div id="changePasswordModal" class="modal">
         <div class="modal-content">
@@ -2782,6 +2825,11 @@
         // Tenta de novo com espera crescente (1s, 2s, 4s...) antes de desistir.
         // Cobre o caso do Render "dormindo" (primeira requisição demora a acordar o serviço).
         async function fetchWithRetry(url, options = {}, maxRetries = 2) {
+            // Injetar X-Workspace-ID automaticamente em todas as chamadas de API
+            if (currentWorkspaceId) {
+                options = { ...options };
+                options.headers = { ...(options.headers || {}), 'X-Workspace-ID': String(currentWorkspaceId) };
+            }
             let lastError;
             for (let attempt = 0; attempt <= maxRetries; attempt++) {
                 try {
@@ -3291,6 +3339,11 @@
             document.getElementById('exportReportDate').value = toLocalISODate(new Date());
             updateSyncIndicator();
             checkOnboarding();
+            // Verificar lembretes agora e a cada 5 minutos
+            checkReminders();
+            setInterval(() => { if (isOnline) checkReminders(); }, 5 * 60 * 1000);
+            // Carregar todos os workspaces do usuário (seletor na sidebar)
+            loadUserWorkspaces();
         }
 
         // Mostra/esconde tudo marcado como .admin-only-section conforme o papel da conta no workspace.
@@ -8917,6 +8970,162 @@
             msgs.scrollTop = msgs.scrollHeight;
             input.focus();
         }
+
+        // ============= MULTI-WORKSPACE =============
+        let currentWorkspaces  = [];
+        let currentWorkspaceId = null;
+
+        // Adiciona X-Workspace-ID em todo fetchWithRetry quando workspace ativo estiver definido
+        const _origFetch = window.fetch.bind(window);
+
+        async function loadUserWorkspaces() {
+            try {
+                const r = await fetch(`${API_URL}/workspaces`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!r.ok) return;
+                currentWorkspaces = await r.json();
+
+                // Restaurar workspace salvo na sessão ou usar o primeiro (pessoal)
+                const saved = sessionStorage.getItem('activeWorkspaceId');
+                const found = saved ? currentWorkspaces.find(w => w.id == saved) : null;
+                currentWorkspaceId = found ? found.id : (currentWorkspaces[0]?.id || null);
+
+                if (currentWorkspaces.length > 1) {
+                    document.getElementById('workspaceSelectorWrap').style.display = '';
+                }
+                renderWorkspaceSelector();
+            } catch(e) { console.error('loadUserWorkspaces:', e); }
+        }
+
+        function renderWorkspaceSelector() {
+            const active = currentWorkspaces.find(w => w.id === currentWorkspaceId);
+            if (!active) return;
+
+            // Atualizar botão
+            document.getElementById('wsActiveName').textContent = active.name;
+
+            // Renderizar lista do dropdown
+            const list = document.getElementById('workspaceDropdownList');
+            if (!list) return;
+            list.innerHTML = currentWorkspaces.map(w => {
+                const isActive = w.id === currentWorkspaceId;
+                const badge = w.isPersonal
+                    ? '<span style="font-size:.6rem;color:var(--amber);border:1px solid var(--amber);border-radius:3px;padding:1px 5px;">pessoal</span>'
+                    : `<span style="font-size:.6rem;color:var(--text-secondary);">${w.memberCount} membros</span>`;
+                return `<div onclick="switchWorkspace(${w.id})" style="padding:.6rem .85rem;cursor:pointer;
+                    display:flex;align-items:center;gap:.6rem;font-size:.78rem;
+                    background:${isActive ? 'var(--panel-raised)' : 'transparent'};
+                    transition:background .1s;"
+                    onmouseover="if(${!isActive})this.style.background='var(--panel-raised)'"
+                    onmouseout="if(${!isActive})this.style.background='transparent'">
+                    <span style="width:8px;height:8px;border-radius:50%;background:var(--amber);flex-shrink:0;opacity:${isActive?1:.3};"></span>
+                    <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(w.name)}</span>
+                    ${badge}
+                    ${isActive ? '<span style="color:var(--amber);font-size:.7rem;">✓</span>' : ''}
+                </div>`;
+            }).join('');
+        }
+
+        function toggleWorkspaceDropdown() {
+            const dd = document.getElementById('workspaceDropdown');
+            dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+        }
+
+        document.addEventListener('click', e => {
+            const wrap = document.getElementById('workspaceSelectorWrap');
+            const dd = document.getElementById('workspaceDropdown');
+            if (dd && wrap && !wrap.contains(e.target)) dd.style.display = 'none';
+        });
+
+        async function switchWorkspace(wsId) {
+            if (wsId === currentWorkspaceId) {
+                document.getElementById('workspaceDropdown').style.display = 'none';
+                return;
+            }
+            currentWorkspaceId = wsId;
+            sessionStorage.setItem('activeWorkspaceId', String(wsId));
+            document.getElementById('workspaceDropdown').style.display = 'none';
+            renderWorkspaceSelector();
+
+            // Limpar caches e recarregar dados do novo workspace
+            sessionStorage.removeItem('cache_demands');
+            sessionStorage.removeItem('cache_groups');
+            sessionStorage.removeItem('cache_statusConfigs');
+            sessionStorage.removeItem('cache_priorityConfigs');
+            invalidateHistoryCache();
+
+            // Mostrar loading e recarregar
+            document.getElementById('demandsList').innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text-secondary);">Carregando workspace...</div>';
+            await loadInit();
+            await loadDemands();
+            loadTodayPage();
+            loadStatusAndPriorityConfigs();
+            loadDemandTypes();
+            updateWorkspaceInfo();
+        }
+
+        async function loadInit() {
+            try {
+                const r = await fetchWithRetry(`${API_URL}/init`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'X-Workspace-ID': String(currentWorkspaceId)
+                    }
+                }, 1);
+                if (!r.ok) return;
+                const init = await r.json();
+                if (init.statusConfigs)  { currentStatusConfigs  = init.statusConfigs;  rebuildStatusAndPriorityStructures(); }
+                if (init.priorityConfigs){ currentPriorityConfigs = init.priorityConfigs; rebuildStatusAndPriorityStructures(); }
+                if (init.groups)  { currentGroups  = init.groups;  updateGroupSelect(); }
+                if (init.members) { currentTeamMembers = init.members; }
+                if (init.workspace) {
+                    currentWorkspace = init.workspace;
+                    updateWorkspaceInfo();
+                }
+                if (init.demandTypes) { currentDemandTypes = init.demandTypes; updateDemandTypeSelects(); }
+            } catch(e) { console.error('loadInit:', e); }
+        }
+
+        function updateWorkspaceInfo() {
+            const ws = currentWorkspace;
+            if (!ws) return;
+            const img = document.getElementById('workspaceLogoImg');
+            if (img) {
+                if (ws.logoUrl) { img.src = ws.logoUrl; img.style.display = 'block'; }
+                else img.style.display = 'none';
+            }
+        }
+
+        function showCreateWorkspaceModal() {
+            document.getElementById('workspaceDropdown').style.display = 'none';
+            document.getElementById('newWorkspaceName').value = '';
+            document.getElementById('createWorkspaceAlert').innerHTML = '';
+            document.getElementById('createWorkspaceModal').classList.add('show');
+        }
+
+        async function createNewWorkspace() {
+            const name = document.getElementById('newWorkspaceName').value.trim();
+            if (!name) { showAlert('createWorkspaceAlert','Nome obrigatório','danger'); return; }
+            try {
+                const r = await fetchWithRetry(`${API_URL}/workspaces`, {
+                    method: 'POST',
+                    headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${token}` },
+                    body: JSON.stringify({ name })
+                }, 1);
+                const data = await r.json();
+                if (r.ok) {
+                    document.getElementById('createWorkspaceModal').classList.remove('show');
+                    await loadUserWorkspaces();
+                    switchWorkspace(data.id);
+                } else {
+                    showAlert('createWorkspaceAlert', data.error || 'Erro ao criar', 'danger');
+                }
+            } catch(e) { showAlert('createWorkspaceAlert','Erro de conexão','danger'); }
+        }
+
+        // Interceptar fetchWithRetry para injetar X-Workspace-ID automaticamente
+        const _fetchWithRetryOrig = fetchWithRetry;
 
         async function loadAdminUsers() {
             const container = document.getElementById('adminUsersList');
