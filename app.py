@@ -134,7 +134,7 @@ class WorkspaceMember(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     workspace_id = db.Column(db.Integer, db.ForeignKey('workspaces.id'), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    role = db.Column(db.String(20), nullable=False, default='member')  # 'admin' | 'member'
+    role = db.Column(db.String(20), nullable=False, default='member')  # 'admin' | 'member' | 'viewer'
     cargo = db.Column(db.String(100), nullable=True)
     joined_at = db.Column(db.DateTime, default=datetime.now)
 
@@ -488,6 +488,7 @@ class AccessKey(db.Model):
     used_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     used_at = db.Column(db.DateTime, nullable=True)
     is_active = db.Column(db.Boolean, default=True)
+    invite_role = db.Column(db.String(20), default='member')  # papel que o convidado receberá
 
     def to_dict(self):
         used_by_user = User.query.get(self.used_by) if self.used_by else None
@@ -997,7 +998,7 @@ def verify_access_key():
     if access_key.key_type == 'team_invite':
         # Entra como membro comum de um workspace que já existe — não recria nada,
         # já que o time já tem seus próprios grupos/status/prioridades configurados.
-        db.session.add(WorkspaceMember(workspace_id=access_key.workspace_id, user_id=user.id, role='member'))
+        db.session.add(WorkspaceMember(workspace_id=access_key.workspace_id, user_id=user.id, role=access_key.invite_role or 'member'))
         db.session.commit()
     else:
         # Chave pessoal: cria um workspace novo e independente com
@@ -1293,7 +1294,7 @@ def update_workspace_member(member_id):
     data = request.get_json()
 
     if 'role' in data:
-        if data['role'] not in ('admin', 'member'):
+        if data['role'] not in ('admin', 'member', 'viewer'):
             return jsonify({'error': 'Papel inválido'}), 400
         if member.role == 'admin' and data['role'] != 'admin':
             other_admin = WorkspaceMember.query.filter(
@@ -1379,6 +1380,11 @@ def create_invite_key():
     if not is_workspace_admin(user_id, workspace_id):
         return jsonify({'error': 'Apenas administradores podem gerar chaves de convite'}), 403
 
+    data = request.get_json() or {}
+    invite_role = data.get('invite_role', 'member')
+    if invite_role not in ('admin', 'member', 'viewer'):
+        invite_role = 'member'
+
     # Gera chave legível (6 chars hex), única no banco
     while True:
         key_value = secrets.token_hex(4).upper()  # ex: A3F9C2E1
@@ -1390,6 +1396,7 @@ def create_invite_key():
         key_type='team_invite',
         workspace_id=workspace_id,
         created_by=user_id,
+        invite_role=invite_role,
         is_active=True
     )
     db.session.add(new_key)
@@ -1812,6 +1819,8 @@ def create_demand():
     """Criar nova demanda"""
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
+    ok, err_resp, err_code = check_write_permission(user_id, workspace_id)
+    if not ok: return err_resp, err_code
     data = request.get_json()
     
     if not data or not data.get('work_group_id') or not data.get('location') or not data.get('activity'):
@@ -1871,6 +1880,8 @@ def update_demand(demand_id):
     """Atualizar demanda"""
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
+    ok, err_resp, err_code = check_write_permission(user_id, workspace_id)
+    if not ok: return err_resp, err_code
     demand = Demand.query.get_or_404(demand_id)
     
     if demand.workspace_id != workspace_id is not None and demand.workspace_id.workspace_id != workspace_id:
@@ -1961,10 +1972,9 @@ def update_demand_status(demand_id):
     """Atualizar status de demanda e mover para histórico se concluído"""
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
+    ok, err_resp, err_code = check_write_permission(user_id, workspace_id)
+    if not ok: return err_resp, err_code
     demand = Demand.query.get_or_404(demand_id)
-
-    if demand.workspace_id is not None and demand.workspace_id != workspace_id:
-        return jsonify({'error': 'Acesso negado'}), 403
 
     data = request.get_json()
     new_status = data.get('status')
@@ -3028,6 +3038,14 @@ def get_demand_notes_snapshot(demand_id):
         print(f'[demand_notes] erro ao capturar snapshot: {e}')
         return []
 
+
+
+def check_write_permission(user_id, workspace_id):
+    """Verifica se o usuário pode criar/editar demandas. Viewers não podem."""
+    role = get_user_workspace_role(user_id, workspace_id)
+    if role == 'viewer':
+        return False, jsonify({'error': 'Visualizadores não podem criar ou editar demandas'}), 403
+    return True, None, None
 
 def ensure_agent_schema():
     """Garante colunas novas nas tabelas usadas pelos endpoints do agente.
