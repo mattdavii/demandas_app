@@ -1462,6 +1462,11 @@
                     z-index:600;box-shadow:0 8px 24px rgba(0,0,0,0.5);overflow:hidden;">
                     <div id="workspaceDropdownList"></div>
                     <div style="border-top:1px solid var(--border);padding:0.5rem;">
+                        <button onclick="openWorkspaceInvite()" style="width:100%;background:transparent;border:none;
+                            color:var(--led-green);font-size:0.72rem;cursor:pointer;font-family:inherit;
+                            padding:0.3rem;text-align:left;">
+                            👥 Convidar para este workspace
+                        </button>
                         <button onclick="showCreateWorkspaceModal()" style="width:100%;background:transparent;border:none;
                             color:var(--amber);font-size:0.72rem;cursor:pointer;font-family:inherit;
                             padding:0.3rem;text-align:left;">
@@ -2571,6 +2576,34 @@
                 <button class="btn btn-primary" style="flex:2;" onclick="downloadByStatusHtml()">📥 Gerar Relatório</button>
                 <button class="btn btn-secondary" style="flex:1;" onclick="document.getElementById('exportByStatusModal').classList.remove('show')">Cancelar</button>
             </div>
+        </div>
+    </div>
+
+    <!-- MODAL: CONVIDAR PARA WORKSPACE -->
+    <div id="workspaceInviteModal" class="modal">
+        <div class="modal-content" style="max-width:480px;">
+            <span class="close-modal" onclick="document.getElementById('workspaceInviteModal').classList.remove('show')">&times;</span>
+            <div class="modal-header">👥 Convidar para o Workspace</div>
+            <div id="inviteWorkspaceName" style="font-size:0.82rem; color:var(--amber); font-weight:700; margin-bottom:0.75rem;"></div>
+            <p style="font-size:0.78rem; color:var(--text-secondary); margin-bottom:1rem;">
+                Compartilhe o link abaixo com quem você quer convidar. Quem acessar o link será adicionado a este workspace.
+            </p>
+            <div id="inviteKeySection">
+                <div style="display:flex; gap:0.5rem; margin-bottom:0.75rem;">
+                    <input type="text" id="inviteLinkDisplay" readonly
+                        style="flex:1; font-size:0.72rem; background:var(--panel-raised); border:1px solid var(--border); border-radius:var(--radius); padding:0.5rem 0.75rem; color:var(--text-primary); cursor:pointer;"
+                        onclick="copyInviteLink()" placeholder="Gerando link...">
+                    <button class="btn btn-primary btn-sm" style="width:auto; flex-shrink:0;" onclick="copyInviteLink()">📋 Copiar</button>
+                </div>
+                <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                    <button class="btn btn-secondary btn-sm" style="width:auto;" onclick="generateNewInviteKey()">🔄 Gerar novo link</button>
+                    <button class="btn btn-sm" style="width:auto; background:transparent; color:var(--led-red); border:1px solid var(--led-red);" onclick="revokeInviteKey()">🗑️ Revogar</button>
+                </div>
+            </div>
+            <div id="inviteNoAdmin" style="display:none; font-size:0.78rem; color:var(--text-secondary); padding:1rem; text-align:center;">
+                ⚠️ Apenas administradores podem gerar links de convite.
+            </div>
+            <div id="workspaceInviteAlert" class="alert" style="margin-top:0.75rem;"></div>
         </div>
     </div>
 
@@ -9095,6 +9128,96 @@
                 if (ws.logoUrl) { img.src = ws.logoUrl; img.style.display = 'block'; }
                 else img.style.display = 'none';
             }
+        }
+
+        let _currentInviteKeyId = null;
+
+        async function openWorkspaceInvite() {
+            document.getElementById('workspaceDropdown').style.display = 'none';
+            const active = currentWorkspaces.find(w => w.id === currentWorkspaceId);
+            document.getElementById('inviteWorkspaceName').textContent =
+                active ? `🏢 ${active.name}` : '';
+            document.getElementById('workspaceInviteAlert').innerHTML = '';
+            document.getElementById('inviteLinkDisplay').value = 'Carregando...';
+
+            const isAdmin = currentWorkspaceRole === 'admin';
+            document.getElementById('inviteKeySection').style.display = isAdmin ? '' : 'none';
+            document.getElementById('inviteNoAdmin').style.display   = isAdmin ? 'none' : '';
+
+            document.getElementById('workspaceInviteModal').classList.add('show');
+
+            if (isAdmin) await loadLatestInviteKey();
+        }
+
+        async function loadLatestInviteKey() {
+            try {
+                const r = await fetchWithRetry(`${API_URL}/workspace/invite-keys`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (!r.ok) return;
+                const keys = await r.json();
+                const active = keys.find(k => k.isActive);
+                if (active) {
+                    _currentInviteKeyId = active.id;
+                    setInviteLink(active.keyValue);
+                } else {
+                    _currentInviteKeyId = null;
+                    document.getElementById('inviteLinkDisplay').value = '';
+                    document.getElementById('inviteLinkDisplay').placeholder = 'Nenhum link ativo. Clique em "Gerar novo link".';
+                }
+            } catch(e) {
+                document.getElementById('inviteLinkDisplay').value = '';
+            }
+        }
+
+        function setInviteLink(keyValue) {
+            const link = `${window.location.origin}?invite=${keyValue}`;
+            document.getElementById('inviteLinkDisplay').value = link;
+        }
+
+        async function generateNewInviteKey() {
+            try {
+                const r = await fetchWithRetry(`${API_URL}/workspace/invite-keys`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                const data = await r.json();
+                if (r.ok) {
+                    _currentInviteKeyId = data.id;
+                    setInviteLink(data.keyValue);
+                    showAlert('workspaceInviteAlert', '✅ Novo link gerado!', 'success');
+                } else {
+                    showAlert('workspaceInviteAlert', data.error || 'Erro ao gerar link', 'danger');
+                }
+            } catch(e) { showAlert('workspaceInviteAlert', 'Erro de conexão', 'danger'); }
+        }
+
+        async function revokeInviteKey() {
+            if (!_currentInviteKeyId) return;
+            if (!confirm('Revogar este link? Quem ainda não entrou não conseguirá mais usar.')) return;
+            try {
+                const r = await fetchWithRetry(`${API_URL}/workspace/invite-keys/${_currentInviteKeyId}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (r.ok) {
+                    _currentInviteKeyId = null;
+                    document.getElementById('inviteLinkDisplay').value = '';
+                    document.getElementById('inviteLinkDisplay').placeholder = 'Link revogado. Gere um novo se precisar.';
+                    showAlert('workspaceInviteAlert', 'Link revogado.', 'success');
+                }
+            } catch(e) { showAlert('workspaceInviteAlert', 'Erro ao revogar', 'danger'); }
+        }
+
+        function copyInviteLink() {
+            const input = document.getElementById('inviteLinkDisplay');
+            if (!input.value || input.value.startsWith('Carregando') || input.value.startsWith('Nenhum')) return;
+            navigator.clipboard.writeText(input.value).then(() => {
+                showAlert('workspaceInviteAlert', '✅ Link copiado!', 'success');
+            }).catch(() => {
+                input.select(); document.execCommand('copy');
+                showAlert('workspaceInviteAlert', '✅ Link copiado!', 'success');
+            });
         }
 
         function showCreateWorkspaceModal() {
