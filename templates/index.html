@@ -3405,6 +3405,9 @@
             document.querySelectorAll('.admin-only-section').forEach(el => {
                 el.style.display = isAdmin ? '' : 'none';
             });
+            // Botão convidar — visível para qualquer admin, sem precisar de múltiplos workspaces
+            const inviteBtn = document.getElementById('sidebarInviteBtn');
+            if (inviteBtn) inviteBtn.style.display = isAdmin ? '' : 'none';
         }
 
         // Toggle "Minhas Demandas / Time Todo" — dura só a sessão (não salva em localStorage),
@@ -9052,9 +9055,6 @@
                 if (currentWorkspaces.length > 1) {
                     document.getElementById('workspaceSelectorWrap').style.display = '';
                 }
-                // Sempre mostrar o botão de convidar
-                const inviteBtn = document.getElementById('sidebarInviteBtn');
-                if (inviteBtn) inviteBtn.style.display = '';
                 renderWorkspaceSelector();
             } catch(e) { console.error('loadUserWorkspaces:', e); }
         }
