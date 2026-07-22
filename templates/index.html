@@ -929,7 +929,9 @@
         .ai-sugg:hover { background:rgba(26,115,232,0.15); }
         .ai-action-card { background:#0a1628; border:1px solid #1a73e8; border-radius:8px; padding:0.6rem 0.75rem; margin-top:0.4rem; font-size:0.75rem; color:#82b4ff; }
 
-        .role-badge-admin { color: var(--amber-bright); border: 1px solid var(--amber); }
+        .role-badge-admin  { color: var(--amber-bright); border: 1px solid var(--amber); }
+        .role-badge-member { color: var(--led-blue); border: 1px solid var(--led-blue); }
+        .role-badge-viewer { color: var(--text-secondary); border: 1px solid var(--border); }
         .role-badge-member { color: var(--text-secondary); border: 1px solid var(--border); }
 
 
@@ -1551,7 +1553,11 @@
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
                 <h3 style="margin-bottom: 0;">📋 Minhas Demandas</h3>
                 <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
-                    <button class="btn btn-sm btn-primary" style="width: auto;" onclick="showNewDemandModal()">➕ Nova Demanda</button>
+            <div id="viewerBanner" style="display:none; background:#1a1000; border:1px solid var(--amber-dim); border-radius:var(--radius); padding:0.5rem 0.85rem; margin-bottom:1rem; font-size:0.75rem; color:var(--amber);">
+                👁️ Você está como <strong>Visualizador</strong> neste workspace — somente leitura.
+            </div>
+
+                    <button class="btn btn-sm btn-primary write-action" style="width: auto;" onclick="showNewDemandModal()">➕ Nova Demanda</button>
                     <button class="btn btn-sm" style="width: auto; background: transparent; color: var(--led-green); border: 1px solid var(--led-green);" onclick="showWhatsAppText()">💬 Gerar Texto WhatsApp</button>
                     <input type="date" id="exportReportDate" style="width: auto; padding: 0.4rem 0.6rem; font-size: 0.75rem;">
                     <button class="btn btn-sm" style="width: auto; background: transparent; color: var(--led-blue); border: 1px solid var(--led-blue);" onclick="downloadDemandsHtml()">📄 Exportar HTML</button>
@@ -2606,8 +2612,16 @@
             <div class="modal-header">👥 Convidar para o Workspace</div>
             <div id="inviteWorkspaceName" style="font-size:0.82rem; color:var(--amber); font-weight:700; margin-bottom:0.75rem;"></div>
             <p style="font-size:0.78rem; color:var(--text-secondary); margin-bottom:1rem;">
-                Compartilhe o link abaixo com quem você quer convidar. Quem acessar o link será adicionado a este workspace.
+                Compartilhe o link abaixo com quem você quer convidar. Quem acessar o link será adicionado a este workspace com o papel selecionado.
             </p>
+            <div class="form-group" style="margin-bottom:0.75rem;">
+                <label>Papel do convidado</label>
+                <select id="inviteRoleSelect" onchange="generateNewInviteKey()" style="font-size:0.82rem;">
+                    <option value="member">✏️ Editor — cria e edita demandas</option>
+                    <option value="viewer">👁️ Visualizador — só visualiza</option>
+                    <option value="admin">👑 Admin — acesso total</option>
+                </select>
+            </div>
             <div id="inviteKeySection">
                 <div style="display:flex; gap:0.5rem; margin-bottom:0.75rem;">
                     <input type="text" id="inviteLinkDisplay" readonly
@@ -3401,13 +3415,21 @@
 
         // Mostra/esconde tudo marcado como .admin-only-section conforme o papel da conta no workspace.
         function applyRoleBasedUI() {
-            const isAdmin = currentWorkspaceRole === 'admin';
+            const isAdmin  = currentWorkspaceRole === 'admin';
+            const isViewer = currentWorkspaceRole === 'viewer';
             document.querySelectorAll('.admin-only-section').forEach(el => {
                 el.style.display = isAdmin ? '' : 'none';
             });
-            // Botão convidar — visível para qualquer admin, sem precisar de múltiplos workspaces
+            // Botões de escrita ocultos para viewers
+            document.querySelectorAll('.write-action').forEach(el => {
+                el.style.display = isViewer ? 'none' : '';
+            });
+            // Botão convidar — visível para admins
             const inviteBtn = document.getElementById('sidebarInviteBtn');
             if (inviteBtn) inviteBtn.style.display = isAdmin ? '' : 'none';
+            // Banner de viewer
+            const viewerBanner = document.getElementById('viewerBanner');
+            if (viewerBanner) viewerBanner.style.display = isViewer ? '' : 'none';
         }
 
         // Toggle "Minhas Demandas / Time Todo" — dura só a sessão (não salva em localStorage),
@@ -3604,7 +3626,17 @@
                             </div>
                         </div>
                         <div class="config-list-actions">
-                            <span class="config-completed-tag ${m.role === 'admin' ? 'role-badge-admin' : 'role-badge-member'}">${m.role === 'admin' ? 'Admin' : 'Membro'}</span>
+                            <span class="config-completed-tag ${m.role === 'admin' ? 'role-badge-admin' : m.role === 'viewer' ? 'role-badge-viewer' : 'role-badge-member'}">
+                                ${m.role === 'admin' ? '👑 Admin' : m.role === 'viewer' ? '👁️ Viewer' : '✏️ Editor'}
+                            </span>
+                            ${m.userId !== currentUser?.id ? `
+                            <select onchange="updateMemberRole(${m.id}, this.value)"
+                                style="background:var(--panel-raised);border:1px solid var(--border);border-radius:var(--radius);padding:2px 6px;font-size:0.7rem;color:var(--text-secondary);cursor:pointer;">
+                                <option value="">Mudar papel</option>
+                                <option value="admin">👑 Admin</option>
+                                <option value="member">✏️ Editor</option>
+                                <option value="viewer">👁️ Viewer</option>
+                            </select>` : ''}
                             ${isAdmin ? `<button class="btn-edit btn-sm" onclick="editTeamMember(${m.id})">Editar</button>` : ''}
                         </div>
                     </div>
@@ -9188,10 +9220,13 @@
                 if (active) {
                     _currentInviteKeyId = active.id;
                     setInviteLink(active.keyValue);
+                    // Sincronizar seletor de papel com o da chave atual
+                    const roleSelect = document.getElementById('inviteRoleSelect');
+                    if (roleSelect && active.inviteRole) roleSelect.value = active.inviteRole;
                 } else {
                     _currentInviteKeyId = null;
                     document.getElementById('inviteLinkDisplay').value = '';
-                    document.getElementById('inviteLinkDisplay').placeholder = 'Nenhum link ativo. Clique em "Gerar novo link".';
+                    document.getElementById('inviteLinkDisplay').placeholder = 'Clique em "Gerar Link" para criar um link de convite.';
                 }
             } catch(e) {
                 document.getElementById('inviteLinkDisplay').value = '';
@@ -9204,16 +9239,18 @@
         }
 
         async function generateNewInviteKey() {
+            const role = document.getElementById('inviteRoleSelect')?.value || 'member';
             try {
                 const r = await fetchWithRetry(`${API_URL}/workspace/invite-keys`, {
                     method: 'POST',
-                    headers: { 'Authorization': `Bearer ${token}` }
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ invite_role: role })
                 }, 1);
                 const data = await r.json();
                 if (r.ok) {
                     _currentInviteKeyId = data.id;
                     setInviteLink(data.keyValue);
-                    showAlert('workspaceInviteAlert', '✅ Novo link gerado!', 'success');
+                    showAlert('workspaceInviteAlert', '✅ Link gerado!', 'success');
                 } else {
                     showAlert('workspaceInviteAlert', data.error || 'Erro ao gerar link', 'danger');
                 }
@@ -9343,6 +9380,21 @@
 
         // Interceptar fetchWithRetry para injetar X-Workspace-ID automaticamente
         const _fetchWithRetryOrig = fetchWithRetry;
+
+        async function updateMemberRole(memberId, newRole) {
+            if (!newRole) return;
+            const labels = {admin:'Admin', member:'Editor', viewer:'Viewer'};
+            if (!confirm(`Alterar papel para "${labels[newRole]}"?`)) return;
+            try {
+                const r = await fetchWithRetry(`${API_URL}/workspace/members/${memberId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ role: newRole })
+                }, 1);
+                if (r.ok) { loadTeamMembers(); }
+                else { const d = await r.json().catch(()=>({})); alert(d.error || 'Erro ao atualizar papel'); }
+            } catch(e) { alert('Erro de conexão'); }
+        }
 
         async function loadAdminUsers() {
             const container = document.getElementById('adminUsersList');
