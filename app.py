@@ -959,6 +959,12 @@ def set_theme():
 @jwt_required()
 def verify_access_key():
     """Libera o acesso da conta usando uma chave de convite válida (uso único)"""
+    # Garante coluna invite_role antes de qualquer query em access_keys
+    try:
+        db.session.execute(text("ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS invite_role VARCHAR(20) DEFAULT 'member'"))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
 
@@ -1356,6 +1362,11 @@ def list_invite_keys():
     """Lista as chaves de convite do workspace. Restrito a admin do workspace."""
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
+    try:
+        db.session.execute(text("ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS invite_role VARCHAR(20) DEFAULT 'member'"))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
     if not is_workspace_admin(user_id, workspace_id):
         return jsonify({'error': 'Apenas administradores podem ver as chaves de convite'}), 403
@@ -1379,6 +1390,12 @@ def create_invite_key():
 
     if not is_workspace_admin(user_id, workspace_id):
         return jsonify({'error': 'Apenas administradores podem gerar chaves de convite'}), 403
+
+    try:
+        db.session.execute(text("ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS invite_role VARCHAR(20) DEFAULT 'member'"))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
     data = request.get_json() or {}
     invite_role = data.get('invite_role', 'member')
