@@ -1494,6 +1494,7 @@
 
             <div class="sidebar-footer">
                 <button class="sidebar-link" onclick="openGlobalSearch()" title="Buscar (Ctrl/Cmd+K)">🔍 <span>Buscar</span></button>
+                <button class="sidebar-link" id="sidebarInviteBtn" style="display:none; color:var(--led-green);" onclick="openWorkspaceInvite()" title="Convidar para o workspace">👥 <span>Convidar</span></button>
                 <div class="sidebar-user">
                     <p>Olá, <strong id="userName">Usuário</strong></p>
                     <button class="logout-btn" onclick="doLogout()">Sair</button>
@@ -2575,6 +2576,25 @@
             <div style="display:flex; gap:0.75rem;">
                 <button class="btn btn-primary" style="flex:2;" onclick="downloadByStatusHtml()">📥 Gerar Relatório</button>
                 <button class="btn btn-secondary" style="flex:1;" onclick="document.getElementById('exportByStatusModal').classList.remove('show')">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: MOVER / COPIAR DEMANDA -->
+    <div id="moveCopyDemandModal" class="modal">
+        <div class="modal-content" style="max-width:420px;">
+            <span class="close-modal" onclick="document.getElementById('moveCopyDemandModal').classList.remove('show')">&times;</span>
+            <div class="modal-header" id="moveCopyModalTitle">📤 Mover Demanda</div>
+            <p style="font-size:0.78rem; color:var(--text-secondary); margin-bottom:0.5rem;" id="moveCopyModalDesc"></p>
+            <div id="moveCopyDemandInfo" style="background:var(--panel-raised); border-radius:var(--radius); padding:0.6rem 0.85rem; margin-bottom:1rem; border-left:3px solid var(--amber-dim); font-size:0.8rem;"></div>
+            <div class="form-group">
+                <label>Workspace destino</label>
+                <select id="moveCopyTargetWs"></select>
+            </div>
+            <div id="moveCopyAlert" class="alert"></div>
+            <div style="display:flex; gap:0.75rem;">
+                <button class="btn btn-primary" style="flex:1;" id="moveCopyConfirmBtn" onclick="confirmMoveCopy()">Confirmar</button>
+                <button class="btn btn-secondary" onclick="document.getElementById('moveCopyDemandModal').classList.remove('show')">Cancelar</button>
             </div>
         </div>
     </div>
@@ -7660,10 +7680,15 @@
                 `;
             }
 
+            const hasOtherWs = currentWorkspaces && currentWorkspaces.length > 1;
             html += `
-                <div style="display:flex; gap:0.5rem; margin-top:1rem;">
+                <div style="display:flex; gap:0.5rem; margin-top:1rem; flex-wrap:wrap;">
                     <button class="btn btn-sm btn-secondary" onclick="completeDemand(${isPendingCreate ? `'${demand.id}'` : demand.id})" ${lockActions ? 'disabled' : ''}>✅ Concluir</button>
                     <button class="btn btn-sm btn-secondary" onclick="editDemandFromDetail(${isPendingCreate ? `'${demand.id}'` : demand.id})" ${lockActions ? 'disabled' : ''}>✏️ Editar</button>
+                    ${hasOtherWs ? `
+                    <button class="btn btn-sm" style="background:transparent;border:1px solid var(--led-blue);color:var(--led-blue);" onclick="openMoveCopyModal(${demand.id},'move')">📤 Mover</button>
+                    <button class="btn btn-sm" style="background:transparent;border:1px solid var(--text-secondary);color:var(--text-secondary);" onclick="openMoveCopyModal(${demand.id},'copy')">📋 Copiar</button>
+                    ` : ''}
                 </div>
             `;
 
@@ -9027,6 +9052,9 @@
                 if (currentWorkspaces.length > 1) {
                     document.getElementById('workspaceSelectorWrap').style.display = '';
                 }
+                // Sempre mostrar o botão de convidar
+                const inviteBtn = document.getElementById('sidebarInviteBtn');
+                if (inviteBtn) inviteBtn.style.display = '';
                 renderWorkspaceSelector();
             } catch(e) { console.error('loadUserWorkspaces:', e); }
         }
@@ -9218,6 +9246,72 @@
                 input.select(); document.execCommand('copy');
                 showAlert('workspaceInviteAlert', '✅ Link copiado!', 'success');
             });
+        }
+
+        // ============= MOVER / COPIAR DEMANDA =============
+        let _moveCopyDemandId = null;
+        let _moveCopyAction   = null; // 'move' | 'copy'
+
+        function openMoveCopyModal(demandId, action) {
+            _moveCopyDemandId = demandId;
+            _moveCopyAction   = action;
+            const demand = currentDemands.find(d => d.id === demandId);
+            if (!demand) return;
+
+            const title = action === 'move' ? '📤 Mover Demanda' : '📋 Copiar Demanda';
+            const desc  = action === 'move'
+                ? 'A demanda será <strong>removida</strong> deste workspace e enviada para o destino.'
+                : 'Uma cópia da demanda será criada no workspace destino. A original permanece aqui.';
+
+            document.getElementById('moveCopyModalTitle').textContent = title;
+            document.getElementById('moveCopyModalDesc').innerHTML = desc;
+            document.getElementById('moveCopyDemandInfo').textContent =
+                `${demand.location || ''} ${demand.location ? '—' : ''} ${demand.activity}`;
+            document.getElementById('moveCopyAlert').innerHTML = '';
+            document.getElementById('moveCopyConfirmBtn').textContent =
+                action === 'move' ? '📤 Mover' : '📋 Copiar';
+
+            // Popular select com outros workspaces
+            const others = currentWorkspaces.filter(w => w.id !== currentWorkspaceId);
+            const sel = document.getElementById('moveCopyTargetWs');
+            if (!others.length) {
+                sel.innerHTML = '<option value="">Nenhum outro workspace disponível</option>';
+            } else {
+                sel.innerHTML = others.map(w =>
+                    `<option value="${w.id}">${escapeHtml(w.name)}</option>`
+                ).join('');
+            }
+
+            document.getElementById('moveCopyDemandModal').classList.add('show');
+        }
+
+        async function confirmMoveCopy() {
+            const targetId = parseInt(document.getElementById('moveCopyTargetWs').value);
+            if (!targetId) {
+                showAlert('moveCopyAlert', 'Selecione um workspace destino', 'danger');
+                return;
+            }
+            const endpoint = _moveCopyAction === 'move'
+                ? `${API_URL}/demands/${_moveCopyDemandId}/move`
+                : `${API_URL}/demands/${_moveCopyDemandId}/copy`;
+            try {
+                const r = await fetchWithRetry(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ target_workspace_id: targetId })
+                }, 1);
+                const data = await r.json();
+                if (r.ok) {
+                    document.getElementById('moveCopyDemandModal').classList.remove('show');
+                    closeDemandDetailModal?.();
+                    loadDemands();
+                    loadTodayPage();
+                    const targetName = currentWorkspaces.find(w => w.id === targetId)?.name || 'outro workspace';
+                    alert(`✅ ${_moveCopyAction === 'move' ? 'Demanda movida' : 'Demanda copiada'} para "${targetName}"!`);
+                } else {
+                    showAlert('moveCopyAlert', data.error || 'Erro ao processar', 'danger');
+                }
+            } catch(e) { showAlert('moveCopyAlert', 'Erro de conexão', 'danger'); }
         }
 
         function showCreateWorkspaceModal() {
