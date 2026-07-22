@@ -3750,6 +3750,78 @@ Prioridades disponíveis: {prio_ctx}
 
     return jsonify({'error': f'Serviço temporariamente indisponível. Tente novamente em instantes.\nDetalhe: {last_error}'}), 502
 
+
+# ============= MOVER / COPIAR DEMANDA ENTRE WORKSPACES =============
+@app.route('/api/demands/<int:demand_id>/move', methods=['POST'])
+@jwt_required()
+def move_demand(demand_id):
+    """Move uma demanda para outro workspace do mesmo usuário."""
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    demand = ws_filter(Demand, user_id, workspace_id, {'id': demand_id}).first_or_404()
+    data = request.get_json() or {}
+    target_ws_id = data.get('target_workspace_id')
+    if not target_ws_id:
+        return jsonify({'error': 'workspace destino obrigatório'}), 400
+    # Validar que o usuário é membro do workspace destino
+    has_access = WorkspaceMember.query.filter_by(user_id=user_id, workspace_id=target_ws_id).first()
+    if not has_access:
+        return jsonify({'error': 'Sem acesso ao workspace destino'}), 403
+    # Encontrar grupo equivalente no destino (por nome) ou usar None
+    dest_group = None
+    if demand.work_group_id:
+        src_group = WorkGroup.query.get(demand.work_group_id)
+        if src_group:
+            dest_group = WorkGroup.query.filter_by(
+                workspace_id=target_ws_id, name=src_group.name
+            ).first()
+    # Mover: atualizar workspace_id e work_group_id
+    demand.workspace_id = target_ws_id
+    demand.work_group_id = dest_group.id if dest_group else None
+    db.session.commit()
+    return jsonify({'message': 'Demanda movida com sucesso', 'newWorkspaceId': target_ws_id}), 200
+
+
+@app.route('/api/demands/<int:demand_id>/copy', methods=['POST'])
+@jwt_required()
+def copy_demand(demand_id):
+    """Copia uma demanda para outro workspace do mesmo usuário."""
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    demand = ws_filter(Demand, user_id, workspace_id, {'id': demand_id}).first_or_404()
+    data = request.get_json() or {}
+    target_ws_id = data.get('target_workspace_id')
+    if not target_ws_id:
+        return jsonify({'error': 'workspace destino obrigatório'}), 400
+    has_access = WorkspaceMember.query.filter_by(user_id=user_id, workspace_id=target_ws_id).first()
+    if not has_access:
+        return jsonify({'error': 'Sem acesso ao workspace destino'}), 403
+    dest_group = None
+    if demand.work_group_id:
+        src_group = WorkGroup.query.get(demand.work_group_id)
+        if src_group:
+            dest_group = WorkGroup.query.filter_by(
+                workspace_id=target_ws_id, name=src_group.name
+            ).first()
+    new_demand = Demand(
+        user_id=user_id,
+        workspace_id=target_ws_id,
+        work_group_id=dest_group.id if dest_group else None,
+        location=demand.location,
+        activity=demand.activity,
+        context=demand.context,
+        status=demand.status,
+        priority=demand.priority,
+        due_date=demand.due_date,
+        checklist=demand.checklist or [],
+        is_recurring=demand.is_recurring,
+        recurrence_type=demand.recurrence_type,
+        created_date=date.today()
+    )
+    db.session.add(new_demand)
+    db.session.commit()
+    return jsonify({'message': 'Demanda copiada com sucesso', 'newDemandId': new_demand.id, 'newWorkspaceId': target_ws_id}), 201
+
 # ============= ROTAS DE BACKUP =============
 @app.route('/api/export', methods=['GET'])
 @jwt_required()
