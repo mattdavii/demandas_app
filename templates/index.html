@@ -7661,7 +7661,7 @@
             `;
         }
 
-        function showDemandDetailModal(id) {
+        async function showDemandDetailModal(id) {
             const demand = currentDemands.find(d => d.id === id);
             if (!demand) return;
 
@@ -7715,6 +7715,9 @@
                 `;
             }
 
+            // Placeholder para anotações (carregadas após o modal abrir)
+            html += `<div id="demandDetailNotesSection" style="margin-top:0.75rem;"></div>`;
+
             const hasOtherWs = currentWorkspaces && currentWorkspaces.length > 1;
             html += `
                 <div style="display:flex; gap:0.5rem; margin-top:1rem; flex-wrap:wrap;">
@@ -7729,6 +7732,44 @@
 
             document.getElementById('demandDetailContent').innerHTML = html;
             document.getElementById('demandDetailModal').classList.add('show');
+
+            // Carregar anotações em paralelo (não bloqueia a abertura do modal)
+            if (!isPendingCreate) loadDemandDetailNotes(id);
+        }
+
+        async function loadDemandDetailNotes(demandId) {
+            const section = document.getElementById('demandDetailNotesSection');
+            if (!section) return;
+            try {
+                const r = await fetchWithRetry(`${API_URL}/demands/${demandId}/notes`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (!r.ok) return;
+                const notes = await r.json();
+                if (!notes.length) { section.innerHTML = ''; return; }
+
+                section.innerHTML = `
+                    <div style="border-top:1px solid var(--border); padding-top:0.85rem; margin-top:0.25rem;">
+                        <div style="font-size:0.68rem; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:var(--amber); margin-bottom:0.6rem;">
+                            📝 Anotações (${notes.length})
+                        </div>
+                        <div style="display:flex; flex-direction:column; gap:0.45rem; max-height:200px; overflow-y:auto;">
+                            ${notes.map(n => {
+                                const dt = n.createdAt
+                                    ? new Date(n.createdAt + (n.createdAt.endsWith('Z') ? '' : 'Z'))
+                                        .toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})
+                                    : '';
+                                return `<div style="background:var(--panel-raised); border-radius:var(--radius); padding:0.5rem 0.65rem; border-left:2px solid var(--amber-dim);">
+                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+                                        <span style="font-size:0.62rem; font-weight:700; color:var(--amber);">${escapeHtml(n.username || '?')}</span>
+                                        <span style="font-size:0.58rem; color:var(--text-secondary);">${dt}</span>
+                                    </div>
+                                    <div style="font-size:0.78rem; white-space:pre-wrap; line-height:1.4; color:var(--text-primary);">${escapeHtml(n.content)}</div>
+                                </div>`;
+                            }).join('')}
+                        </div>
+                    </div>`;
+            } catch(e) { section.innerHTML = ''; }
         }
 
         function closeDemandDetailModal() {
