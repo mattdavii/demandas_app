@@ -2123,6 +2123,13 @@
                 <input type="checkbox" id="statusConfigIsCompleted" style="width:auto; accent-color: var(--led-green); cursor:pointer;">
                 <label style="margin-bottom:0; cursor:pointer;" onclick="document.getElementById('statusConfigIsCompleted').click()">Esse status é conclusivo (arquiva a demanda pro histórico)</label>
             </div>
+            <div class="form-group" style="display:flex; align-items:center; gap:0.5rem;">
+                <input type="checkbox" id="statusConfigIsExecutionStart" style="width:auto; accent-color: var(--led-blue); cursor:pointer;">
+                <label style="margin-bottom:0; cursor:pointer;" onclick="document.getElementById('statusConfigIsExecutionStart').click()">
+                    ⏱️ Este status inicia o timer de execução
+                    <span style="font-size:0.65rem; color:var(--text-secondary); display:block; margin-top:1px;">Só um status pode ser o início. Marca o momento em que a demanda começa a ser executada.</span>
+                </label>
+            </div>
             <button class="btn btn-primary" onclick="saveStatusConfig()">Salvar</button>
             <button class="btn btn-secondary" onclick="closeStatusConfigModal()" style="margin-left: 0.5rem;">Cancelar</button>
         </div>
@@ -4316,7 +4323,7 @@
                     <div class="config-list-info">
                         <span class="config-color-dot" style="background:${s.color};"></span>
                         <span>${s.emoji || ''} ${escapeHtml(s.label)}</span>
-                        ${s.isCompleted ? '<span class="config-completed-tag">Conclusivo</span>' : ''}
+                        ${s.isCompleted ? '<span class="config-completed-tag">Conclusivo</span>' : ''}${s.isExecutionStart ? '<span class="config-completed-tag" style="color:var(--led-blue);border-color:var(--led-blue);">⏱️ Início</span>' : ''}
                     </div>
                     <div class="config-list-actions">
                         <button class="btn-icon" onclick="moveStatusConfig(${s.id}, -1)" ${idx === 0 ? 'disabled' : ''} title="Mover pra cima">↑</button>
@@ -4360,6 +4367,7 @@
             document.getElementById('statusConfigEmoji').value = '';
             document.getElementById('statusConfigColor').value = '#9aa0a7';
             document.getElementById('statusConfigIsCompleted').checked = false;
+            document.getElementById('statusConfigIsExecutionStart').checked = false;
             document.getElementById('statusConfigModal').classList.add('show');
         }
 
@@ -4372,6 +4380,7 @@
             document.getElementById('statusConfigEmoji').value = config.emoji || '';
             document.getElementById('statusConfigColor').value = config.color;
             document.getElementById('statusConfigIsCompleted').checked = config.isCompleted;
+            document.getElementById('statusConfigIsExecutionStart').checked = config.isExecutionStart || false;
             document.getElementById('statusConfigModal').classList.add('show');
         }
 
@@ -4389,6 +4398,7 @@
             const emoji = document.getElementById('statusConfigEmoji').value.trim();
             const color = document.getElementById('statusConfigColor').value;
             const isCompleted = document.getElementById('statusConfigIsCompleted').checked;
+            const isExecutionStart = document.getElementById('statusConfigIsExecutionStart').checked;
             const isEdit = editingStatusConfigId !== null;
 
             try {
@@ -4397,14 +4407,14 @@
                     response = await fetchWithRetry(`${API_URL}/status-configs/${editingStatusConfigId}`, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify({ label, emoji, color, isCompleted })
+                        body: JSON.stringify({ label, emoji, color, isCompleted, is_execution_start: isExecutionStart })
                     }, 1);
                 } else {
                     const key = generateUniqueKey(label, currentStatusConfigs);
                     response = await fetchWithRetry(`${API_URL}/status-configs`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify({ key, label, emoji, color, isCompleted })
+                        body: JSON.stringify({ key, label, emoji, color, isCompleted, is_execution_start: isExecutionStart })
                     }, 1);
                 }
 
@@ -6352,6 +6362,7 @@
                 ${checklistHtml}
                 ${checklistFooter}
                 ${notesHtml}
+                ${getExecutionAnalysisHtml(last)}
             `;
             document.getElementById('historyCardDetailModal').classList.add('show');
         }
@@ -7722,6 +7733,18 @@
             }
             if (demand.context) {
                 html += `<p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:1rem;">📌 ${escapeHtml(demand.context)}</p>`;
+            }
+
+            // Timer de execução em andamento
+            if (demand.executionStartedAt) {
+                const started = new Date(demand.executionStartedAt + (demand.executionStartedAt.endsWith('Z') ? '' : 'Z'));
+                const diffMs  = Date.now() - started.getTime();
+                html += `<div style="font-size:0.82rem; margin-bottom:0.75rem; padding:0.5rem 0.75rem;
+                    background:rgba(96,165,250,0.08); border:1px solid rgba(96,165,250,0.3);
+                    border-radius:var(--radius); color:var(--led-blue);">
+                    ⏱️ Em execução há <strong>${formatDuration(diffMs)}</strong>
+                    <span style="font-size:0.65rem; color:var(--text-secondary); margin-left:0.5rem;">desde ${new Date(demand.executionStartedAt + (demand.executionStartedAt.endsWith('Z')?'':'Z')).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>
+                </div>`;
             }
 
             const checklist = demand.checklist || [];
@@ -9508,6 +9531,59 @@
                 if (r.ok) { loadTeamMembers(); }
                 else { const d = await r.json().catch(()=>({})); alert(d.error || 'Erro ao atualizar papel'); }
             } catch(e) { alert('Erro de conexão'); }
+        }
+
+        // ── Utilitários de tempo de execução ────────────────────────────────────
+        function formatDuration(ms) {
+            const totalMin = Math.floor(ms / 60000);
+            if (totalMin < 60) return `${totalMin} min`;
+            const hours = Math.floor(totalMin / 60);
+            const mins  = totalMin % 60;
+            if (hours < 24) return `${hours}h ${mins > 0 ? mins + 'min' : ''}`.trim();
+            const days = Math.floor(hours / 24);
+            const hrs  = hours % 24;
+            return `${days}d ${hrs > 0 ? hrs + 'h' : ''}`.trim();
+        }
+
+        function formatMinutes(minutes) {
+            if (!minutes && minutes !== 0) return '—';
+            return formatDuration(minutes * 60000);
+        }
+
+        function getExecutionAnalysisHtml(item) {
+            const lines = [];
+            // Tempo na fila (criação → início de execução)
+            if (item.executionStartedAt && item.createdDate) {
+                const created = new Date(item.createdDate + 'T00:00:00Z');
+                const started = new Date(item.executionStartedAt + (item.executionStartedAt.endsWith('Z') ? '' : 'Z'));
+                const queueMs = started - created;
+                if (queueMs > 0) lines.push(`<div style="display:flex;justify-content:space-between;padding:3px 0;">
+                    <span style="color:var(--text-secondary);">⏳ Tempo na fila (criação → início)</span>
+                    <span style="font-weight:600;">${formatDuration(queueMs)}</span></div>`);
+            }
+            // Tempo de execução
+            if (item.executionMinutes != null) {
+                const color = item.executionMinutes < 60 ? 'var(--led-green)' : item.executionMinutes < 1440 ? 'var(--amber)' : 'var(--led-red)';
+                lines.push(`<div style="display:flex;justify-content:space-between;padding:3px 0;">
+                    <span style="color:var(--text-secondary);">⏱️ Tempo de execução</span>
+                    <span style="font-weight:700;color:${color};">${formatMinutes(item.executionMinutes)}</span></div>`);
+            }
+            // Tempo total
+            if (item.createdDate && item.statusChangeDate) {
+                const created = new Date(item.createdDate + 'T00:00:00Z');
+                const done    = new Date(item.statusChangeDate + 'T23:59:00Z');
+                const totalMs = done - created;
+                if (totalMs > 0) lines.push(`<div style="display:flex;justify-content:space-between;padding:3px 0;">
+                    <span style="color:var(--text-secondary);">📊 Lead time total</span>
+                    <span style="font-weight:600;">${formatDuration(totalMs)}</span></div>`);
+            }
+            if (!lines.length) return '';
+            return `<div style="margin-top:0.85rem;padding:0.65rem 0.75rem;background:rgba(96,165,250,0.06);
+                border:1px solid rgba(96,165,250,0.2);border-radius:var(--radius);">
+                <div style="font-size:0.65rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;
+                    color:var(--led-blue);margin-bottom:6px;">⏱️ Análise de Tempo</div>
+                <div style="font-size:0.78rem;">${lines.join('')}</div>
+            </div>`;
         }
 
         async function loadAdminUsers() {
