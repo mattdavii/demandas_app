@@ -7672,9 +7672,34 @@
             document.getElementById('demandDetailTitle').textContent = `${demand.location} - ${demand.activity}`;
 
             let html = `
-                <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:1rem;">
+                <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:1rem; align-items:center;">
                     ${getGroupBadge(demand.workGroupId, demand.workGroupName)}
-                    ${getStatusBadgeHtml(demand.status)}
+                    <div style="position:relative;">
+                        <button id="detailStatusBtn" onclick="toggleDetailStatusDropdown()"
+                            style="background:transparent; border:1px solid ${(() => { const s = (currentStatusConfigs||[]).find(sc=>sc.key===demand.status); return s?.color||'var(--text-secondary)'; })()}; color:${(() => { const s = (currentStatusConfigs||[]).find(sc=>sc.key===demand.status); return s?.color||'var(--text-secondary)'; })()};
+                            border-radius:3px; padding:2px 10px; font-size:0.72rem; font-weight:700;
+                            text-transform:uppercase; letter-spacing:0.04em; cursor:pointer; font-family:inherit;
+                            display:flex; align-items:center; gap:0.4rem;">
+                            <span style="width:7px;height:7px;border-radius:50%;background:${(() => { const s = (currentStatusConfigs||[]).find(sc=>sc.key===demand.status); return s?.color||'var(--text-secondary)'; })()};flex-shrink:0;"></span>
+                            ${escapeHtml((currentStatusConfigs||[]).find(s=>s.key===demand.status)?.label || demand.status)}
+                            <span style="font-size:0.6rem;opacity:0.7;">▼</span>
+                        </button>
+                        <div id="detailStatusDropdown" style="display:none;position:absolute;top:calc(100% + 4px);left:0;min-width:160px;
+                            background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+                            z-index:600;box-shadow:0 8px 24px rgba(0,0,0,0.5);overflow:hidden;">
+                            ${(currentStatusConfigs||[]).map(s => `
+                                <div onclick="changeDetailStatus('${escapeHtml(s.key)}')"
+                                    style="padding:0.5rem 0.85rem;cursor:pointer;font-size:0.78rem;
+                                    display:flex;align-items:center;gap:0.6rem;color:var(--text-primary);
+                                    ${s.key===demand.status?'background:var(--panel-raised);':''}"
+                                    onmouseover="this.style.background='var(--panel-raised)'"
+                                    onmouseout="this.style.background='${s.key===demand.status?'var(--panel-raised)':'transparent'}'">
+                                    <span style="width:8px;height:8px;border-radius:50%;background:${s.color||'var(--text-secondary)'};flex-shrink:0;"></span>
+                                    ${escapeHtml(s.emoji||'')} ${escapeHtml(s.label)}
+                                    ${s.key===demand.status?'<span style="margin-left:auto;color:var(--amber);font-size:0.7rem;">✓</span>':''}
+                                </div>`).join('')}
+                        </div>
+                    </div>
                     ${getPriorityBadge(demand.priority)}
                 </div>
             `;
@@ -7735,6 +7760,54 @@
 
             // Carregar anotações em paralelo (não bloqueia a abertura do modal)
             if (!isPendingCreate) loadDemandDetailNotes(id);
+        }
+
+        function toggleDetailStatusDropdown() {
+            const dd = document.getElementById('detailStatusDropdown');
+            if (dd) dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+        }
+
+        // Fechar dropdown de status ao clicar fora
+        document.addEventListener('click', e => {
+            const btn = document.getElementById('detailStatusBtn');
+            const dd  = document.getElementById('detailStatusDropdown');
+            if (dd && btn && !btn.contains(e.target) && !dd.contains(e.target)) {
+                dd.style.display = 'none';
+            }
+        });
+
+        async function changeDetailStatus(newStatus) {
+            const dd = document.getElementById('detailStatusDropdown');
+            if (dd) dd.style.display = 'none';
+            if (!currentDemandDetailId) return;
+
+            const demand = currentDemands.find(d => d.id === currentDemandDetailId);
+            if (!demand || demand.status === newStatus) return;
+
+            try {
+                const r = await fetchWithRetry(`${API_URL}/demands/${currentDemandDetailId}/status`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ status: newStatus })
+                }, 1);
+                if (r.ok) {
+                    const data = await r.json();
+                    // Se virou status conclusivo, a demanda foi arquivada
+                    if (data.archived) {
+                        closeDemandDetailModal();
+                        invalidateHistoryCache();
+                        loadDemands();
+                        loadTodayPage();
+                    } else {
+                        // Atualizar o status localmente e reabrir o modal
+                        demand.status = newStatus;
+                        invalidateHistoryCache();
+                        loadDemands();
+                        loadTodayPage();
+                        showDemandDetailModal(currentDemandDetailId);
+                    }
+                }
+            } catch(e) { alert('Erro ao alterar status'); }
         }
 
         async function loadDemandDetailNotes(demandId) {
