@@ -381,7 +381,9 @@ class Demand(db.Model):
     is_recurring = db.Column(db.Boolean, default=False)
     recurrence_type = db.Column(db.String(20), nullable=True)
     type_id = db.Column(db.Integer, db.ForeignKey('demand_types.id', ondelete='SET NULL'), nullable=True)
-    previous_status = db.Column(db.String(50), nullable=True)
+    previous_status      = db.Column(db.String(50), nullable=True)
+    status_log           = db.Column(db.JSON, nullable=True)
+    execution_started_at = db.Column(db.DateTime, nullable=True)
     rejection_note = db.Column(db.Text, nullable=True)  # 'weekly'|'biweekly'|'monthly'|'quarterly'|'semiannual'|'yearly'
     
     def to_dict(self, user_cache=None):
@@ -409,6 +411,8 @@ class Demand(db.Model):
             'isRecurring': self.is_recurring or False,
             'recurrenceType': self.recurrence_type,
             'typeId': self.type_id,
+            'executionStartedAt': self.execution_started_at.isoformat() if self.execution_started_at else None,
+            'statusLog': self.status_log or [],
             'previousStatus': self.previous_status,
             'rejectionNote': self.rejection_note
         }
@@ -430,7 +434,10 @@ class DemandHistory(db.Model):
     checklist = db.Column(db.JSON, nullable=True)  # snapshot do checklist da demanda ao concluir
     action_type     = db.Column(db.String(30), nullable=True)   # 'approved' | null (mudança normal)
     type_id         = db.Column(db.Integer, nullable=True)       # snapshot do tipo ao concluir
-    notes_snapshot  = db.Column(db.JSON, nullable=True)          # snapshot das anotações ao concluir
+    notes_snapshot       = db.Column(db.JSON, nullable=True)
+    execution_minutes    = db.Column(db.Integer, nullable=True)
+    execution_started_at = db.Column(db.DateTime, nullable=True)
+    status_log           = db.Column(db.JSON, nullable=True)
     status_change_date = db.Column(db.Date, nullable=False)
     created_date = db.Column(db.Date, nullable=True)
     timestamp = db.Column(db.DateTime, default=datetime.now)
@@ -452,7 +459,10 @@ class DemandHistory(db.Model):
             'checklist': self.checklist,
             'actionType': self.action_type,
             'typeId': self.type_id,
-            'notesSnapshot': self.notes_snapshot or []
+            'notesSnapshot': self.notes_snapshot or [],
+            'executionMinutes': self.execution_minutes,
+            'executionStartedAt': self.execution_started_at.isoformat() if self.execution_started_at else None,
+            'statusLog': self.status_log or []
         }
 
 class Note(db.Model):
@@ -529,8 +539,9 @@ class StatusConfig(db.Model):
     color = db.Column(db.String(7), nullable=False, default='#9aa0a7')
     emoji = db.Column(db.String(10), nullable=True)
     order = db.Column(db.Integer, default=0)
-    is_completed = db.Column(db.Boolean, default=False)
-    is_approval = db.Column(db.Boolean, default=False)
+    is_completed        = db.Column(db.Boolean, default=False)
+    is_approval         = db.Column(db.Boolean, default=False)
+    is_execution_start  = db.Column(db.Boolean, default=False)
 
     __table_args__ = (db.UniqueConstraint('workspace_id', 'key', name='unique_workspace_status_key'),)
 
@@ -543,6 +554,7 @@ class StatusConfig(db.Model):
             'emoji': self.emoji,
             'order': self.order,
             'isCompleted': self.is_completed,
+            'isExecutionStart': self.is_execution_start or False,
             'isApproval': self.is_approval or False
         }
 
@@ -665,7 +677,19 @@ def ping():
     """Health check leve. Também aplica migrations pendentes na primeira chamada."""
     _approval_cols = [
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS previous_status VARCHAR(50)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_minutes INTEGER",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS notes_snapshot JSON",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_minutes INTEGER",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
         "ALTER TABLE work_groups ADD COLUMN IF NOT EXISTS group_type VARCHAR(50)",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS action_type VARCHAR(30)",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP",
@@ -1995,11 +2019,43 @@ def update_demand_status(demand_id):
 
     data = request.get_json()
     new_status = data.get('status')
-    old_status = demand.status  # salvar antes de qualquer alteração
+    old_status = demand.status
 
     if not new_status:
         return jsonify({'error': 'Status não fornecido'}), 400
-    
+
+    # ── Log de transição ──────────────────────────────────────────────────────
+    user = User.query.get(user_id)
+    now  = datetime.now()
+    log_entry = {
+        'status': new_status,
+        'from':   old_status,
+        'timestamp': now.isoformat(),
+        'userId': user_id,
+        'username': (user.full_name or user.username) if user else str(user_id)
+    }
+    current_log = list(demand.status_log or [])
+    current_log.append(log_entry)
+    demand.status_log = current_log
+
+    # ── Timer de execução ─────────────────────────────────────────────────────
+    exec_start_config = ws_filter(StatusConfig, user_id, workspace_id, {'is_execution_start': True}).first()
+    exec_start_key = exec_start_config.key if exec_start_config else None
+
+    if exec_start_key and new_status == exec_start_key and not demand.execution_started_at:
+        demand.execution_started_at = now
+
+    # ── Status config ─────────────────────────────────────────────────────────
+    status_config = ws_filter(StatusConfig, user_id, workspace_id, {'key': new_status}).first()
+    is_terminal = status_config.is_completed if status_config else (new_status in ('concluido', 'concluído'))
+    is_approval = status_config.is_approval if status_config else False
+
+    # Calcular minutos de execução ao concluir
+    execution_minutes = None
+    if is_terminal and demand.execution_started_at:
+        delta = now - demand.execution_started_at
+        execution_minutes = int(delta.total_seconds() / 60)
+
     history = DemandHistory(
         user_id=user_id,
         workspace_id=workspace_id,
@@ -2014,13 +2070,12 @@ def update_demand_status(demand_id):
         context=demand.context,
         status=new_status,
         status_change_date=date.today(),
-        created_date=demand.created_date
+        created_date=demand.created_date,
+        execution_minutes=execution_minutes,
+        execution_started_at=demand.execution_started_at,
+        status_log=current_log,
     )
     db.session.add(history)
-
-    status_config = ws_filter(StatusConfig, user_id, workspace_id, {'key': new_status}).first()
-    is_terminal = status_config.is_completed if status_config else (new_status in ('concluido', 'concluído'))
-    is_approval = status_config.is_approval if status_config else False
 
     # Fluxo de aprovação: salva o status anterior e notifica os admins
     if is_approval:
@@ -2383,6 +2438,12 @@ def get_history():
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS type_id INTEGER",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS action_type VARCHAR(30)",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS notes_snapshot JSON",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_minutes INTEGER",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
     ]:
         try:
@@ -2491,6 +2552,12 @@ def get_activity_feed():
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS action_type VARCHAR(30)",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS type_id INTEGER",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS notes_snapshot JSON",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_minutes INTEGER",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
     ]:
         try:
             db.session.execute(text(_col))
