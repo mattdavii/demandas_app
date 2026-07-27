@@ -1831,10 +1831,19 @@ def get_demands():
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
 
-    # Garante coluna type_id (adicionada com os tipos de demanda)
+    # Garante colunas novas antes de qualquer query ORM
     for _col in [
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS type_id INTEGER",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS notes_snapshot JSON",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_minutes INTEGER",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE work_groups ADD COLUMN IF NOT EXISTS group_type VARCHAR(50)",
+        "ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS invite_role VARCHAR(20) DEFAULT 'member'",
     ]:
         try:
             db.session.execute(text(_col))
@@ -2039,6 +2048,14 @@ def update_demand_status(demand_id):
     demand.status_log = current_log
 
     # ── Timer de execução ─────────────────────────────────────────────────────
+    try:
+        db.session.execute(text("ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE"))
+        db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON"))
+        db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP"))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
     exec_start_config = ws_filter(StatusConfig, user_id, workspace_id, {'is_execution_start': True}).first()
     exec_start_key = exec_start_config.key if exec_start_config else None
 
