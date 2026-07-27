@@ -2949,11 +2949,6 @@
         // Tenta de novo com espera crescente (1s, 2s, 4s...) antes de desistir.
         // Cobre o caso do Render "dormindo" (primeira requisição demora a acordar o serviço).
         async function fetchWithRetry(url, options = {}, maxRetries = 2) {
-            // Injetar X-Workspace-ID automaticamente em todas as chamadas de API
-            if (currentWorkspaceId) {
-                options = { ...options };
-                options.headers = { ...(options.headers || {}), 'X-Workspace-ID': String(currentWorkspaceId) };
-            }
             let lastError;
             for (let attempt = 0; attempt <= maxRetries; attempt++) {
                 try {
@@ -9585,23 +9580,27 @@ filterCards();
             sessionStorage.removeItem('cache_priorityConfigs');
             invalidateHistoryCache();
 
-            // Mostrar loading e recarregar
             document.getElementById('demandsList').innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text-secondary);">Carregando workspace...</div>';
+
+            // Recarregar tudo com o novo workspace (authHeaders() já inclui X-Workspace-ID)
             await loadInit();
             await loadDemands();
             loadTodayPage();
             loadStatusAndPriorityConfigs();
             loadDemandTypes();
-            updateWorkspaceInfo();
+        }
+
+        // Retorna headers padrão com Authorization e, se houver workspace ativo, X-Workspace-ID
+        function authHeaders(extra = {}) {
+            const h = { 'Authorization': `Bearer ${token}`, ...extra };
+            if (currentWorkspaceId) h['X-Workspace-ID'] = String(currentWorkspaceId);
+            return h;
         }
 
         async function loadInit() {
             try {
                 const r = await fetchWithRetry(`${API_URL}/init`, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'X-Workspace-ID': String(currentWorkspaceId)
-                    }
+                    headers: authHeaders()
                 }, 1);
                 if (!r.ok) return;
                 const init = await r.json();
@@ -9609,10 +9608,7 @@ filterCards();
                 if (init.priorityConfigs){ currentPriorityConfigs = init.priorityConfigs; rebuildStatusAndPriorityStructures(); }
                 if (init.groups)  { currentGroups  = init.groups;  updateGroupSelect(); }
                 if (init.members) { currentTeamMembers = init.members; }
-                if (init.workspace) {
-                    currentWorkspace = init.workspace;
-                    updateWorkspaceInfo();
-                }
+                if (init.workspace) { currentWorkspace = init.workspace; updateWorkspaceInfo(); }
                 if (init.demandTypes) { currentDemandTypes = init.demandTypes; updateDemandTypeSelects(); }
             } catch(e) { console.error('loadInit:', e); }
         }
