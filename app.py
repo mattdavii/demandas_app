@@ -724,11 +724,32 @@ def ping():
 @app.route('/api/init')
 @jwt_required()
 def get_init_data():
-    """Retorna configs, workspace, membros e grupos — sem demands e sem COUNT.
-    Demands são buscadas em paralelo pelo frontend via /api/demands, que é mais rápida
-    (2 queries) e pode renderizar o Kanban independentemente das queries de configuração."""
+    """Retorna configs, workspace, membros e grupos — sem demands e sem COUNT."""
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
+
+    # Garante TODAS as colunas novas antes de qualquer query ORM
+    for _col in [
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_approval BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE work_groups ADD COLUMN IF NOT EXISTS group_type VARCHAR(50)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS previous_status VARCHAR(50)",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS type_id INTEGER",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS notes_snapshot JSON",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_minutes INTEGER",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS action_type VARCHAR(30)",
+        "ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS invite_role VARCHAR(20) DEFAULT 'member'",
+    ]:
+        try:
+            db.session.execute(text(_col))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
 
     user = User.query.get(user_id)
     workspace = Workspace.query.get(workspace_id) if workspace_id else None
@@ -2024,6 +2045,22 @@ def update_demand_status(demand_id):
     workspace_id = get_user_workspace_id(user_id)
     ok, err_resp, err_code = check_write_permission(user_id, workspace_id)
     if not ok: return err_resp, err_code
+
+    # Garante colunas novas ANTES de qualquer query ORM
+    for _col in [
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_minutes INTEGER",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS status_log JSON",
+    ]:
+        try:
+            db.session.execute(text(_col))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
     demand = Demand.query.get_or_404(demand_id)
 
     data = request.get_json()
@@ -2048,14 +2085,6 @@ def update_demand_status(demand_id):
     demand.status_log = current_log
 
     # ── Timer de execução ─────────────────────────────────────────────────────
-    try:
-        db.session.execute(text("ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE"))
-        db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON"))
-        db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP"))
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
-
     exec_start_config = ws_filter(StatusConfig, user_id, workspace_id, {'is_execution_start': True}).first()
     exec_start_key = exec_start_config.key if exec_start_config else None
 
@@ -2073,33 +2102,11 @@ def update_demand_status(demand_id):
         delta = now - demand.execution_started_at
         execution_minutes = int(delta.total_seconds() / 60)
 
-    history = DemandHistory(
-        user_id=user_id,
-        workspace_id=workspace_id,
-        work_group_id=demand.work_group_id,
-        demand_id=demand.id,
-        assigned_to_user_id=demand.assigned_to_user_id or demand.user_id,
-        priority=demand.priority,
-        checklist=demand.checklist or [],
-        notes_snapshot=get_demand_notes_snapshot(demand.id),
-        location=demand.location,
-        activity=demand.activity,
-        context=demand.context,
-        status=new_status,
-        status_change_date=date.today(),
-        created_date=demand.created_date,
-        execution_minutes=execution_minutes,
-        execution_started_at=demand.execution_started_at,
-        status_log=current_log,
-    )
-    db.session.add(history)
-
     # Fluxo de aprovação: salva o status anterior e notifica os admins
     if is_approval:
         demand.previous_status = old_status
         requester = User.query.get(user_id)
         requester_name = (requester.full_name or requester.username) if requester else 'Alguém'
-        # Notifica após commit (dispara em background pra não atrasar a resposta)
         import threading as _t
         _d, _w, _r = demand, workspace_id, requester_name
         def _notify():
@@ -2108,6 +2115,26 @@ def update_demand_status(demand_id):
         _t.Thread(target=_notify, daemon=True).start()
 
     if is_terminal:
+        history = DemandHistory(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            work_group_id=demand.work_group_id,
+            demand_id=demand.id,
+            assigned_to_user_id=demand.assigned_to_user_id or demand.user_id,
+            priority=demand.priority,
+            checklist=demand.checklist or [],
+            notes_snapshot=get_demand_notes_snapshot(demand.id),
+            location=demand.location,
+            activity=demand.activity,
+            context=demand.context,
+            status=new_status,
+            status_change_date=date.today(),
+            created_date=demand.created_date,
+            execution_minutes=execution_minutes,
+            execution_started_at=demand.execution_started_at,
+            status_log=current_log,
+        )
+        db.session.add(history)
         if demand.is_recurring and demand.recurrence_type:
             # Auto-cria a próxima ocorrência com mesmos dados, checklist resetado e nova data
             new_due = next_due_date(demand.due_date, demand.recurrence_type)
