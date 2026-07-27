@@ -2301,9 +2301,23 @@ def notify_assignment(demand, assigned_user, assigner_user_id):
 @app.route('/api/reminders/check', methods=['POST'])
 @jwt_required()
 def check_reminders():
-    """Verifica e dispara lembretes vencidos do usuário logado.
-    Push é enviado em thread separada mas a lista de disparados é retornada imediatamente."""
+    """Verifica e dispara lembretes vencidos do usuário logado."""
     user_id = int(get_jwt_identity())
+
+    # Garante colunas novas ANTES de qualquer query ORM em Demand/StatusConfig
+    for _col in [
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS previous_status VARCHAR(50)",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_approval BOOLEAN DEFAULT FALSE",
+    ]:
+        try:
+            db.session.execute(text(_col)); db.session.commit()
+        except Exception:
+            db.session.rollback()
+
     try:
         user = User.query.get(user_id)
         if not user:
