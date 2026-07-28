@@ -204,9 +204,15 @@ function loadData() {
           .then(function(r) { return r.json(); })
           .then(function(notesMap) {
             allDemandNotes = notesMap || {};
+            var totalNotes = Object.values(allDemandNotes).reduce(function(acc, arr) { return acc + arr.length; }, 0);
+            // Debug: mostrar contagem no timestamp
+            var tsEl = document.getElementById('ts');
+            if (tsEl) tsEl.title = 'Anotações carregadas: ' + totalNotes + ' em ' + Object.keys(allDemandNotes).length + ' demandas';
             renderBoard(allDemands); // Re-renderiza com anotações
           })
-          .catch(function() {}); // Falha silenciosa
+          .catch(function(e) {
+            console.error('Erro ao buscar anotações:', e);
+          });
       }
     })
     .catch(function(err) {
