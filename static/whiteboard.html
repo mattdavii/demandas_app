@@ -281,9 +281,10 @@ function renderBoard(demands) {
         if (d.checklist.length > 4) {
           cards += '<div style="font-size:.6rem;color:var(--text2);margin-top:2px;">+' + (d.checklist.length - 4) + ' itens</div>';
         }
-      cards += '</div>'; // fecha checklist
+        cards += '</div>'; // fecha bloco checklist
+      } // fim if checklist
 
-      // Anotações da demanda
+      // Anotações da demanda (sempre fora do if checklist)
       var demNotes = allDemandNotes[String(d.id)] || [];
       if (demNotes.length > 0) {
         cards += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border);">';
@@ -299,8 +300,8 @@ function renderBoard(demands) {
         if (demNotes.length > 3) {
           cards += '<div style="font-size:.58rem;color:var(--text2);margin-top:2px;">+' + (demNotes.length - 3) + ' mais</div>';
         }
-        cards += '</div>'; // fecha anotações
-      }
+        cards += '</div>'; // fecha bloco anotações
+      } // fim if anotações
 
       cards += '</div>'; // fecha card
     }); // fim items.forEach
