@@ -438,6 +438,7 @@ class DemandHistory(db.Model):
     execution_minutes    = db.Column(db.Integer, nullable=True)
     execution_started_at = db.Column(db.DateTime, nullable=True)
     status_log           = db.Column(db.JSON, nullable=True)
+    clickup_task_id      = db.Column(db.String(50), nullable=True)  # ID task ClickUp após sync
     status_change_date = db.Column(db.Date, nullable=False)
     created_date = db.Column(db.Date, nullable=True)
     timestamp = db.Column(db.DateTime, default=datetime.now)
@@ -2161,9 +2162,32 @@ def update_demand_status(demand_id):
         db.session.delete(demand)
     else:
         demand.status = new_status
-    
+
     db.session.commit()
-    return jsonify({'message': 'Status atualizado'}), 200
+
+    # Auto-sync para ClickUp em background (só quando terminal)
+    if is_terminal and os.getenv('CLICKUP_API_KEY') and os.getenv('CLICKUP_LIST_ID'):
+        _h = history
+        try:
+            _gmap = {r[0]: r[1] for r in db.session.execute(text(
+                "SELECT id, name FROM work_groups WHERE workspace_id = :ws OR (workspace_id IS NULL AND user_id = :uid)"
+            ), {'ws': workspace_id, 'uid': user_id}).fetchall()}
+        except Exception:
+            _gmap = {}
+        def _sync_cu(h, gmap):
+            with app.app_context():
+                try:
+                    gname = gmap.get(h.work_group_id, '')
+                    res, _ = _clickup_request('POST', f'/list/{os.getenv("CLICKUP_LIST_ID")}/task',
+                                              _history_to_clickup_task(h, gname))
+                    h.clickup_task_id = res.get('id')
+                    db.session.merge(h); db.session.commit()
+                except Exception as e:
+                    app.logger.error(f'ClickUp auto-sync: {e}')
+        import threading as _t
+        _t.Thread(target=_sync_cu, args=(_h, _gmap), daemon=True).start()
+
+    return jsonify({'message': 'Status atualizado', 'archived': is_terminal}), 200
 
 # ============= ROTAS DE NOTAS =============
 @app.route('/api/notes', methods=['GET'])
@@ -3981,6 +4005,250 @@ def copy_demand(demand_id):
     db.session.add(new_demand)
     db.session.commit()
     return jsonify({'message': 'Demanda copiada com sucesso', 'newDemandId': new_demand.id, 'newWorkspaceId': target_ws_id}), 201
+
+
+# ============= INTEGRAÇÃO CLICKUP =============
+
+def _clickup_headers():
+    return {
+        'Authorization': os.getenv('CLICKUP_API_KEY', ''),
+        'Content-Type': 'application/json'
+    }
+
+def _clickup_request(method, endpoint, data=None, timeout=20):
+    url = f'https://api.clickup.com/api/v2{endpoint}'
+    payload = json.dumps(data).encode() if data else None
+    req = urllib.request.Request(url, data=payload, headers=_clickup_headers(), method=method.upper())
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read()), resp.status
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        raise Exception(f'ClickUp {e.code}: {body[:300]}')
+
+def _priority_to_clickup(priority_key):
+    mapping = {'urgente': 1, 'alta': 2, 'media': 3, 'média': 3, 'baixa': 4}
+    return mapping.get((priority_key or '').lower(), 3)
+
+def _format_exec_time(minutes):
+    if not minutes:
+        return '—'
+    if minutes < 60:
+        return f'{minutes} min'
+    h, m = divmod(minutes, 60)
+    if h < 24:
+        return f'{h}h {m}min' if m else f'{h}h'
+    d, hh = divmod(h, 24)
+    return f'{d}d {hh}h' if hh else f'{d}d'
+
+def _history_to_clickup_task(h, group_name=''):
+    """Converte DemandHistory em payload de task do ClickUp com snapshot completo."""
+    checklist = h.checklist or []
+    done = sum(1 for i in checklist if i.get('checked'))
+    notes = h.notes_snapshot or []
+
+    lines = [
+        f'📍 **Local:** {h.location or "—"}',
+        f'👥 **Grupo:** {group_name or "—"}',
+        f'📌 **Contexto:** {h.context or "—"}',
+        f'🏷️ **Prioridade:** {h.priority or "—"}',
+        f'📅 **Criada em:** {h.created_date.strftime("%d/%m/%Y") if h.created_date else "—"}',
+        f'✅ **Concluída em:** {h.status_change_date.strftime("%d/%m/%Y") if h.status_change_date else "—"}',
+        f'⏱️ **Tempo de execução:** {_format_exec_time(h.execution_minutes)}',
+        '',
+    ]
+    if checklist:
+        lines.append(f'**Checklist ({done}/{len(checklist)}):**')
+        for item in checklist:
+            mark = '✅' if item.get('checked') else '☐'
+            lines.append(f'{mark} {item.get("text", "")}')
+        lines.append('')
+    if notes:
+        lines.append('**Anotações:**')
+        for n in notes:
+            dt = n.get('createdAt', '')[:16].replace('T', ' ') if n.get('createdAt') else ''
+            lines.append(f'[{n.get("username", "?")} — {dt}]: {n.get("content", "")}')
+        lines.append('')
+
+    snapshot = {
+        'id': h.id, 'location': h.location, 'activity': h.activity,
+        'context': h.context, 'status': h.status, 'priority': h.priority,
+        'workGroupName': group_name, 'workGroupId': h.work_group_id,
+        'assignedToUserId': h.assigned_to_user_id,
+        'checklist': h.checklist, 'notesSnapshot': h.notes_snapshot,
+        'executionMinutes': h.execution_minutes,
+        'statusChangeDate': str(h.status_change_date) if h.status_change_date else None,
+        'createdDate': str(h.created_date) if h.created_date else None,
+        'typeId': h.type_id,
+    }
+    lines.append(f'_painel_data:{json.dumps(snapshot, ensure_ascii=False)}_')
+
+    due_ms = None
+    if h.status_change_date:
+        due_ms = int(datetime.combine(h.status_change_date, datetime.min.time()).timestamp() * 1000)
+
+    return {
+        'name': f'{h.location or "—"} — {h.activity}',
+        'description': '\n'.join(lines),
+        'status': 'complete',
+        'priority': _priority_to_clickup(h.priority),
+        'tags': [{'name': t} for t in [group_name, h.priority] if t],
+        'due_date': due_ms,
+        'due_date_time': False,
+    }
+
+def _parse_clickup_task(task):
+    """Converte task do ClickUp de volta para formato de histórico."""
+    import re as _re
+    desc = task.get('description', '')
+    match = _re.search(r'_painel_data:(.+?)_$', desc, _re.MULTILINE | _re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1).strip())
+        except Exception:
+            pass
+    return {'activity': task.get('name', ''), 'status': 'concluido',
+            'clickupTaskId': task.get('id'), 'statusChangeDate': None}
+
+
+@app.route('/api/clickup/test', methods=['GET'])
+@jwt_required()
+def clickup_test():
+    api_key = os.getenv('CLICKUP_API_KEY')
+    list_id = os.getenv('CLICKUP_LIST_ID')
+    if not api_key or not list_id:
+        return jsonify({'error': 'CLICKUP_API_KEY ou CLICKUP_LIST_ID não configurados no Render'}), 503
+    try:
+        data, _ = _clickup_request('GET', f'/list/{list_id}')
+        return jsonify({
+            'ok': True,
+            'listName': data.get('name'),
+            'spaceName': data.get('space', {}).get('name'),
+            'taskCount': data.get('task_count', 0),
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 502
+
+
+@app.route('/api/clickup/migrate/count', methods=['GET'])
+@jwt_required()
+def clickup_migrate_count():
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    try:
+        db.session.execute(text("ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS clickup_task_id VARCHAR(50)"))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+    total    = DemandHistory.query.filter_by(workspace_id=workspace_id).count()
+    migrated = DemandHistory.query.filter(
+        DemandHistory.workspace_id == workspace_id,
+        DemandHistory.clickup_task_id.isnot(None)
+    ).count()
+    return jsonify({'total': total, 'pending': total - migrated, 'migrated': migrated}), 200
+
+
+@app.route('/api/clickup/migrate/batch', methods=['POST'])
+@jwt_required()
+def clickup_migrate_batch():
+    api_key = os.getenv('CLICKUP_API_KEY')
+    list_id = os.getenv('CLICKUP_LIST_ID')
+    if not api_key or not list_id:
+        return jsonify({'error': 'ClickUp não configurado no Render'}), 503
+
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    data  = request.get_json() or {}
+    limit = min(int(data.get('limit', 10)), 20)
+
+    try:
+        db.session.execute(text("ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS clickup_task_id VARCHAR(50)"))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    pending = DemandHistory.query.filter(
+        DemandHistory.workspace_id == workspace_id,
+        DemandHistory.clickup_task_id.is_(None)
+    ).order_by(DemandHistory.id.asc()).limit(limit).all()
+
+    if not pending:
+        return jsonify({'sent': 0, 'failed': 0, 'remaining': 0, 'done': True}), 200
+
+    grp_rows = db.session.execute(text(
+        "SELECT id, name FROM work_groups WHERE workspace_id = :ws OR (workspace_id IS NULL AND user_id = :uid)"
+    ), {'ws': workspace_id, 'uid': user_id}).fetchall()
+    group_map = {r[0]: r[1] for r in grp_rows}
+
+    sent = failed = 0
+    errors = []
+    for h in pending:
+        try:
+            group_name   = group_map.get(h.work_group_id, '')
+            task_payload = _history_to_clickup_task(h, group_name)
+            result, _    = _clickup_request('POST', f'/list/{list_id}/task', task_payload)
+            h.clickup_task_id = result.get('id', 'synced')
+            db.session.add(h)
+            sent += 1
+        except Exception as e:
+            failed += 1
+            errors.append(str(e)[:100])
+            app.logger.error(f'ClickUp migrate error (history {h.id}): {e}')
+
+    if sent > 0:
+        db.session.commit()
+
+    remaining = DemandHistory.query.filter(
+        DemandHistory.workspace_id == workspace_id,
+        DemandHistory.clickup_task_id.is_(None)
+    ).count()
+
+    return jsonify({
+        'sent': sent, 'failed': failed,
+        'remaining': remaining, 'done': remaining == 0,
+        'errors': errors[:3]
+    }), 200
+
+
+@app.route('/api/clickup/clear-local', methods=['DELETE'])
+@jwt_required()
+def clickup_clear_local():
+    """Remove demand_history local que já foi sincronizado com o ClickUp."""
+    user_id      = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Somente admins podem limpar o histórico local'}), 403
+    count = DemandHistory.query.filter(
+        DemandHistory.workspace_id == workspace_id,
+        DemandHistory.clickup_task_id.isnot(None)
+    ).delete()
+    db.session.commit()
+    return jsonify({'deleted': count}), 200
+
+
+@app.route('/api/clickup/history', methods=['GET'])
+@jwt_required()
+def clickup_history():
+    """Lê histórico de demandas diretamente do ClickUp."""
+    api_key = os.getenv('CLICKUP_API_KEY')
+    list_id = os.getenv('CLICKUP_LIST_ID')
+    if not api_key or not list_id:
+        return jsonify({'error': 'ClickUp não configurado'}), 503
+    page = int(request.args.get('page', 0))
+    try:
+        params = f'?include_closed=true&subtasks=false&page={page}&order_by=date_updated&reverse=true'
+        data, _ = _clickup_request('GET', f'/list/{list_id}/task{params}')
+        tasks   = data.get('tasks', [])
+        history = []
+        for task in tasks:
+            parsed = _parse_clickup_task(task)
+            parsed['clickupTaskId'] = task.get('id')
+            parsed['clickupUrl']    = task.get('url')
+            history.append(parsed)
+        return jsonify({'history': history, 'hasMore': len(tasks) == 100, 'page': page}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 502
+
 
 # ============= ROTAS DE BACKUP =============
 @app.route('/api/export', methods=['GET'])
