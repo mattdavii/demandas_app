@@ -2011,8 +2011,10 @@
                 </div>
                 <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
                     <button class="btn btn-secondary" style="width:auto;" onclick="testClickupConnection()">🔌 Testar Conexão</button>
+                    <button class="btn btn-secondary" style="width:auto;" onclick="runClickupDiagnose()">🔍 Diagnóstico</button>
                     <button class="btn btn-primary" style="width:auto;" onclick="openClickupMigrateModal()">🔄 Migrar Histórico</button>
                 </div>
+                <div id="clickupDiagnoseResult" style="display:none; margin-top:0.75rem; background:var(--panel-raised); border-radius:var(--radius); padding:0.85rem 1rem; font-size:0.75rem; font-family:monospace; white-space:pre-wrap; max-height:300px; overflow-y:auto;"></div>
                 <div id="clickupAlert" class="alert" style="margin-top:0.75rem;"></div>
                 <div style="margin-top:1rem; font-size:0.72rem; color:var(--text-secondary);">
                     ✅ Demandas futuras serão enviadas ao ClickUp automaticamente ao serem concluídas.
@@ -9558,6 +9560,22 @@ filterCards();
         }
 
         // ============= CLICKUP =============
+        async function runClickupDiagnose() {
+            const btn = event.target; btn.disabled = true; btn.textContent = 'Executando...';
+            const resultEl = document.getElementById('clickupDiagnoseResult');
+            resultEl.style.display = '';
+            resultEl.textContent = 'Aguarde...';
+            try {
+                const r = await fetchWithRetry(`${API_URL}/clickup/diagnose`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                const d = await r.json();
+                resultEl.textContent = JSON.stringify(d, null, 2);
+            } catch(e) {
+                resultEl.textContent = 'Erro: ' + e.message;
+            } finally { btn.disabled = false; btn.textContent = '🔍 Diagnóstico'; }
+        }
+
         async function testClickupConnection() {
             const btn = event.target; btn.disabled = true; btn.textContent = 'Testando...';
             try {
