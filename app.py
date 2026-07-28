@@ -3597,8 +3597,8 @@ def agent_demand_notes():
     """Retorna anotações de demandas em lote para o Whiteboard via AgentToken."""
     try:
         token_value = request.args.get('token', '').strip()
-        agent_token = AgentToken.query.filter_by(token=token_value, is_active=True).first()
-        if not agent_token:
+        user, workspace_id = get_agent_user(token_value)
+        if not user:
             return jsonify({'error': 'Token inválido'}), 401
 
         ids_param = request.args.get('ids', '')
