@@ -744,6 +744,7 @@ def get_init_data():
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS status_log JSON",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS action_type VARCHAR(30)",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS clickup_task_id VARCHAR(50)",
         "ALTER TABLE access_keys ADD COLUMN IF NOT EXISTS invite_role VARCHAR(20) DEFAULT 'member'",
     ]:
         try:
@@ -1148,13 +1149,14 @@ def get_all_user_workspaces():
         .order_by(WorkspaceMember.id.asc()).all()
     result = []
     seen = set()
+    first_ws_id = memberships[0].workspace_id if memberships else None
     for m in memberships:
         ws = Workspace.query.get(m.workspace_id)
         if not ws or ws.id in seen:
             continue
         seen.add(ws.id)
         member_count = WorkspaceMember.query.filter_by(workspace_id=ws.id).count()
-        is_personal = (ws.user_id == user_id)
+        is_personal = (ws.id == first_ws_id)
         result.append({
             'id': ws.id,
             'name': ws.name,
