@@ -203,8 +203,10 @@ function loadData() {
         var noteUrl = BASE + '/api/agent/demand-notes?token=' + encodeURIComponent(TK) + '&ids=' + ids;
         fetch(noteUrl)
           .then(function(r) {
-            if (!r.ok) throw new Error('Status ' + r.status);
-            return r.json();
+            return r.json().then(function(body) {
+              if (!r.ok) throw new Error('Status ' + r.status + ': ' + (body.error || JSON.stringify(body)));
+              return body;
+            });
           })
           .then(function(notesMap) {
             allDemandNotes = notesMap || {};
