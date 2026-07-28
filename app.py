@@ -2523,6 +2523,7 @@ def get_history():
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_minutes INTEGER",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS clickup_task_id VARCHAR(50)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
