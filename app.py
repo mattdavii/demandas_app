@@ -4163,6 +4163,68 @@ def _parse_clickup_task(task):
     }
 
 
+@app.route('/api/clickup/diagnose', methods=['GET'])
+@jwt_required()
+def clickup_diagnose():
+    """Diagnóstico completo da integração ClickUp."""
+    api_key = os.getenv('CLICKUP_API_KEY', '').strip()
+    list_id  = os.getenv('CLICKUP_LIST_ID', '').strip()
+    result = {
+        'api_key_set': bool(api_key),
+        'api_key_prefix': api_key[:8] + '...' if api_key else None,
+        'list_id_set': bool(list_id),
+        'list_id': list_id,
+        'steps': []
+    }
+
+    if not api_key or not list_id:
+        result['steps'].append({'step': 'config', 'ok': False, 'error': 'Variáveis não configuradas'})
+        return jsonify(result), 200
+
+    # Passo 1: testar API key
+    try:
+        url = 'https://api.clickup.com/api/v2/user'
+        req = urllib.request.Request(url, headers={'Authorization': api_key}, method='GET')
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            user = json.loads(resp.read())
+        result['steps'].append({'step': 'auth', 'ok': True, 'username': user.get('user', {}).get('username')})
+    except Exception as e:
+        result['steps'].append({'step': 'auth', 'ok': False, 'error': str(e)})
+        return jsonify(result), 200
+
+    # Passo 2: buscar primeira página de tasks
+    try:
+        url = f'https://api.clickup.com/api/v2/list/{list_id}/task?include_closed=true&page=0&order_by=date_updated&reverse=true'
+        req = urllib.request.Request(url, headers={'Authorization': api_key}, method='GET')
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+        tasks = data.get('tasks', [])
+        result['steps'].append({'step': 'fetch_tasks', 'ok': True, 'count': len(tasks)})
+    except Exception as e:
+        result['steps'].append({'step': 'fetch_tasks', 'ok': False, 'error': str(e)})
+        return jsonify(result), 200
+
+    # Passo 3: testar parse da primeira task
+    if tasks:
+        task = tasks[0]
+        parsed = _parse_clickup_task(task)
+        desc = task.get('description', '') or ''
+        has_marker = '_painel_data:' in desc
+        result['steps'].append({
+            'step': 'parse_sample',
+            'ok': bool(parsed.get('location') or parsed.get('activity')),
+            'task_name': task.get('name'),
+            'has_painel_data': has_marker,
+            'parsed_location': parsed.get('location'),
+            'parsed_activity': parsed.get('activity'),
+            'description_len': len(desc),
+            'description_preview': desc[:200],
+        })
+
+    result['total_tasks_page0'] = len(tasks)
+    return jsonify(result), 200
+
+
 @app.route('/api/clickup/test', methods=['GET'])
 @jwt_required()
 def clickup_test():
