@@ -3592,6 +3592,39 @@ def delete_demand_type(type_id):
     return jsonify({'message': 'Tipo removido'}), 200
 
 
+@app.route('/api/agent/demand-notes', methods=['GET'])
+def agent_demand_notes():
+    """Retorna anotações de demandas em lote para o Whiteboard via AgentToken."""
+    token_value = request.args.get('token', '').strip()
+    agent_token = AgentToken.query.filter_by(token=token_value, is_active=True).first()
+    if not agent_token:
+        return jsonify({'error': 'Token inválido'}), 401
+    ensure_agent_schema()
+    ids_param = request.args.get('ids', '')
+    if not ids_param:
+        return jsonify({}), 200
+    ids = [int(i) for i in ids_param.split(',') if i.strip().isdigit()]
+    if not ids:
+        return jsonify({}), 200
+    try:
+        db.session.execute(text("CREATE TABLE IF NOT EXISTS demand_notes (id SERIAL PRIMARY KEY, demand_id INTEGER NOT NULL REFERENCES demands(id) ON DELETE CASCADE, user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, username VARCHAR(80), content TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW())"))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+    notes = DemandNote.query.filter(DemandNote.demand_id.in_(ids)).order_by(DemandNote.demand_id, DemandNote.created_at.asc()).all()
+    result = {}
+    for n in notes:
+        key = str(n.demand_id)
+        if key not in result:
+            result[key] = []
+        result[key].append({
+            'username': n.username,
+            'content': n.content,
+            'createdAt': n.created_at.isoformat() if n.created_at else None
+        })
+    return jsonify(result), 200
+
+
 @app.route('/api/agent/notes', methods=['GET'])
 def agent_notes():
     """Retorna notas do usuário para o Whiteboard (autenticado via token de agente)."""
