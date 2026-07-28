@@ -4134,15 +4134,33 @@ def _history_to_clickup_task(h, group_name=''):
 def _parse_clickup_task(task):
     """Converte task do ClickUp de volta para formato de histórico."""
     import re as _re
-    desc = task.get('description', '')
-    match = _re.search(r'_painel_data:(.+?)_$', desc, _re.MULTILINE | _re.DOTALL)
+    desc = task.get('description', '') or ''
+    # Regex robusto: procura _painel_data: seguido de um objeto JSON completo
+    match = _re.search(r'_painel_data:(\{.*?\})_(?:\s*)$', desc, _re.DOTALL | _re.MULTILINE)
+    if not match:
+        # Fallback: tenta encontrar qualquer JSON após _painel_data:
+        match = _re.search(r'_painel_data:(\{.+\})', desc, _re.DOTALL)
     if match:
         try:
-            return json.loads(match.group(1).strip())
+            data = json.loads(match.group(1).strip())
+            # Garantir campos essenciais
+            if not data.get('location') and task.get('name', '').count(' — ') >= 1:
+                parts = task['name'].split(' — ', 1)
+                data['location'] = parts[0].strip()
+                data['activity'] = parts[1].strip() if len(parts) > 1 else task['name']
+            return data
         except Exception:
             pass
-    return {'activity': task.get('name', ''), 'status': 'concluido',
-            'clickupTaskId': task.get('id'), 'statusChangeDate': None}
+    # Fallback completo: extrair dados básicos do nome da task
+    name = task.get('name', '')
+    location, activity = (name.split(' — ', 1) + [''])[:2] if ' — ' in name else ('', name)
+    return {
+        'location': location.strip(),
+        'activity': activity.strip() or name,
+        'status': 'concluido',
+        'clickupTaskId': task.get('id'),
+        'statusChangeDate': None,
+    }
 
 
 @app.route('/api/clickup/test', methods=['GET'])
