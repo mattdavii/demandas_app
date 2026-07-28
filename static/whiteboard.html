@@ -200,18 +200,26 @@ function loadData() {
       // Buscar anotações das demandas em paralelo
       if (allDemands.length > 0) {
         var ids = allDemands.map(function(d) { return d.id; }).join(',');
-        fetch(BASE + '/api/agent/demand-notes?token=' + encodeURIComponent(TK) + '&ids=' + ids)
-          .then(function(r) { return r.json(); })
+        var noteUrl = BASE + '/api/agent/demand-notes?token=' + encodeURIComponent(TK) + '&ids=' + ids;
+        fetch(noteUrl)
+          .then(function(r) {
+            if (!r.ok) throw new Error('Status ' + r.status);
+            return r.json();
+          })
           .then(function(notesMap) {
             allDemandNotes = notesMap || {};
-            var totalNotes = Object.values(allDemandNotes).reduce(function(acc, arr) { return acc + arr.length; }, 0);
-            // Debug: mostrar contagem no timestamp
+            var demCount   = Object.keys(allDemandNotes).length;
+            var totalNotes = Object.values(allDemandNotes).reduce(function(acc, arr) { return acc + (Array.isArray(arr) ? arr.length : 0); }, 0);
             var tsEl = document.getElementById('ts');
-            if (tsEl) tsEl.title = 'Anotações carregadas: ' + totalNotes + ' em ' + Object.keys(allDemandNotes).length + ' demandas';
-            renderBoard(allDemands); // Re-renderiza com anotações
+            if (tsEl) {
+              tsEl.textContent += ' · 📝 ' + totalNotes + ' anot.';
+              tsEl.title = 'IDs buscados: ' + ids + '\nDemandas com notas: ' + demCount;
+            }
+            if (totalNotes > 0) renderBoard(allDemands);
           })
           .catch(function(e) {
-            console.error('Erro ao buscar anotações:', e);
+            var tsEl = document.getElementById('ts');
+            if (tsEl) tsEl.textContent += ' · ⚠️ notas: ' + e.message;
           });
       }
     })
