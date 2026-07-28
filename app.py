@@ -2568,7 +2568,7 @@ def get_history():
             local_clickup_ids = {h.clickup_task_id for h in history if h.clickup_task_id}
             page = 0
             while page < 10:  # máximo 10 páginas = 1000 tasks do ClickUp
-                params = f'?include_closed=true&subtasks=false&page={page}&order_by=date_updated&reverse=true'
+                params = f'?include_closed=true&subtasks=false&page={page}&order_by=updated&reverse=true'
                 url = f'https://api.clickup.com/api/v2/list/{list_id}/task{params}'
                 req = urllib.request.Request(url, headers={'Authorization': api_key}, method='GET')
                 with urllib.request.urlopen(req, timeout=15) as resp:
@@ -4194,7 +4194,7 @@ def clickup_diagnose():
 
     # Passo 2: buscar primeira página de tasks
     try:
-        url = f'https://api.clickup.com/api/v2/list/{list_id}/task?include_closed=true&page=0&order_by=date_updated&reverse=true'
+        url = f'https://api.clickup.com/api/v2/list/{list_id}/task?include_closed=true&page=0&order_by=updated&reverse=true'
         req = urllib.request.Request(url, headers={'Authorization': api_key}, method='GET')
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read())
@@ -4378,7 +4378,7 @@ def clickup_history():
         return jsonify({'error': 'ClickUp não configurado'}), 503
     page = int(request.args.get('page', 0))
     try:
-        params = f'?include_closed=true&subtasks=false&page={page}&order_by=date_updated&reverse=true'
+        params = f'?include_closed=true&subtasks=false&page={page}&order_by=updated&reverse=true'
         data, _ = _clickup_request('GET', f'/list/{list_id}/task{params}')
         tasks   = data.get('tasks', [])
         history = []
