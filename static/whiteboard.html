@@ -148,6 +148,8 @@ function esc(s) {
 }
 
 // ─── Carregamento de dados ────────────────────────────────────────────────────
+var allDemandNotes = {}; // { demand_id: [{username, content, createdAt}] }
+
 function loadData() {
   if (!TK) return;
   document.getElementById('ts').textContent = 'Atualizando...';
@@ -167,7 +169,6 @@ function loadData() {
       var dem   = data[1];
       var notes = data[2] || [];
 
-      // Atualizar título da sidebar
       var notesTitle = document.getElementById('notes-title');
       if (notesTitle) {
         notesTitle.textContent = PINNED ? '📌 Notas Fixadas' : '📝 Notas';
@@ -180,7 +181,6 @@ function loadData() {
       });
 
       var t = sum.totais || {};
-      // Header: logo + nome do workspace
       var brandEl = document.getElementById('brand');
       if (brandEl) {
         var logoHtml = sum.logoUrl
@@ -196,6 +196,18 @@ function loadData() {
 
       renderBoard(allDemands);
       renderNotes(notes);
+
+      // Buscar anotações das demandas em paralelo
+      if (allDemands.length > 0) {
+        var ids = allDemands.map(function(d) { return d.id; }).join(',');
+        fetch(BASE + '/api/agent/demand-notes?token=' + encodeURIComponent(TK) + '&ids=' + ids)
+          .then(function(r) { return r.json(); })
+          .then(function(notesMap) {
+            allDemandNotes = notesMap || {};
+            renderBoard(allDemands); // Re-renderiza com anotações
+          })
+          .catch(function() {}); // Falha silenciosa
+      }
     })
     .catch(function(err) {
       document.getElementById('ts').textContent = 'Erro: ' + err.message;
@@ -269,11 +281,30 @@ function renderBoard(demands) {
         if (d.checklist.length > 4) {
           cards += '<div style="font-size:.6rem;color:var(--text2);margin-top:2px;">+' + (d.checklist.length - 4) + ' itens</div>';
         }
-        cards += '</div>';
+      cards += '</div>'; // fecha checklist
+
+      // Anotações da demanda
+      var demNotes = allDemandNotes[String(d.id)] || [];
+      if (demNotes.length > 0) {
+        cards += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border);">';
+        cards += '<div style="font-size:.6rem;color:var(--amber);font-weight:700;margin-bottom:4px;">📝 ANOTAÇÕES (' + demNotes.length + ')</div>';
+        demNotes.slice(0, 3).forEach(function(n) {
+          var dt = n.createdAt ? new Date(n.createdAt + (n.createdAt.endsWith('Z') ? '' : 'Z'))
+            .toLocaleString('pt-BR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) : '';
+          cards += '<div style="margin-bottom:4px;padding:4px 6px;background:rgba(245,166,35,0.07);border-radius:3px;border-left:2px solid rgba(245,166,35,0.4);">';
+          cards += '<div style="font-size:.58rem;color:var(--amber);margin-bottom:1px;">' + esc(n.username || '?') + ' · ' + dt + '</div>';
+          cards += '<div style="font-size:.65rem;color:var(--text1);line-height:1.3;white-space:pre-wrap;">' + esc(n.content) + '</div>';
+          cards += '</div>';
+        });
+        if (demNotes.length > 3) {
+          cards += '<div style="font-size:.58rem;color:var(--text2);margin-top:2px;">+' + (demNotes.length - 3) + ' mais</div>';
+        }
+        cards += '</div>'; // fecha anotações
       }
 
-      cards += '</div>';
-    });
+      cards += '</div>'; // fecha card
+    }); // fim items.forEach
+
     html += '<div class="gcol" style="border-top-color:' + color + ';">';
     html += '<div class="ghdr" style="border-bottom-color:rgba(' + hexToRgb(color) + ',0.3);">';
     html += '<span class="gname" style="color:' + color + ';">' + (emoji ? esc(emoji) + ' ' : '') + esc(gname) + '</span>';
