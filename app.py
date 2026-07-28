@@ -2558,7 +2558,38 @@ def get_history():
         query = query.filter(DemandHistory.activity.ilike(f'%{activity}%'))
 
     history = query.order_by(DemandHistory.status_change_date.desc()).limit(500).all()
-    return jsonify([h.to_dict() for h in history]), 200
+    result = [h.to_dict() for h in history]
+
+    # Se ClickUp estiver configurado, buscar histórico lá também (complementa o local)
+    api_key = os.getenv('CLICKUP_API_KEY', '').strip()
+    list_id  = os.getenv('CLICKUP_LIST_ID', '').strip()
+    if api_key and list_id:
+        try:
+            local_clickup_ids = {h.clickup_task_id for h in history if h.clickup_task_id}
+            page = 0
+            while page < 10:  # máximo 10 páginas = 1000 tasks do ClickUp
+                params = f'?include_closed=true&subtasks=false&page={page}&order_by=date_updated&reverse=true'
+                url = f'https://api.clickup.com/api/v2/list/{list_id}/task{params}'
+                req = urllib.request.Request(url, headers={'Authorization': api_key}, method='GET')
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    data = json.loads(resp.read())
+                tasks = data.get('tasks', [])
+                for task in tasks:
+                    task_id = task.get('id')
+                    if task_id in local_clickup_ids:
+                        continue  # já está no resultado local
+                    parsed = _parse_clickup_task(task)
+                    parsed['clickupTaskId'] = task_id
+                    parsed['clickupUrl']    = task.get('url')
+                    parsed['fromClickUp']   = True
+                    result.append(parsed)
+                if len(tasks) < 100:
+                    break
+                page += 1
+        except Exception as e:
+            app.logger.warning(f'get_history ClickUp fetch: {e}')
+
+    return jsonify(result), 200
 
 # ============= ROTAS DE RELATÓRIO =============
 @app.route('/api/whatsapp-text', methods=['GET'])
@@ -4117,20 +4148,48 @@ def _parse_clickup_task(task):
 @app.route('/api/clickup/test', methods=['GET'])
 @jwt_required()
 def clickup_test():
-    api_key = os.getenv('CLICKUP_API_KEY')
-    list_id = os.getenv('CLICKUP_LIST_ID')
+    api_key = os.getenv('CLICKUP_API_KEY', '').strip()
+    list_id = os.getenv('CLICKUP_LIST_ID', '').strip()
     if not api_key or not list_id:
         return jsonify({'error': 'CLICKUP_API_KEY ou CLICKUP_LIST_ID não configurados no Render'}), 503
+
+    # Debug: validar formato básico
+    if not api_key.startswith('pk_'):
+        return jsonify({'error': f'API Key inválida — deve começar com "pk_". Recebido: "{api_key[:10]}..."'}), 400
+    if not list_id.isdigit():
+        return jsonify({'error': f'List ID inválido — deve ser só números. Recebido: "{list_id}"'}), 400
+
+    # Testar primeiro com endpoint de usuário (mais simples)
     try:
-        data, _ = _clickup_request('GET', f'/list/{list_id}')
+        url_user = 'https://api.clickup.com/api/v2/user'
+        req_user = urllib.request.Request(url_user, headers={'Authorization': api_key}, method='GET')
+        with urllib.request.urlopen(req_user, timeout=20) as resp:
+            user_data = json.loads(resp.read())
+        username = user_data.get('user', {}).get('username', '?')
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        return jsonify({'error': f'API Key inválida (status {e.code}): {body[:200]}'}), 400
+    except Exception as e:
+        return jsonify({'error': f'Erro de rede: {str(e)}'}), 502
+
+    # Testar acesso à lista
+    try:
+        url_list = f'https://api.clickup.com/api/v2/list/{list_id}'
+        req_list = urllib.request.Request(url_list, headers={'Authorization': api_key}, method='GET')
+        with urllib.request.urlopen(req_list, timeout=20) as resp:
+            list_data = json.loads(resp.read())
         return jsonify({
             'ok': True,
-            'listName': data.get('name'),
-            'spaceName': data.get('space', {}).get('name'),
-            'taskCount': data.get('task_count', 0),
+            'username': username,
+            'listName': list_data.get('name'),
+            'spaceName': list_data.get('space', {}).get('name'),
+            'taskCount': list_data.get('task_count', 0),
         }), 200
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        return jsonify({'error': f'List ID "{list_id}" não encontrado (status {e.code}): {body[:200]}. Verifique o ID na URL da lista no ClickUp.'}), 400
     except Exception as e:
-        return jsonify({'error': str(e)}), 502
+        return jsonify({'error': f'Erro ao acessar lista: {str(e)}'}), 502
 
 
 @app.route('/api/clickup/migrate/count', methods=['GET'])
