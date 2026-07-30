@@ -4024,6 +4024,198 @@ Prioridades disponíveis: {prio_ctx}
     return jsonify({'error': f'Serviço temporariamente indisponível. Tente novamente em instantes.\nDetalhe: {last_error}'}), 502
 
 
+
+# ============= RELATÓRIO DIÁRIO CLICKUP =============
+
+def _build_daily_report(workspace_id, user_id, ws_name):
+    """Monta o conteúdo do relatório diário para um workspace."""
+    today     = date.today()
+    today_str = str(today)
+    week_str  = str(today + timedelta(days=7))
+
+    # Migrations antes de qualquer query
+    for _col in [
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS previous_status VARCHAR(50)",
+    ]:
+        try: db.session.execute(text(_col)); db.session.commit()
+        except Exception: db.session.rollback()
+
+    terminal_keys = [s.key for s in ws_filter(StatusConfig, user_id, workspace_id,
+                     {'is_completed': True}).all()]
+    all_active = ws_filter(Demand, user_id, workspace_id).filter(
+        ~Demand.status.in_(terminal_keys)
+    ).all() if terminal_keys else ws_filter(Demand, user_id, workspace_id).all()
+
+    # Grupos para nomes
+    grp_rows = db.session.execute(text(
+        "SELECT id, name FROM work_groups WHERE workspace_id = :ws OR "
+        "(workspace_id IS NULL AND user_id = :uid)"
+    ), {'ws': workspace_id, 'uid': user_id}).fetchall()
+    group_map = {r[0]: r[1] for r in grp_rows}
+
+    # Concluídas hoje (do demand_history)
+    concluded_today = DemandHistory.query.filter(
+        DemandHistory.workspace_id == workspace_id,
+        DemandHistory.status_change_date == today
+    ).all()
+
+    # Categorizar demandas ativas
+    atrasadas  = [d for d in all_active if d.due_date and str(d.due_date) < today_str]
+    para_hoje  = [d for d in all_active if d.due_date and str(d.due_date) == today_str]
+    proximas   = [d for d in all_active if d.due_date and today_str < str(d.due_date) <= week_str]
+    sem_prazo  = [d for d in all_active if not d.due_date]
+
+    # Status counts
+    status_cfgs = ws_filter(StatusConfig, user_id, workspace_id).order_by(
+        StatusConfig.order).all()
+    status_counts = {s.key: 0 for s in status_cfgs}
+    for d in all_active:
+        if d.status in status_counts:
+            status_counts[d.status] += 1
+
+    def fmt_demand(d, show_due=True):
+        g = group_map.get(d.work_group_id, '?')
+        line = f'• {d.location or g} — {d.activity}'
+        parts = []
+        if d.priority: parts.append(d.priority.upper())
+        if show_due and d.due_date:
+            from datetime import date as _date
+            if str(d.due_date) < today_str:
+                parts.append(f'⚠️ Venceu {d.due_date.strftime("%d/%m")}')
+            else:
+                parts.append(f'Vence {d.due_date.strftime("%d/%m")}')
+        if d.status:
+            sc = next((s for s in status_cfgs if s.key == d.status), None)
+            if sc: parts.append(sc.label)
+        if parts: line += f' | {" · ".join(parts)}'
+        return line
+
+    def fmt_history(h):
+        line = f'• {h.location or "?"} — {h.activity}'
+        parts = []
+        if h.priority: parts.append(h.priority.upper())
+        if h.execution_minutes:
+            parts.append(f'⏱️ {_format_exec_time(h.execution_minutes)}')
+        if parts: line += f' | {" · ".join(parts)}'
+        return line
+
+    # Montar linhas do relatório
+    lines = [
+        f'# 📊 Relatório Diário — {today.strftime("%d/%m/%Y (%A)")}',
+        f'**Workspace:** {ws_name}',
+        f'**Total ativo:** {len(all_active)} demanda(s)',
+        '',
+    ]
+
+    if atrasadas:
+        lines.append(f'## ⚠️ ATRASADAS ({len(atrasadas)})')
+        lines.extend([fmt_demand(d) for d in sorted(atrasadas, key=lambda x: str(x.due_date))])
+        lines.append('')
+
+    if para_hoje:
+        lines.append(f'## 📅 PARA HOJE ({len(para_hoje)})')
+        lines.extend([fmt_demand(d, show_due=False) for d in para_hoje])
+        lines.append('')
+
+    if proximas:
+        lines.append(f'## 🗓️ PRÓXIMOS 7 DIAS ({len(proximas)})')
+        lines.extend([fmt_demand(d) for d in sorted(proximas, key=lambda x: str(x.due_date))])
+        lines.append('')
+
+    if concluded_today:
+        lines.append(f'## ✅ CONCLUÍDAS HOJE ({len(concluded_today)})')
+        lines.extend([fmt_history(h) for h in concluded_today])
+        lines.append('')
+
+    if not atrasadas and not para_hoje and not concluded_today:
+        lines.append('## ✅ Sem pendências urgentes hoje!')
+        lines.append('')
+
+    # Status counts
+    lines.append('## 📊 ABERTAS POR STATUS')
+    sc_parts = [f'{s.label}: {status_counts.get(s.key, 0)}' for s in status_cfgs
+                if not s.is_completed and status_counts.get(s.key, 0) > 0]
+    lines.append(' | '.join(sc_parts) if sc_parts else 'Nenhuma demanda ativa.')
+    lines.append('')
+    lines.append(f'---')
+    lines.append(f'_Gerado automaticamente pelo Painel de Bordo — {datetime.now().strftime("%d/%m/%Y %H:%M")}_')
+
+    return '\n'.join(lines)
+
+
+@app.route('/api/cron/daily-report', methods=['GET'])
+def cron_daily_report():
+    """Gera o relatório diário e envia ao ClickUp como task.
+    Chamado pelo cron-job.org às 06:00 BRT (09:00 UTC)."""
+    key = request.args.get('key', '').strip()
+    if key != os.getenv('CRON_SECRET_KEY', ''):
+        return jsonify({'error': 'Não autorizado'}), 403
+
+    api_key     = os.getenv('CLICKUP_API_KEY', '').strip()
+    report_list = os.getenv('CLICKUP_REPORT_LIST_ID', '').strip()
+
+    if not api_key or not report_list:
+        return jsonify({'error': 'CLICKUP_API_KEY ou CLICKUP_REPORT_LIST_ID não configurados'}), 503
+
+    today = date.today()
+    results = []
+
+    # Processar todos os workspaces ativos
+    workspaces = Workspace.query.all()
+    for ws in workspaces:
+        try:
+            # Pegar admin do workspace
+            admin_member = WorkspaceMember.query.filter_by(
+                workspace_id=ws.id, role='admin'
+            ).first()
+            if not admin_member:
+                continue
+
+            user_id = admin_member.user_id
+            content = _build_daily_report(ws.id, user_id, ws.name)
+
+            # Criar task no ClickUp
+            task_payload = {
+                'name': f'📊 {ws.name} — {today.strftime("%d/%m/%Y")}',
+                'description': content,
+                'status': 'open',
+                'due_date': int(datetime.combine(today, datetime.min.time()).timestamp() * 1000),
+                'due_date_time': False,
+                'tags': [{'name': 'relatório-diário'}, {'name': ws.name}],
+            }
+            url = f'https://api.clickup.com/api/v2/list/{report_list}/task'
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(task_payload).encode(),
+                headers={'Authorization': api_key, 'Content-Type': 'application/json'},
+                method='POST'
+            )
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                task_data = json.loads(resp.read())
+
+            results.append({
+                'workspace': ws.name,
+                'ok': True,
+                'task_id': task_data.get('id'),
+                'task_url': task_data.get('url'),
+            })
+            app.logger.info(f'Daily report created for workspace {ws.name}: {task_data.get("url")}')
+
+        except Exception as e:
+            results.append({'workspace': ws.name, 'ok': False, 'error': str(e)})
+            app.logger.error(f'Daily report error for workspace {ws.name}: {e}')
+
+    success = sum(1 for r in results if r.get('ok'))
+    return jsonify({
+        'date': str(today),
+        'workspaces_processed': len(results),
+        'success': success,
+        'results': results,
+    }), 200
+
 # ============= MOVER / COPIAR DEMANDA ENTRE WORKSPACES =============
 @app.route('/api/demands/<int:demand_id>/move', methods=['POST'])
 @jwt_required()
