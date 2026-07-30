@@ -5925,7 +5925,7 @@
                 ${allClear && !emptyMineMessage ? '<div class="card" style="text-align:center; padding:2rem; margin-bottom:1.5rem; color:var(--text-secondary);">🎉 Nada atrasado ou previsto para hoje.</div>' : ''}
                 ${renderTodaySection('⚠️ Atrasadas', overdueItems, 'var(--led-red)')}
                 ${renderTodaySection('📌 Para Hoje', todayItems, 'var(--amber)')}
-                ${renderTodaySection('📅 Programadas para Hoje', getTodayScheduled().filter(d => !todayItems.includes(d) && !overdueItems.includes(d)), 'var(--led-blue)')}
+                ${renderTodaySection('📅 Programadas para Hoje', getTodayScheduled(), 'var(--led-blue)')}
                 ${renderTodayConcludedSection(concludedToday)}
             `;
         }
@@ -6061,6 +6061,10 @@
             `).join('');
             return statusItems + `
                 <div class="calendar-legend-item">
+                    <span class="calendar-legend-dot" style="background:transparent; border:2px solid var(--led-blue);"></span>
+                    <span style="color:var(--led-blue);">📅 Programada</span>
+                </div>
+                <div class="calendar-legend-item">
                     <span style="color: var(--led-green); font-weight: 700; font-size: 0.7rem;">✓N</span>
                     <span>Concluídas no dia</span>
                 </div>
@@ -6085,21 +6089,34 @@
 
         function buildCalendarIndex() {
             const statusFilter = document.getElementById('calendarStatusFilter').value;
-            const groupFilter = document.getElementById('calendarGroupFilter').value;
+            const groupFilter  = document.getElementById('calendarGroupFilter').value;
 
             let demands = currentDemands;
             if (statusFilter) demands = demands.filter(d => d.status === statusFilter);
-            if (groupFilter) demands = demands.filter(d => String(d.workGroupId) === groupFilter);
+            if (groupFilter)  demands = demands.filter(d => String(d.workGroupId) === groupFilter);
 
             const index = {};
             demands.forEach(d => {
-                const dates = new Set();
-                if (d.dueDate) dates.add(d.dueDate);
-                if (d.reminderAt) dates.add(d.reminderAt.slice(0, 10));
-                dates.forEach(iso => {
+                // dueDate — prazo de vencimento
+                if (d.dueDate) {
+                    if (!index[d.dueDate]) index[d.dueDate] = [];
+                    if (!index[d.dueDate].find(x => x.id === d.id))
+                        index[d.dueDate].push(d);
+                }
+                // reminderAt — lembrete
+                if (d.reminderAt) {
+                    const iso = d.reminderAt.slice(0, 10);
                     if (!index[iso]) index[iso] = [];
-                    index[iso].push(d);
-                });
+                    if (!index[iso].find(x => x.id === d.id))
+                        index[iso].push(d);
+                }
+                // scheduledDate — data de programação (aparece TAMBÉM no calendário)
+                if (d.scheduledDate && d.scheduledDate !== d.dueDate) {
+                    if (!index[d.scheduledDate]) index[d.scheduledDate] = [];
+                    // Marca como "programado" para o calendário destacar diferente
+                    const copy = Object.assign({}, d, { _isScheduledDate: true });
+                    index[d.scheduledDate].push(copy);
+                }
             });
             return index;
         }
@@ -6113,10 +6130,17 @@
             if (isToday) classes.push('today');
             if (isSelected) classes.push('selected');
 
+            // Verificar se tem demandas programadas para este dia
+            const hasScheduled = demandsForDay.some(d => d._isScheduledDate);
+
             const maxDots = 4;
             const dots = demandsForDay.slice(0, maxDots).map(item => {
-                const color = getStatusColor(item.status);
-                return `<span class="calendar-dot" style="background:${color};" title="${escapeHtml(item.activity)}"></span>`;
+                const color = item._isScheduledDate ? 'var(--led-blue)' : getStatusColor(item.status);
+                const title = (item._isScheduledDate ? '📅 Programada: ' : '') + escapeHtml(item.activity);
+                const style = item._isScheduledDate
+                    ? `border:2px solid var(--led-blue);background:transparent;`
+                    : `background:${color};`;
+                return `<span class="calendar-dot" style="${style}" title="${title}"></span>`;
             }).join('');
             const extra = demandsForDay.length > maxDots
                 ? `<span class="calendar-more">+${demandsForDay.length - maxDots}</span>` : '';
@@ -6125,10 +6149,15 @@
             const completedBadge = (showCompleted && completedForDay.length > 0)
                 ? `<div class="calendar-completed-badge">✓ ${completedForDay.length}</div>` : '';
 
+            // Badge 📅 se tem programada
+            const scheduledBadge = hasScheduled
+                ? `<div style="font-size:0.55rem;color:var(--led-blue);line-height:1;">📅</div>` : '';
+
             return `
                 <div class="${classes.join(' ')}" onclick="selectCalendarDay('${iso}')">
                     <div class="calendar-day-number">${dateObj.getDate()}</div>
                     <div class="calendar-day-dots">${dots}${extra}</div>
+                    ${scheduledBadge}
                     ${completedBadge}
                 </div>
             `;
@@ -6183,10 +6212,21 @@
 
             let html = '';
 
-            if (demands.length === 0) {
+            const regularDemands   = demands.filter(d => !d._isScheduledDate);
+            const scheduledDemands = demands.filter(d => d._isScheduledDate);
+
+            if (regularDemands.length === 0 && scheduledDemands.length === 0) {
                 html += '<div class="kanban-empty">Nada planejado para este dia</div>';
             } else {
-                html += demands.map(d => renderDemandCardCompact(d, getStatusColor(d.status))).join('');
+                if (regularDemands.length > 0)
+                    html += regularDemands.map(d => renderDemandCardCompact(d, getStatusColor(d.status))).join('');
+            }
+
+            if (scheduledDemands.length > 0) {
+                html += `<div style="margin-top:${regularDemands.length ? '1rem' : '0'}; padding-top:${regularDemands.length ? '1rem' : '0'}; ${regularDemands.length ? 'border-top:1px solid var(--border);' : ''}">
+                    <div style="font-size:0.72rem; font-weight:700; color:var(--led-blue); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.75rem;">📅 Programadas para este dia (${scheduledDemands.length})</div>
+                    ${scheduledDemands.map(d => renderDemandCardCompact(d, 'var(--led-blue)')).join('')}
+                </div>`;
             }
 
             if (showCompleted && completed.length > 0) {
