@@ -2150,6 +2150,13 @@
                 <label style="margin-bottom:0; cursor:pointer;" onclick="document.getElementById('statusConfigIsCompleted').click()">Esse status é conclusivo (arquiva a demanda pro histórico)</label>
             </div>
             <div class="form-group" style="display:flex; align-items:center; gap:0.5rem;">
+                <input type="checkbox" id="statusConfigIsSchedulable" style="width:auto; accent-color: var(--led-blue); cursor:pointer;">
+                <label style="margin-bottom:0; cursor:pointer;" onclick="document.getElementById('statusConfigIsSchedulable').click()">
+                    📅 Este status usa Data de Programação
+                    <span style="font-size:0.65rem; color:var(--text-secondary); display:block; margin-top:1px;">Exibe campo "Programado para" na demanda — data prevista de execução, independente do prazo</span>
+                </label>
+            </div>
+            <div class="form-group" style="display:flex; align-items:center; gap:0.5rem;">
                 <input type="checkbox" id="statusConfigIsExecutionStart" style="width:auto; accent-color: var(--led-blue); cursor:pointer;">
                 <label style="margin-bottom:0; cursor:pointer;" onclick="document.getElementById('statusConfigIsExecutionStart').click()">
                     ⏱️ Este status inicia o timer de execução
@@ -2471,6 +2478,11 @@
                 <label>Vencimento (opcional)</label>
                 <input type="date" id="newDueDate">
             </div>
+            <div class="form-group" id="newScheduledDateGroup" style="display:none;">
+                <label>📅 Programado para (opcional)</label>
+                <input type="date" id="newScheduledDate">
+                <p style="font-size:0.7rem; color:var(--text-secondary); margin-top:0.35rem;">Data prevista de execução — independente do prazo de vencimento.</p>
+            </div>
             <div class="form-group">
                 <label>🔔 Lembrete - data e hora (opcional)</label>
                 <input type="datetime-local" id="newReminderAt">
@@ -2537,6 +2549,11 @@
             <div class="form-group">
                 <label>Vencimento (opcional)</label>
                 <input type="date" id="editDemandDueDate">
+            </div>
+            <div class="form-group" id="editScheduledDateGroup" style="display:none;">
+                <label>📅 Programado para (opcional)</label>
+                <input type="date" id="editDemandScheduledDate">
+                <p style="font-size:0.7rem; color:var(--text-secondary); margin-top:0.35rem;">Data prevista de execução — independente do prazo de vencimento.</p>
             </div>
             <div class="form-group">
                 <label>🔔 Lembrete - data e hora (opcional)</label>
@@ -4420,7 +4437,7 @@
                     <div class="config-list-info">
                         <span class="config-color-dot" style="background:${s.color};"></span>
                         <span>${s.emoji || ''} ${escapeHtml(s.label)}</span>
-                        ${s.isCompleted ? '<span class="config-completed-tag">Conclusivo</span>' : ''}${s.isExecutionStart ? '<span class="config-completed-tag" style="color:var(--led-blue);border-color:var(--led-blue);">⏱️ Início</span>' : ''}
+                        ${s.isCompleted ? '<span class="config-completed-tag">Conclusivo</span>' : ''}${s.isExecutionStart ? '<span class="config-completed-tag" style="color:var(--led-blue);border-color:var(--led-blue);">⏱️ Início</span>' : ''}${s.isSchedulable ? '<span class="config-completed-tag" style="color:var(--amber);border-color:var(--amber);">📅 Programado</span>' : ''}
                     </div>
                     <div class="config-list-actions">
                         <button class="btn-icon" onclick="moveStatusConfig(${s.id}, -1)" ${idx === 0 ? 'disabled' : ''} title="Mover pra cima">↑</button>
@@ -4465,6 +4482,7 @@
             document.getElementById('statusConfigColor').value = '#9aa0a7';
             document.getElementById('statusConfigIsCompleted').checked = false;
             document.getElementById('statusConfigIsExecutionStart').checked = false;
+            document.getElementById('statusConfigIsSchedulable').checked = false;
             document.getElementById('statusConfigModal').classList.add('show');
         }
 
@@ -4478,6 +4496,7 @@
             document.getElementById('statusConfigColor').value = config.color;
             document.getElementById('statusConfigIsCompleted').checked = config.isCompleted;
             document.getElementById('statusConfigIsExecutionStart').checked = config.isExecutionStart || false;
+            document.getElementById('statusConfigIsSchedulable').checked = config.isSchedulable || false;
             document.getElementById('statusConfigModal').classList.add('show');
         }
 
@@ -4496,6 +4515,7 @@
             const color = document.getElementById('statusConfigColor').value;
             const isCompleted = document.getElementById('statusConfigIsCompleted').checked;
             const isExecutionStart = document.getElementById('statusConfigIsExecutionStart').checked;
+            const isSchedulable = document.getElementById('statusConfigIsSchedulable').checked;
             const isEdit = editingStatusConfigId !== null;
 
             try {
@@ -4504,14 +4524,14 @@
                     response = await fetchWithRetry(`${API_URL}/status-configs/${editingStatusConfigId}`, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify({ label, emoji, color, isCompleted, is_execution_start: isExecutionStart })
+                        body: JSON.stringify({ label, emoji, color, isCompleted, is_execution_start: isExecutionStart, isSchedulable })
                     }, 1);
                 } else {
                     const key = generateUniqueKey(label, currentStatusConfigs);
                     response = await fetchWithRetry(`${API_URL}/status-configs`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify({ key, label, emoji, color, isCompleted, is_execution_start: isExecutionStart })
+                        body: JSON.stringify({ key, label, emoji, color, isCompleted, is_execution_start: isExecutionStart, isSchedulable })
                     }, 1);
                 }
 
@@ -4885,6 +4905,8 @@
             populateStatusDropdown('newStatus', { includeCompleted: false });
             populateAssigneeDropdown('newAssignedToUserId');
             document.getElementById('newDueDate').value = '';
+            document.getElementById('newScheduledDate').value = '';
+            updateScheduledDateVisibility('newDemandStatus', 'newScheduledDateGroup');
             document.getElementById('newReminderAt').value = '';
             document.getElementById('newRecurrenceType').value = '';
             newDemandChecklistDraft = [];
@@ -4931,6 +4953,7 @@
                         priority,
                         due_date: due_date || null,
                         reminder_at: reminder_at || null,
+                        scheduled_date: document.getElementById('newScheduledDate').value || null,
                         status,
                         assigned_to_user_id: assigned_to_user_id ? parseInt(assigned_to_user_id) : null,
                         type_id: type_id ? parseInt(type_id) : null,
@@ -5054,6 +5077,9 @@
             }
             document.getElementById('editDemandRecurrenceType').value = demand.recurrenceType || '';
             document.getElementById('editDemandDueDate').value = demand.dueDate || '';
+            document.getElementById('editDemandScheduledDate').value = demand.scheduledDate || '';
+            // Mostrar/ocultar campo de programação
+            updateScheduledDateVisibility('editDemandStatus', 'editScheduledDateGroup');
             document.getElementById('editDemandReminderAt').value = demand.reminderAt ? utcToLocalDatetimeInput(demand.reminderAt) : '';
             editDemandChecklistDraft = (demand.checklist || []).map(item => ({ text: item.text, checked: !!item.checked }));
             renderDemandChecklistDraftEditor(true);
@@ -5097,7 +5123,7 @@
                         priority: document.getElementById('editDemandPriority').value,
                         type_id: document.getElementById('editDemandTypeId')?.value ? parseInt(document.getElementById('editDemandTypeId').value) : null,
                         due_date: dueDate || null,
-                        reminder_at: reminderAt || null,
+                        scheduled_date: document.getElementById('editDemandScheduledDate').value || null,                        reminder_at: reminderAt || null,
                         assigned_to_user_id: assignedToUserId ? parseInt(assignedToUserId) : null,
                         is_recurring: !!editRecurrenceType,
                         recurrence_type: editRecurrenceType || null,
@@ -5899,6 +5925,7 @@
                 ${allClear && !emptyMineMessage ? '<div class="card" style="text-align:center; padding:2rem; margin-bottom:1.5rem; color:var(--text-secondary);">🎉 Nada atrasado ou previsto para hoje.</div>' : ''}
                 ${renderTodaySection('⚠️ Atrasadas', overdueItems, 'var(--led-red)')}
                 ${renderTodaySection('📌 Para Hoje', todayItems, 'var(--amber)')}
+                ${renderTodaySection('📅 Programadas para Hoje', getTodayScheduled().filter(d => !todayItems.includes(d) && !overdueItems.includes(d)), 'var(--led-blue)')}
                 ${renderTodayConcludedSection(concludedToday)}
             `;
         }
@@ -7774,6 +7801,7 @@
                         ${approvalBadge}
                     </div>
                     ${isOverdue(d.dueDate) ? `<div style="font-size:0.7rem; font-weight:700; color:var(--led-red); margin-bottom:0.25rem;">⚠️ Atrasada</div>` : ''}
+                    ${d.scheduledDate ? `<div style="font-size:0.68rem; color:var(--led-blue); margin-bottom:0.25rem;">📅 Programada para ${formatDateBR(d.scheduledDate)}</div>` : ''}
                     ${getChecklistProgressHtml(d.checklist)}
                 </div>
             `;
@@ -9364,6 +9392,30 @@ filterCards();
         function toggleStatusFilter(key) {
             _activeStatusFilter = (_activeStatusFilter === key) ? null : key;
             renderDemands();
+        }
+
+        // ── Scheduled Date visibility ──────────────────────────────────────────
+        function updateScheduledDateVisibility(statusSelectId, groupId) {
+            const statusKey = document.getElementById(statusSelectId)?.value;
+            const config    = (currentStatusConfigs || []).find(s => s.key === statusKey);
+            const group     = document.getElementById(groupId);
+            if (group) group.style.display = config?.isSchedulable ? '' : 'none';
+        }
+
+        // Hookear selects de status para mostrar/ocultar o campo
+        document.addEventListener('change', function(e) {
+            if (e.target.id === 'newDemandStatus') {
+                updateScheduledDateVisibility('newDemandStatus', 'newScheduledDateGroup');
+            }
+            if (e.target.id === 'editDemandStatus') {
+                updateScheduledDateVisibility('editDemandStatus', 'editScheduledDateGroup');
+            }
+        });
+
+        // ── Hoje: incluir demandas com scheduled_date = hoje ──────────────────
+        function getTodayScheduled() {
+            const today = toLocalISODate(new Date());
+            return (currentDemands || []).filter(d => d.scheduledDate === today);
         }
 
         // ============= ANOTAÇÕES DE DEMANDA =============
