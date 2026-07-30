@@ -1533,6 +1533,15 @@ def get_status_configs():
     user_id = int(get_jwt_identity())
     workspace_id = get_user_workspace_id(user_id)
 
+    # Garante colunas novas antes do SELECT do ORM
+    for _col in [
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_approval BOOLEAN DEFAULT FALSE",
+    ]:
+        try: db.session.execute(text(_col)); db.session.commit()
+        except Exception: db.session.rollback()
+
     # Fallback: inclui registros com workspace_id NULL do próprio user (migração incompleta)
     existing = StatusConfig.query.filter(
         db.or_(
@@ -1590,6 +1599,16 @@ def update_status_config(config_id):
     workspace_id = get_user_workspace_id(user_id)
     if not is_workspace_admin(user_id, workspace_id):
         return jsonify({'error': 'Apenas administradores podem editar status'}), 403
+
+    # Garante colunas novas antes do SELECT
+    for _col in [
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_approval BOOLEAN DEFAULT FALSE",
+    ]:
+        try: db.session.execute(text(_col)); db.session.commit()
+        except Exception: db.session.rollback()
+
     config = StatusConfig.query.get_or_404(config_id)
 
     if config.workspace_id != workspace_id is not None and config.workspace_id.workspace_id != workspace_id:
