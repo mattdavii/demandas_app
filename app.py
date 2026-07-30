@@ -384,6 +384,7 @@ class Demand(db.Model):
     previous_status      = db.Column(db.String(50), nullable=True)
     status_log           = db.Column(db.JSON, nullable=True)
     execution_started_at = db.Column(db.DateTime, nullable=True)
+    scheduled_date       = db.Column(db.Date, nullable=True)    # data de programação (quando está planejado executar)
     rejection_note = db.Column(db.Text, nullable=True)  # 'weekly'|'biweekly'|'monthly'|'quarterly'|'semiannual'|'yearly'
     
     def to_dict(self, user_cache=None):
@@ -411,6 +412,7 @@ class Demand(db.Model):
             'isRecurring': self.is_recurring or False,
             'recurrenceType': self.recurrence_type,
             'typeId': self.type_id,
+            'scheduledDate': str(self.scheduled_date) if self.scheduled_date else None,
             'executionStartedAt': self.execution_started_at.isoformat() if self.execution_started_at else None,
             'statusLog': self.status_log or [],
             'previousStatus': self.previous_status,
@@ -543,6 +545,7 @@ class StatusConfig(db.Model):
     is_completed        = db.Column(db.Boolean, default=False)
     is_approval         = db.Column(db.Boolean, default=False)
     is_execution_start  = db.Column(db.Boolean, default=False)
+    is_schedulable      = db.Column(db.Boolean, default=False)  # status usa data de programação
 
     __table_args__ = (db.UniqueConstraint('workspace_id', 'key', name='unique_workspace_status_key'),)
 
@@ -556,6 +559,7 @@ class StatusConfig(db.Model):
             'order': self.order,
             'isCompleted': self.is_completed,
             'isExecutionStart': self.is_execution_start or False,
+            'isSchedulable': self.is_schedulable or False,
             'isApproval': self.is_approval or False
         }
 
@@ -679,6 +683,8 @@ def ping():
     _approval_cols = [
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS previous_status VARCHAR(50)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS scheduled_date DATE",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_minutes INTEGER",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
@@ -689,6 +695,8 @@ def ping():
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS status_log JSON",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS scheduled_date DATE",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
         "ALTER TABLE work_groups ADD COLUMN IF NOT EXISTS group_type VARCHAR(50)",
@@ -736,6 +744,8 @@ def get_init_data():
         "ALTER TABLE work_groups ADD COLUMN IF NOT EXISTS group_type VARCHAR(50)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS scheduled_date DATE",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS previous_status VARCHAR(50)",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS type_id INTEGER",
@@ -1607,6 +1617,16 @@ def update_status_config(config_id):
                 return jsonify({'error': 'Precisa existir ao menos um status marcado como conclusivo'}), 400
         config.is_completed = data['isCompleted']
 
+    if 'isSchedulable' in data:
+        config.is_schedulable = bool(data['isSchedulable'])
+
+    if 'is_execution_start' in data:
+        if bool(data['is_execution_start']):
+            ws_filter(StatusConfig, user_id, workspace_id).filter(
+                StatusConfig.id != config.id
+            ).update({'is_execution_start': False})
+        config.is_execution_start = bool(data['is_execution_start'])
+
     db.session.commit()
     return jsonify(config.to_dict()), 200
 
@@ -1859,6 +1879,8 @@ def get_demands():
     for _col in [
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS scheduled_date DATE",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS type_id INTEGER",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS notes_snapshot JSON",
@@ -2052,6 +2074,8 @@ def update_demand_status(demand_id):
     # Garante colunas novas ANTES de qualquer query ORM
     for _col in [
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS scheduled_date DATE",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_minutes INTEGER",
@@ -2333,6 +2357,8 @@ def check_reminders():
     # Garante colunas novas ANTES de qualquer query ORM em Demand/StatusConfig
     for _col in [
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS scheduled_date DATE",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS previous_status VARCHAR(50)",
@@ -2527,6 +2553,8 @@ def get_history():
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS status_log JSON",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS clickup_task_id VARCHAR(50)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS scheduled_date DATE",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
@@ -2672,6 +2700,8 @@ def get_activity_feed():
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS status_log JSON",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS scheduled_date DATE",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
     ]:
@@ -4036,6 +4066,8 @@ def _build_daily_report(workspace_id, user_id, ws_name):
     # Migrations antes de qualquer query
     for _col in [
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS scheduled_date DATE",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS previous_status VARCHAR(50)",
