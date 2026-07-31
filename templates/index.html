@@ -1492,11 +1492,13 @@
                 <button class="sidebar-link" id="adminLogTabBtn" data-tab="adminlog" style="display:none;" onclick="switchTab('adminlog')">🪲 <span>Log</span></button>
                 <button class="sidebar-link" onclick="openWhiteboard()" title="Abrir Whiteboard em nova janela">🗃️ <span>Whiteboard</span></button>
                 <button class="sidebar-link" data-tab="settings" onclick="switchTab('settings')">⚙️ <span>Configurações</span></button>
+                <!-- Separador visual -->
+                <div style="margin-top:auto; padding-top:0.5rem; border-top:1px solid var(--border);"></div>
+                <button class="sidebar-link" onclick="openGlobalSearch()" title="Buscar (Ctrl/Cmd+K)">🔍 <span>Buscar</span></button>
+                <button class="sidebar-link" id="sidebarInviteBtn" style="display:none; color:var(--led-green);" onclick="openWorkspaceInvite()" title="Convidar para o workspace">👥 <span>Convidar</span></button>
             </div>
 
             <div class="sidebar-footer">
-                <button class="sidebar-link" onclick="openGlobalSearch()" title="Buscar (Ctrl/Cmd+K)">🔍 <span>Buscar</span></button>
-                <button class="sidebar-link" id="sidebarInviteBtn" style="display:none; color:var(--led-green);" onclick="openWorkspaceInvite()" title="Convidar para o workspace">👥 <span>Convidar</span></button>
                 <div class="sidebar-user">
                     <p>Olá, <strong id="userName">Usuário</strong></p>
                     <button class="logout-btn" onclick="doLogout()">Sair</button>
