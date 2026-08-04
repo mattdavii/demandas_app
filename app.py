@@ -718,6 +718,10 @@ def ping():
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS previous_status VARCHAR(50)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS scheduled_date DATE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_nome VARCHAR(120)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_contato VARCHAR(120)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_raw VARCHAR(200)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_minutes INTEGER",
@@ -730,6 +734,10 @@ def ping():
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS status_log JSON",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS scheduled_date DATE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_nome VARCHAR(120)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_contato VARCHAR(120)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_raw VARCHAR(200)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
@@ -779,6 +787,10 @@ def get_init_data():
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS scheduled_date DATE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_nome VARCHAR(120)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_contato VARCHAR(120)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_raw VARCHAR(200)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS previous_status VARCHAR(50)",
@@ -1933,6 +1945,10 @@ def get_demands():
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS scheduled_date DATE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_nome VARCHAR(120)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_contato VARCHAR(120)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_raw VARCHAR(200)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS type_id INTEGER",
@@ -2128,6 +2144,10 @@ def update_demand_status(demand_id):
     for _col in [
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS scheduled_date DATE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_nome VARCHAR(120)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_contato VARCHAR(120)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_raw VARCHAR(200)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
@@ -2411,6 +2431,10 @@ def check_reminders():
     for _col in [
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS scheduled_date DATE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_nome VARCHAR(120)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_contato VARCHAR(120)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_raw VARCHAR(200)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
@@ -2481,6 +2505,23 @@ def cron_check_all_reminders():
         return jsonify({'error': 'Não autorizado'}), 403
 
     now = datetime.now()
+    # Garante colunas novas antes de qualquer query ORM
+    for _col in [
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS scheduled_date DATE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_nome VARCHAR(120)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_contato VARCHAR(120)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_raw VARCHAR(200)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
+    ]:
+        try:
+            db.session.execute(text(_col)); db.session.commit()
+        except Exception:
+            db.session.rollback()
+
     due_demands = Demand.query.filter(
         Demand.reminder_at.isnot(None),
         Demand.reminder_at <= now,
@@ -2607,6 +2648,10 @@ def get_history():
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS clickup_task_id VARCHAR(50)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS scheduled_date DATE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_nome VARCHAR(120)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_contato VARCHAR(120)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_raw VARCHAR(200)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
@@ -2754,6 +2799,10 @@ def get_activity_feed():
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS status_log JSON",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS scheduled_date DATE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_nome VARCHAR(120)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_contato VARCHAR(120)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_raw VARCHAR(200)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
@@ -4120,6 +4169,10 @@ def _build_daily_report(workspace_id, user_id, ws_name):
     for _col in [
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS status_log JSON",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS scheduled_date DATE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_nome VARCHAR(120)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_contato VARCHAR(120)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_raw VARCHAR(200)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
