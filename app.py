@@ -384,7 +384,12 @@ class Demand(db.Model):
     previous_status      = db.Column(db.String(50), nullable=True)
     status_log           = db.Column(db.JSON, nullable=True)
     execution_started_at = db.Column(db.DateTime, nullable=True)
-    scheduled_date       = db.Column(db.Date, nullable=True)    # data de programação (quando está planejado executar)
+    scheduled_date       = db.Column(db.Date, nullable=True)    # data de programação
+    # Chamado externo
+    chamado_nome         = db.Column(db.String(120), nullable=True)   # nome de quem abriu
+    chamado_contato      = db.Column(db.String(120), nullable=True)   # email/telefone
+    chamado_local_raw    = db.Column(db.String(200), nullable=True)   # local digitado (se "Outro")
+    chamado_local_novo   = db.Column(db.Boolean, default=False)       # badge ⚠️ local desconhecido (quando está planejado executar)
     rejection_note = db.Column(db.Text, nullable=True)  # 'weekly'|'biweekly'|'monthly'|'quarterly'|'semiannual'|'yearly'
     
     def to_dict(self, user_cache=None):
@@ -413,6 +418,10 @@ class Demand(db.Model):
             'recurrenceType': self.recurrence_type,
             'typeId': self.type_id,
             'scheduledDate': str(self.scheduled_date) if self.scheduled_date else None,
+            'chamadoNome': self.chamado_nome,
+            'chamadoContato': self.chamado_contato,
+            'chamadoLocalRaw': self.chamado_local_raw,
+            'chamadoLocalNovo': self.chamado_local_novo or False,
             'executionStartedAt': self.execution_started_at.isoformat() if self.execution_started_at else None,
             'statusLog': self.status_log or [],
             'previousStatus': self.previous_status,
@@ -488,6 +497,31 @@ class Note(db.Model):
             'createdAt': self.created_at.isoformat() if self.created_at else None,
             'updatedAt': self.updated_at.isoformat() if self.updated_at else None
         }
+
+class ChamadoToken(db.Model):
+    """Token público para abertura de chamados externos por workspace."""
+    __tablename__ = 'chamado_tokens'
+
+    id           = db.Column(db.Integer, primary_key=True)
+    token        = db.Column(db.String(64), unique=True, nullable=False)
+    workspace_id = db.Column(db.Integer, db.ForeignKey('workspaces.id'), nullable=False)
+    created_by   = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    created_at   = db.Column(db.DateTime, default=datetime.now)
+    is_active    = db.Column(db.Boolean, default=True)
+    group_id     = db.Column(db.Integer, nullable=True)  # grupo destino dos chamados
+
+    def to_dict(self):
+        ws = Workspace.query.get(self.workspace_id)
+        return {
+            'id': self.id,
+            'token': self.token,
+            'workspaceId': self.workspace_id,
+            'workspaceName': ws.name if ws else '?',
+            'isActive': self.is_active,
+            'groupId': self.group_id,
+            'createdAt': self.created_at.isoformat() if self.created_at else None,
+        }
+
 
 class AccessKey(db.Model):
     __tablename__ = 'access_keys'
@@ -4688,6 +4722,197 @@ def clickup_history():
         return jsonify({'history': history, 'hasMore': len(tasks) == 100, 'page': page}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 502
+
+
+
+# ============= CHAMADO EXTERNO =============
+
+@app.route('/chamado/<token_value>')
+def chamado_page(token_value):
+    """Página pública de abertura de chamado — sem autenticação."""
+    ct = ChamadoToken.query.filter_by(token=token_value, is_active=True).first()
+    if not ct:
+        return '<h2 style="font-family:sans-serif;text-align:center;padding:3rem;">Link inválido ou expirado.</h2>', 404
+    ws = Workspace.query.get(ct.workspace_id)
+    ws_name = ws.name if ws else 'Painel de Bordo'
+    return render_template('chamado.html', token=token_value, ws_name=ws_name)
+
+
+@app.route('/api/chamado/<token_value>/locais', methods=['GET'])
+def chamado_locais(token_value):
+    """Retorna lista de locais conhecidos para o select do formulário."""
+    ct = ChamadoToken.query.filter_by(token=token_value, is_active=True).first()
+    if not ct:
+        return jsonify({'error': 'Token inválido'}), 401
+    # Locais a partir de demandas ativas
+    rows = db.session.execute(
+        text("SELECT DISTINCT location FROM demands WHERE workspace_id = :ws AND location IS NOT NULL AND location != '' ORDER BY location ASC"),
+        {'ws': ct.workspace_id}
+    ).fetchall()
+    locais = [r[0] for r in rows]
+    # Adicionar locais do histórico
+    hist_rows = db.session.execute(
+        text("SELECT DISTINCT location FROM demand_history WHERE workspace_id = :ws AND location IS NOT NULL AND location != '' ORDER BY location ASC"),
+        {'ws': ct.workspace_id}
+    ).fetchall()
+    for r in hist_rows:
+        if r[0] not in locais:
+            locais.append(r[0])
+    locais.sort()
+    return jsonify({'locais': locais}), 200
+
+
+@app.route('/api/chamado/<token_value>/abrir', methods=['POST'])
+def chamado_abrir(token_value):
+    """Recebe o formulário público e cria a demanda no workspace."""
+    ct = ChamadoToken.query.filter_by(token=token_value, is_active=True).first()
+    if not ct:
+        return jsonify({'error': 'Token inválido'}), 401
+
+    # Criar tabelas se necessário
+    try:
+        db.session.execute(text("CREATE TABLE IF NOT EXISTS chamado_tokens (id SERIAL PRIMARY KEY, token VARCHAR(64) UNIQUE NOT NULL, workspace_id INTEGER NOT NULL, created_by INTEGER NOT NULL, created_at TIMESTAMP DEFAULT NOW(), is_active BOOLEAN DEFAULT TRUE, group_id INTEGER)"))
+        for _col in [
+            "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_nome VARCHAR(120)",
+            "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_contato VARCHAR(120)",
+            "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_raw VARCHAR(200)",
+            "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE",
+        ]:
+            db.session.execute(text(_col))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    data = request.get_json() or {}
+    nome     = (data.get('nome') or '').strip()
+    contato  = (data.get('contato') or '').strip()
+    local    = (data.get('local') or '').strip()
+    local_raw = (data.get('local_raw') or '').strip()  # se "Outro"
+    descricao = (data.get('descricao') or '').strip()
+    urgencia  = data.get('urgencia', 'media')
+
+    if not nome or not descricao:
+        return jsonify({'error': 'Nome e descrição são obrigatórios'}), 400
+
+    local_final   = local_raw if local == '__outro__' else local
+    local_novo    = local == '__outro__'
+
+    # Prioridade mapeada da urgência
+    prioridade_map = {'normal': 'media', 'alta': 'alta', 'urgente': 'urgente'}
+    prioridade = prioridade_map.get(urgencia, 'media')
+
+    # Status inicial — primeiro não conclusivo do workspace
+    admin = WorkspaceMember.query.filter_by(workspace_id=ct.workspace_id, role='admin').first()
+    uid = admin.user_id if admin else ct.created_by
+    first_status = ws_filter(StatusConfig, uid, ct.workspace_id).filter_by(
+        is_completed=False).order_by(StatusConfig.order).first()
+    status_key = first_status.key if first_status else 'novo'
+
+    demand = Demand(
+        user_id=uid,
+        workspace_id=ct.workspace_id,
+        work_group_id=ct.group_id,
+        location=local_final,
+        activity=f'[Chamado] {descricao[:100]}',
+        context=f'Aberto por: {nome}\nContato: {contato}\n\n{descricao}',
+        status=status_key,
+        priority=prioridade,
+        created_date=date.today(),
+        chamado_nome=nome,
+        chamado_contato=contato,
+        chamado_local_raw=local_raw if local_novo else None,
+        chamado_local_novo=local_novo,
+    )
+    db.session.add(demand)
+    db.session.commit()
+
+    # Notificação push para admins do workspace se local novo
+    if local_novo:
+        try:
+            admins = WorkspaceMember.query.filter_by(workspace_id=ct.workspace_id, role='admin').all()
+            for adm in admins:
+                _send_push_to_user(
+                    adm.user_id,
+                    '⚠️ Chamado com local desconhecido',
+                    f'{nome}: "{local_raw}" — verifique e corrija o local',
+                )
+        except Exception as e:
+            app.logger.warning(f'Push chamado local novo: {e}')
+
+    return jsonify({'ok': True, 'demandId': demand.id}), 201
+
+
+@app.route('/api/demands/<int:demand_id>/chamado-confirmar-local', methods=['POST'])
+@jwt_required()
+def chamado_confirmar_local(demand_id):
+    """Remove o badge de local desconhecido após o admin editar o local."""
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    demand = Demand.query.get_or_404(demand_id)
+    try:
+        db.session.execute(text("ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE"))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+    demand.chamado_local_novo = False
+    db.session.commit()
+    return jsonify({'ok': True}), 200
+
+
+# Gerenciamento do token de chamado (admin)
+@app.route('/api/chamado-token', methods=['GET'])
+@jwt_required()
+def get_chamado_token():
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    try:
+        db.session.execute(text("CREATE TABLE IF NOT EXISTS chamado_tokens (id SERIAL PRIMARY KEY, token VARCHAR(64) UNIQUE NOT NULL, workspace_id INTEGER NOT NULL, created_by INTEGER NOT NULL, created_at TIMESTAMP DEFAULT NOW(), is_active BOOLEAN DEFAULT TRUE, group_id INTEGER)"))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+    ct = ChamadoToken.query.filter_by(workspace_id=workspace_id).order_by(ChamadoToken.id.desc()).first()
+    if not ct:
+        return jsonify({'token': None}), 200
+    return jsonify(ct.to_dict()), 200
+
+
+@app.route('/api/chamado-token', methods=['POST'])
+@jwt_required()
+def create_chamado_token():
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Apenas admins podem gerar o link de chamado'}), 403
+    try:
+        db.session.execute(text("CREATE TABLE IF NOT EXISTS chamado_tokens (id SERIAL PRIMARY KEY, token VARCHAR(64) UNIQUE NOT NULL, workspace_id INTEGER NOT NULL, created_by INTEGER NOT NULL, created_at TIMESTAMP DEFAULT NOW(), is_active BOOLEAN DEFAULT TRUE, group_id INTEGER)"))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+    data = request.get_json() or {}
+    # Desativar token anterior
+    ChamadoToken.query.filter_by(workspace_id=workspace_id).update({'is_active': False})
+    new_token = ChamadoToken(
+        token=secrets.token_urlsafe(32),
+        workspace_id=workspace_id,
+        created_by=user_id,
+        group_id=data.get('group_id'),
+        is_active=True,
+    )
+    db.session.add(new_token)
+    db.session.commit()
+    return jsonify(new_token.to_dict()), 201
+
+
+@app.route('/api/chamado-token', methods=['DELETE'])
+@jwt_required()
+def revoke_chamado_token():
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    if not is_workspace_admin(user_id, workspace_id):
+        return jsonify({'error': 'Apenas admins podem revogar o link'}), 403
+    ChamadoToken.query.filter_by(workspace_id=workspace_id).update({'is_active': False})
+    db.session.commit()
+    return jsonify({'ok': True}), 200
 
 
 # ============= ROTAS DE BACKUP =============
