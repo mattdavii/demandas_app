@@ -2001,7 +2001,29 @@
                 </div>
             </div>
 
-            <!-- ClickUp Integration -->
+            <!-- Link de Chamado Externo -->
+            <div class="card admin-only-section" style="margin-bottom:1.5rem;">
+                <h3>🔗 Link de Chamado Externo</h3>
+                <p style="font-size:0.78rem; color:var(--text-secondary); margin-bottom:1rem;">
+                    Gere um link público para clientes ou terceiros abrirem chamados diretamente no seu Kanban — sem precisar de conta.
+                </p>
+                <div id="chamadoTokenCard" style="display:none; background:var(--panel-raised); border-radius:var(--radius); padding:0.75rem 1rem; margin-bottom:1rem; border-left:3px solid var(--led-green); font-size:0.82rem;">
+                    <div id="chamadoLinkDisplay" style="word-break:break-all; margin-bottom:0.5rem;"></div>
+                    <div style="font-size:0.7rem; color:var(--text-secondary);">Grupo destino: <span id="chamadoGrupoNome">—</span></div>
+                </div>
+                <div class="form-group" style="margin-bottom:0.75rem;">
+                    <label>Grupo destino dos chamados</label>
+                    <select id="chamadoGroupSelect">
+                        <option value="">Sem grupo específico</option>
+                    </select>
+                </div>
+                <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
+                    <button class="btn btn-primary" style="width:auto;" onclick="generateChamadoToken()">🔗 Gerar Link</button>
+                    <button class="btn btn-secondary" style="width:auto;" onclick="copyChamadoLink()">📋 Copiar Link</button>
+                    <button class="btn btn-sm" style="width:auto; background:transparent; border:1px solid var(--led-red); color:var(--led-red);" onclick="revokeChamadoToken()">🗑️ Revogar</button>
+                </div>
+                <div id="chamadoAlert" class="alert" style="margin-top:0.75rem;"></div>
+            </div>
             <div class="card admin-only-section" style="margin-bottom:1.5rem;">
                 <h3>🔗 Integração ClickUp</h3>
                 <p style="font-size:0.78rem; color:var(--text-secondary); margin-bottom:1rem;">
@@ -7842,6 +7864,8 @@
                         ${recurringBadge}
                         ${approvalBadge}
                     </div>
+                    ${d.chamadoNome ? `<div style="font-size:0.65rem; color:var(--led-blue); margin-bottom:0.2rem;">📞 Chamado: ${escapeHtml(d.chamadoNome)}</div>` : ''}
+                    ${d.chamadoLocalNovo ? `<div style="font-size:0.65rem; color:var(--amber); font-weight:700; margin-bottom:0.2rem;" title="Local digitado: ${escapeHtml(d.chamadoLocalRaw||'')}">⚠️ Local não cadastrado — verifique</div>` : ''}
                     ${isOverdue(d.dueDate) ? `<div style="font-size:0.7rem; font-weight:700; color:var(--led-red); margin-bottom:0.25rem;">⚠️ Atrasada</div>` : ''}
                     ${d.scheduledDate ? `<div style="font-size:0.68rem; color:var(--led-blue); margin-bottom:0.25rem;">📅 Programada para ${formatDateBR(d.scheduledDate)}</div>` : ''}
                     ${getChecklistProgressHtml(d.checklist)}
@@ -7892,6 +7916,16 @@
                 </div>
             `;
 
+            if (demand.chamadoNome) {
+                html += `<div style="margin-bottom:0.75rem; padding:0.65rem 0.85rem; background:rgba(96,165,250,0.08); border:1px solid rgba(96,165,250,0.25); border-radius:var(--radius);">
+                    <div style="font-size:0.65rem; font-weight:700; color:var(--led-blue); margin-bottom:4px;">📞 CHAMADO EXTERNO</div>
+                    <div style="font-size:0.8rem;">👤 ${escapeHtml(demand.chamadoNome)}</div>
+                    ${demand.chamadoContato ? `<div style="font-size:0.78rem; color:var(--text-secondary);">📱 ${escapeHtml(demand.chamadoContato)}</div>` : ''}
+                    ${demand.chamadoLocalNovo ? `<div style="font-size:0.75rem; color:var(--amber); margin-top:4px;">⚠️ Local digitado: <strong>${escapeHtml(demand.chamadoLocalRaw||'')}</strong>
+                        <button onclick="confirmarLocalChamado(${demand.id})" style="margin-left:0.5rem; background:var(--amber); border:none; border-radius:3px; padding:2px 8px; font-size:0.65rem; color:#000; cursor:pointer; font-family:inherit;">✓ Confirmar local</button>
+                    </div>` : ''}
+                </div>`;
+            }
             if (demand.dueDate) {
                 const overdue = isOverdue(demand.dueDate);
                 html += `<div style="font-size:0.85rem; margin-bottom:0.6rem; font-weight:${overdue ? '700' : '400'}; color:${overdue ? 'var(--led-red)' : 'var(--text-secondary)'};">${overdue ? '⚠️ Atrasada — venceu em' : '📅 Vence em'} ${formatDateBR(demand.dueDate)}</div>`;
@@ -8320,6 +8354,7 @@
                 loadInviteKeys();
                 loadDemandTypes();
                 loadAgentTokens();
+                loadChamadoToken();
                 applyRoleBasedUI();
                 const nameInput = document.getElementById('workspaceNameInput');
                 if (nameInput && currentWorkspace && currentWorkspace.name && !nameInput.value) {
@@ -9651,6 +9686,87 @@ filterCards();
             sendBtn.disabled = false;
             msgs.scrollTop = msgs.scrollHeight;
             input.focus();
+        }
+
+        // ============= CHAMADO EXTERNO =============
+        async function loadChamadoToken() {
+            try {
+                const r = await fetchWithRetry(`${API_URL}/chamado-token`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                const d = await r.json();
+                // Popular select de grupos
+                const sel = document.getElementById('chamadoGroupSelect');
+                if (sel) {
+                    sel.innerHTML = '<option value="">Sem grupo específico</option>';
+                    (currentGroups || []).forEach(g => {
+                        const opt = document.createElement('option');
+                        opt.value = g.id; opt.textContent = `${g.emoji||''} ${g.name}`;
+                        sel.appendChild(opt);
+                    });
+                }
+                if (r.ok && d.token) {
+                    const link = `${window.location.origin}/chamado/${d.token}`;
+                    const card = document.getElementById('chamadoTokenCard');
+                    if (card) {
+                        card.style.display = '';
+                        document.getElementById('chamadoLinkDisplay').textContent = link;
+                        const grp = (currentGroups || []).find(g => g.id === d.groupId);
+                        document.getElementById('chamadoGrupoNome').textContent = grp ? `${grp.emoji||''} ${grp.name}` : 'Nenhum';
+                        if (sel && d.groupId) sel.value = d.groupId;
+                    }
+                }
+            } catch(e) {}
+        }
+
+        async function generateChamadoToken() {
+            const groupId = document.getElementById('chamadoGroupSelect')?.value || null;
+            try {
+                const r = await fetchWithRetry(`${API_URL}/chamado-token`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ group_id: groupId ? parseInt(groupId) : null })
+                }, 1);
+                const d = await r.json();
+                if (r.ok) {
+                    showAlert('chamadoAlert', '✅ Link gerado!', 'success');
+                    await loadChamadoToken();
+                } else {
+                    showAlert('chamadoAlert', d.error || 'Erro ao gerar', 'danger');
+                }
+            } catch(e) { showAlert('chamadoAlert', 'Erro de conexão', 'danger'); }
+        }
+
+        function copyChamadoLink() {
+            const linkEl = document.getElementById('chamadoLinkDisplay');
+            if (!linkEl?.textContent) { showAlert('chamadoAlert', 'Gere um link primeiro', 'danger'); return; }
+            navigator.clipboard.writeText(linkEl.textContent).then(() => {
+                showAlert('chamadoAlert', '✅ Link copiado!', 'success');
+            });
+        }
+
+        async function revokeChamadoToken() {
+            if (!confirm('Revogar o link? Quem tentar acessar receberá "Link inválido".')) return;
+            try {
+                const r = await fetchWithRetry(`${API_URL}/chamado-token`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                if (r.ok) {
+                    document.getElementById('chamadoTokenCard').style.display = 'none';
+                    showAlert('chamadoAlert', 'Link revogado.', 'success');
+                }
+            } catch(e) { showAlert('chamadoAlert', 'Erro ao revogar', 'danger'); }
+        }
+
+        async function confirmarLocalChamado(demandId) {
+            try {
+                await fetchWithRetry(`${API_URL}/demands/${demandId}/chamado-confirmar-local`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                loadDemands();
+            } catch(e) {}
         }
 
         // ============= CLICKUP =============
