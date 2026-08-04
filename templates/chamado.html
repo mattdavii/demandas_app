@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Abrir Chamado — {{ ws_name }}</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d;
+    --text: #e6edf3; --text2: #8b949e;
+    --amber: #f5a623; --green: #3ddc84; --red: #ff5b5b; --blue: #60a5fa;
+    --radius: 8px;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'Courier New', monospace; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1.5rem; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 2rem; width: 100%; max-width: 520px; }
+  .header { text-align: center; margin-bottom: 2rem; }
+  .header h1 { color: var(--amber); font-size: 1.3rem; margin-bottom: 0.4rem; }
+  .header p { color: var(--text2); font-size: 0.82rem; }
+  .form-group { margin-bottom: 1.1rem; }
+  label { display: block; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text2); margin-bottom: 0.4rem; }
+  label span.req { color: var(--red); }
+  input, select, textarea {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 0.65rem 0.85rem;
+    color: var(--text); font-family: inherit; font-size: 0.88rem;
+    transition: border-color .15s;
+  }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--amber); }
+  textarea { resize: vertical; min-height: 100px; }
+  select option { background: var(--panel); }
+  #outro-group { display: none; margin-top: 0.5rem; }
+  .urgencia-group { display: flex; gap: 0.5rem; }
+  .urg-btn {
+    flex: 1; padding: 0.55rem; border: 1px solid var(--border); border-radius: var(--radius);
+    background: transparent; color: var(--text2); font-family: inherit;
+    font-size: 0.78rem; cursor: pointer; text-align: center; transition: all .15s;
+  }
+  .urg-btn.selected { color: #000; font-weight: 700; }
+  .urg-btn[data-v="normal"].selected  { background: var(--blue);  border-color: var(--blue); }
+  .urg-btn[data-v="alta"].selected    { background: var(--amber); border-color: var(--amber); }
+  .urg-btn[data-v="urgente"].selected { background: var(--red);   border-color: var(--red); }
+  .btn-submit {
+    width: 100%; padding: 0.85rem; background: var(--amber); border: none;
+    border-radius: var(--radius); color: #000; font-family: inherit;
+    font-size: 0.95rem; font-weight: 700; cursor: pointer;
+    transition: opacity .15s; margin-top: 0.5rem;
+  }
+  .btn-submit:hover { opacity: .85; }
+  .btn-submit:disabled { opacity: .5; cursor: not-allowed; }
+  .alert { padding: 0.75rem 1rem; border-radius: var(--radius); font-size: 0.82rem; margin-top: 1rem; display: none; }
+  .alert-danger  { background: rgba(255,91,91,.1); border: 1px solid var(--red);   color: var(--red); }
+  .alert-success { background: rgba(61,220,132,.1); border: 1px solid var(--green); color: var(--green); }
+  .success-screen { display: none; text-align: center; padding: 1.5rem 0; }
+  .success-screen .icon { font-size: 3.5rem; margin-bottom: 1rem; }
+  .success-screen h2 { color: var(--green); margin-bottom: 0.5rem; }
+  .success-screen p { color: var(--text2); font-size: 0.85rem; line-height: 1.6; }
+  .loading { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(0,0,0,.3); border-top-color: #000; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .powered { text-align: center; margin-top: 1.5rem; font-size: 0.65rem; color: var(--text2); }
+  .powered span { color: var(--amber); }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="header">
+    <h1>📋 Abrir Chamado</h1>
+    <p>{{ ws_name }}</p>
+  </div>
+
+  <div id="form-area">
+    <div class="form-group">
+      <label>Seu nome <span class="req">*</span></label>
+      <input type="text" id="nome" placeholder="Ex: João Silva" maxlength="120">
+    </div>
+
+    <div class="form-group">
+      <label>Contato (email ou telefone) <span class="req">*</span></label>
+      <input type="text" id="contato" placeholder="Ex: joao@empresa.com ou (83) 99999-9999" maxlength="120">
+    </div>
+
+    <div class="form-group">
+      <label>Local <span class="req">*</span></label>
+      <select id="local">
+        <option value="">Carregando...</option>
+      </select>
+      <div id="outro-group">
+        <input type="text" id="local-outro" placeholder="Digite o nome do local" maxlength="200">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Urgência</label>
+      <div class="urgencia-group">
+        <button class="urg-btn selected" data-v="normal"  onclick="setUrg(this)">Normal</button>
+        <button class="urg-btn"          data-v="alta"    onclick="setUrg(this)">Alta</button>
+        <button class="urg-btn"          data-v="urgente" onclick="setUrg(this)">Urgente</button>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Descrição do problema <span class="req">*</span></label>
+      <textarea id="descricao" placeholder="Descreva o problema com o máximo de detalhes possível..."></textarea>
+    </div>
+
+    <div id="alert-box" class="alert"></div>
+
+    <button class="btn-submit" onclick="enviar()">Enviar Chamado</button>
+  </div>
+
+  <div id="success-screen" class="success-screen">
+    <div class="icon">✅</div>
+    <h2>Chamado enviado!</h2>
+    <p>Recebemos seu chamado e nossa equipe será notificada em breve.<br>Entraremos em contato pelo canal informado.</p>
+    <button class="btn-submit" style="margin-top:1.5rem;" onclick="novoChamado()">Abrir outro chamado</button>
+  </div>
+
+  <div class="powered">Desenvolvido por <span>MD Soluções Tecnológicas</span></div>
+</div>
+
+<script>
+var TOKEN = '{{ token }}';
+var urgencia = 'normal';
+
+// Carregar locais
+fetch('/api/chamado/' + TOKEN + '/locais')
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    var sel = document.getElementById('local');
+    sel.innerHTML = '<option value="">Selecione o local...</option>';
+    (d.locais || []).forEach(function(loc) {
+      var opt = document.createElement('option');
+      opt.value = loc; opt.textContent = loc;
+      sel.appendChild(opt);
+    });
+    var outro = document.createElement('option');
+    outro.value = '__outro__'; outro.textContent = '📝 Outro (não encontrei na lista)';
+    sel.appendChild(outro);
+  })
+  .catch(function() {
+    var sel = document.getElementById('local');
+    sel.innerHTML = '<option value="__outro__">Digite o local manualmente</option>';
+    document.getElementById('outro-group').style.display = '';
+  });
+
+document.getElementById('local').addEventListener('change', function() {
+  document.getElementById('outro-group').style.display =
+    this.value === '__outro__' ? '' : 'none';
+  if (this.value === '__outro__')
+    document.getElementById('local-outro').focus();
+});
+
+function setUrg(btn) {
+  document.querySelectorAll('.urg-btn').forEach(function(b) { b.classList.remove('selected'); });
+  btn.classList.add('selected');
+  urgencia = btn.getAttribute('data-v');
+}
+
+function showAlert(msg, type) {
+  var el = document.getElementById('alert-box');
+  el.className = 'alert alert-' + type;
+  el.textContent = msg;
+  el.style.display = '';
+}
+
+function enviar() {
+  var nome     = document.getElementById('nome').value.trim();
+  var contato  = document.getElementById('contato').value.trim();
+  var local    = document.getElementById('local').value;
+  var localRaw = document.getElementById('local-outro').value.trim();
+  var desc     = document.getElementById('descricao').value.trim();
+
+  if (!nome)    { showAlert('Informe seu nome.', 'danger'); return; }
+  if (!contato) { showAlert('Informe um contato.', 'danger'); return; }
+  if (!local)   { showAlert('Selecione o local.', 'danger'); return; }
+  if (local === '__outro__' && !localRaw) { showAlert('Digite o nome do local.', 'danger'); return; }
+  if (!desc)    { showAlert('Descreva o problema.', 'danger'); return; }
+
+  var btn = document.querySelector('.btn-submit');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loading"></span>Enviando...';
+  document.getElementById('alert-box').style.display = 'none';
+
+  fetch('/api/chamado/' + TOKEN + '/abrir', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      nome: nome, contato: contato,
+      local: local, local_raw: localRaw,
+      descricao: desc, urgencia: urgencia
+    })
+  })
+  .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+  .then(function(res) {
+    if (res.ok) {
+      document.getElementById('form-area').style.display = 'none';
+      document.getElementById('success-screen').style.display = '';
+    } else {
+      showAlert(res.data.error || 'Erro ao enviar. Tente novamente.', 'danger');
+      btn.disabled = false;
+      btn.textContent = 'Enviar Chamado';
+    }
+  })
+  .catch(function() {
+    showAlert('Erro de conexão. Verifique sua internet e tente novamente.', 'danger');
+    btn.disabled = false;
+    btn.textContent = 'Enviar Chamado';
+  });
+}
+
+function novoChamado() {
+  document.getElementById('nome').value = '';
+  document.getElementById('contato').value = '';
+  document.getElementById('local').value = '';
+  document.getElementById('local-outro').value = '';
+  document.getElementById('descricao').value = '';
+  document.getElementById('outro-group').style.display = 'none';
+  document.getElementById('alert-box').style.display = 'none';
+  document.querySelectorAll('.urg-btn').forEach(function(b) { b.classList.remove('selected'); });
+  document.querySelector('.urg-btn[data-v="normal"]').classList.add('selected');
+  urgencia = 'normal';
+  document.getElementById('success-screen').style.display = 'none';
+  document.getElementById('form-area').style.display = '';
+  document.querySelector('.btn-submit').disabled = false;
+  document.querySelector('.btn-submit').textContent = 'Enviar Chamado';
+}
+</script>
+</body>
+</html>
