@@ -389,7 +389,8 @@ class Demand(db.Model):
     chamado_nome         = db.Column(db.String(120), nullable=True)   # nome de quem abriu
     chamado_contato      = db.Column(db.String(120), nullable=True)   # email/telefone
     chamado_local_raw    = db.Column(db.String(200), nullable=True)   # local digitado (se "Outro")
-    chamado_local_novo   = db.Column(db.Boolean, default=False)       # badge ⚠️ local desconhecido (quando está planejado executar)
+    chamado_local_novo   = db.Column(db.Boolean, default=False)       # badge ⚠️ local desconhecido
+    clickup_task_id      = db.Column(db.String(50), nullable=True)    # ID da task no ClickUp (backup) (quando está planejado executar)
     rejection_note = db.Column(db.Text, nullable=True)  # 'weekly'|'biweekly'|'monthly'|'quarterly'|'semiannual'|'yearly'
     
     def to_dict(self, user_cache=None):
@@ -422,6 +423,7 @@ class Demand(db.Model):
             'chamadoContato': self.chamado_contato,
             'chamadoLocalRaw': self.chamado_local_raw,
             'chamadoLocalNovo': self.chamado_local_novo or False,
+            'clickupTaskId': self.clickup_task_id,
             'executionStartedAt': self.execution_started_at.isoformat() if self.execution_started_at else None,
             'statusLog': self.status_log or [],
             'previousStatus': self.previous_status,
@@ -722,6 +724,7 @@ def ping():
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_contato VARCHAR(120)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_raw VARCHAR(200)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS clickup_task_id VARCHAR(50)",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS execution_minutes INTEGER",
@@ -738,6 +741,7 @@ def ping():
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_contato VARCHAR(120)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_raw VARCHAR(200)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS clickup_task_id VARCHAR(50)",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
@@ -791,6 +795,7 @@ def get_init_data():
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_contato VARCHAR(120)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_raw VARCHAR(200)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS clickup_task_id VARCHAR(50)",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS previous_status VARCHAR(50)",
@@ -1949,6 +1954,7 @@ def get_demands():
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_contato VARCHAR(120)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_raw VARCHAR(200)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS clickup_task_id VARCHAR(50)",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE demand_history ADD COLUMN IF NOT EXISTS type_id INTEGER",
@@ -2148,6 +2154,7 @@ def update_demand_status(demand_id):
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_contato VARCHAR(120)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_raw VARCHAR(200)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS clickup_task_id VARCHAR(50)",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
@@ -2279,8 +2286,13 @@ def update_demand_status(demand_id):
                     gname = gmap.get(h.work_group_id, '')
                     res, _ = _clickup_request('POST', f'/list/{os.getenv("CLICKUP_LIST_ID")}/task',
                                               _history_to_clickup_task(h, gname))
-                    h.clickup_task_id = res.get('id')
+                    task_id = res.get('id')
+                    h.clickup_task_id = task_id
                     db.session.merge(h); db.session.commit()
+                    # Anotações → comentários nativos
+                    notes = h.notes_snapshot or []
+                    if notes and task_id:
+                        _post_notes_as_comments(task_id, notes)
                 except Exception as e:
                     app.logger.error(f'ClickUp auto-sync: {e}')
         import threading as _t
@@ -2435,6 +2447,7 @@ def check_reminders():
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_contato VARCHAR(120)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_raw VARCHAR(200)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS clickup_task_id VARCHAR(50)",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
@@ -2514,6 +2527,7 @@ def cron_check_all_reminders():
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_contato VARCHAR(120)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_raw VARCHAR(200)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS clickup_task_id VARCHAR(50)",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
     ]:
@@ -2652,6 +2666,7 @@ def get_history():
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_contato VARCHAR(120)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_raw VARCHAR(200)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS clickup_task_id VARCHAR(50)",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
@@ -2803,6 +2818,7 @@ def get_activity_feed():
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_contato VARCHAR(120)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_raw VARCHAR(200)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS clickup_task_id VARCHAR(50)",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_execution_start BOOLEAN DEFAULT FALSE",
@@ -4173,6 +4189,7 @@ def _build_daily_report(workspace_id, user_id, ws_name):
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_contato VARCHAR(120)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_raw VARCHAR(200)",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS clickup_task_id VARCHAR(50)",
         "ALTER TABLE status_configs ADD COLUMN IF NOT EXISTS is_schedulable BOOLEAN DEFAULT FALSE",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS execution_started_at TIMESTAMP",
         "ALTER TABLE demands ADD COLUMN IF NOT EXISTS type_id INTEGER",
@@ -4428,6 +4445,118 @@ def copy_demand(demand_id):
 
 # ============= INTEGRAÇÃO CLICKUP =============
 
+def _clickup_add_comment(task_id, comment_text, notify_all=False):
+    """Adiciona um comentário nativo a uma task do ClickUp."""
+    api_key = os.getenv('CLICKUP_API_KEY', '').strip()
+    if not api_key or not task_id:
+        return None
+    url = f'https://api.clickup.com/api/v2/task/{task_id}/comment'
+    payload = json.dumps({
+        'comment_text': comment_text,
+        'notify_all': notify_all,
+    }).encode()
+    req = urllib.request.Request(
+        url, data=payload,
+        headers={'Authorization': api_key, 'Content-Type': 'application/json'},
+        method='POST'
+    )
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        return json.loads(resp.read())
+
+
+def _post_notes_as_comments(task_id, notes):
+    """Publica cada anotação como um comentário nativo no ClickUp.
+    notes: [{username, content, createdAt}]"""
+    if not task_id or not notes:
+        return 0
+    posted = 0
+    for n in notes:
+        try:
+            dt = ''
+            raw = n.get('createdAt')
+            if raw:
+                try:
+                    clean = raw.replace('Z', '')
+                    dt = datetime.fromisoformat(clean).strftime('%d/%m/%Y %H:%M')
+                except Exception:
+                    dt = str(raw)[:16].replace('T', ' ')
+            autor = n.get('username') or 'Desconhecido'
+            texto = f'📝 {autor}' + (f' — {dt}' if dt else '') + f'\n\n{n.get("content", "")}'
+            _clickup_add_comment(task_id, texto)
+            posted += 1
+        except Exception as e:
+            app.logger.warning(f'ClickUp comment falhou (task {task_id}): {e}')
+    return posted
+
+
+def _demand_to_clickup_task(d, group_name='', status_label=''):
+    """Converte uma Demand ATIVA em payload de task do ClickUp (backup)."""
+    checklist = d.checklist or []
+    done = sum(1 for i in checklist if i.get('checked'))
+
+    lines = [
+        f'📍 **Local:** {d.location or "—"}',
+        f'👥 **Grupo:** {group_name or "—"}',
+        f'📌 **Contexto:** {d.context or "—"}',
+        f'🏷️ **Prioridade:** {d.priority or "—"}',
+        f'📊 **Status no Painel:** {status_label or d.status or "—"}',
+        f'📅 **Criada em:** {d.created_date.strftime("%d/%m/%Y") if d.created_date else "—"}',
+    ]
+    if d.due_date:
+        lines.append(f'⏰ **Vence em:** {d.due_date.strftime("%d/%m/%Y")}')
+    if d.scheduled_date:
+        lines.append(f'📆 **Programada para:** {d.scheduled_date.strftime("%d/%m/%Y")}')
+    if d.execution_started_at:
+        lines.append(f'⏱️ **Em execução desde:** {d.execution_started_at.strftime("%d/%m/%Y %H:%M")}')
+    if d.is_recurring and d.recurrence_type:
+        lines.append(f'🔄 **Recorrência:** {d.recurrence_type}')
+    if d.chamado_nome:
+        lines.append(f'📞 **Chamado aberto por:** {d.chamado_nome} ({d.chamado_contato or "sem contato"})')
+    lines.append('')
+
+    if checklist:
+        lines.append(f'**Checklist ({done}/{len(checklist)}):**')
+        for item in checklist:
+            mark = '✅' if item.get('checked') else '☐'
+            lines.append(f'{mark} {item.get("text", "")}')
+        lines.append('')
+
+    snapshot = {
+        'demandId': d.id, 'location': d.location, 'activity': d.activity,
+        'context': d.context, 'status': d.status, 'priority': d.priority,
+        'workGroupName': group_name, 'workGroupId': d.work_group_id,
+        'assignedToUserId': d.assigned_to_user_id,
+        'checklist': d.checklist,
+        'dueDate': str(d.due_date) if d.due_date else None,
+        'scheduledDate': str(d.scheduled_date) if d.scheduled_date else None,
+        'createdDate': str(d.created_date) if d.created_date else None,
+        'typeId': d.type_id, 'isActive': True,
+    }
+    lines.append(f'_painel_data:{json.dumps(snapshot, ensure_ascii=False)}_')
+
+    due_ms = None
+    if d.due_date:
+        due_ms = int(datetime.combine(d.due_date, datetime.min.time()).timestamp() * 1000)
+
+    tags = [t for t in [group_name, d.priority, 'ativa'] if t]
+
+    return {
+        'name': f'{d.location or "—"} — {d.activity}',
+        'description': '\n'.join(lines),
+        'priority': _priority_to_clickup(d.priority),
+        'tags': [{'name': t} for t in tags],
+        'due_date': due_ms,
+        'due_date_time': False,
+    }
+
+
+def _clickup_add_comment_safe(task_id, text_body):
+    try:
+        return _clickup_add_comment(task_id, text_body)
+    except Exception:
+        return None
+
+
 def _clickup_headers():
     return {
         'Authorization': os.getenv('CLICKUP_API_KEY', ''),
@@ -4483,10 +4612,7 @@ def _history_to_clickup_task(h, group_name=''):
             lines.append(f'{mark} {item.get("text", "")}')
         lines.append('')
     if notes:
-        lines.append('**Anotações:**')
-        for n in notes:
-            dt = n.get('createdAt', '')[:16].replace('T', ' ') if n.get('createdAt') else ''
-            lines.append(f'[{n.get("username", "?")} — {dt}]: {n.get("content", "")}')
+        lines.append(f'_({len(notes)} anotação(ões) publicadas como comentários abaixo)_')
         lines.append('')
 
     snapshot = {
@@ -4709,14 +4835,20 @@ def clickup_migrate_batch():
 
     sent = failed = 0
     errors = []
+    comments_posted = 0
     for h in pending:
         try:
             group_name   = group_map.get(h.work_group_id, '')
             task_payload = _history_to_clickup_task(h, group_name)
             result, _    = _clickup_request('POST', f'/list/{list_id}/task', task_payload)
-            h.clickup_task_id = result.get('id', 'synced')
+            task_id = result.get('id', 'synced')
+            h.clickup_task_id = task_id
             db.session.add(h)
             sent += 1
+            # Anotações → comentários nativos
+            notes = h.notes_snapshot or []
+            if notes and task_id != 'synced':
+                comments_posted += _post_notes_as_comments(task_id, notes)
         except Exception as e:
             failed += 1
             errors.append(str(e)[:100])
@@ -4732,6 +4864,123 @@ def clickup_migrate_batch():
 
     return jsonify({
         'sent': sent, 'failed': failed,
+        'remaining': remaining, 'done': remaining == 0,
+        'comments': comments_posted,
+        'errors': errors[:3]
+    }), 200
+
+
+@app.route('/api/clickup/backup/count', methods=['GET'])
+@jwt_required()
+def clickup_backup_count():
+    """Conta demandas ATIVAS pendentes de backup no ClickUp."""
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    for _col in [
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS clickup_task_id VARCHAR(50)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS scheduled_date DATE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_nome VARCHAR(120)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_contato VARCHAR(120)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_raw VARCHAR(200)",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE",
+    ]:
+        try: db.session.execute(text(_col)); db.session.commit()
+        except Exception: db.session.rollback()
+
+    total    = ws_filter(Demand, user_id, workspace_id).count()
+    migrated = ws_filter(Demand, user_id, workspace_id).filter(
+        Demand.clickup_task_id.isnot(None)).count()
+    return jsonify({'total': total, 'pending': total - migrated, 'migrated': migrated}), 200
+
+
+@app.route('/api/clickup/backup/batch', methods=['POST'])
+@jwt_required()
+def clickup_backup_batch():
+    """Exporta um lote de demandas ATIVAS para o ClickUp, com anotações como comentários."""
+    api_key = os.getenv('CLICKUP_API_KEY', '').strip()
+    list_id = os.getenv('CLICKUP_LIST_ID', '').strip()
+    if not api_key or not list_id:
+        return jsonify({'error': 'ClickUp não configurado no Render/Railway'}), 503
+
+    user_id = int(get_jwt_identity())
+    workspace_id = get_user_workspace_id(user_id)
+    data  = request.get_json() or {}
+    limit = min(int(data.get('limit', 5)), 10)
+
+    for _col in [
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS clickup_task_id VARCHAR(50)",
+    ]:
+        try: db.session.execute(text(_col)); db.session.commit()
+        except Exception: db.session.rollback()
+
+    pending = ws_filter(Demand, user_id, workspace_id).filter(
+        Demand.clickup_task_id.is_(None)
+    ).order_by(Demand.id.asc()).limit(limit).all()
+
+    if not pending:
+        return jsonify({'sent': 0, 'failed': 0, 'comments': 0, 'remaining': 0, 'done': True}), 200
+
+    # Mapas de grupo e status
+    grp_rows = db.session.execute(text(
+        "SELECT id, name FROM work_groups WHERE workspace_id = :ws OR (workspace_id IS NULL AND user_id = :uid)"
+    ), {'ws': workspace_id, 'uid': user_id}).fetchall()
+    group_map = {r[0]: r[1] for r in grp_rows}
+
+    status_map = {}
+    try:
+        for s in ws_filter(StatusConfig, user_id, workspace_id).all():
+            status_map[s.key] = s.label
+    except Exception:
+        pass
+
+    # Garantir tabela de anotações
+    try:
+        db.session.execute(text(
+            "CREATE TABLE IF NOT EXISTS demand_notes ("
+            "id SERIAL PRIMARY KEY, demand_id INTEGER NOT NULL, user_id INTEGER, "
+            "username VARCHAR(80), content TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW())"
+        ))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    sent = failed = comments_posted = 0
+    errors = []
+    for d in pending:
+        try:
+            group_name   = group_map.get(d.work_group_id, '')
+            status_label = status_map.get(d.status, d.status)
+            payload      = _demand_to_clickup_task(d, group_name, status_label)
+            result, _    = _clickup_request('POST', f'/list/{list_id}/task', payload)
+            task_id      = result.get('id')
+            d.clickup_task_id = task_id or 'synced'
+            db.session.add(d)
+            sent += 1
+
+            # Buscar anotações da demanda e postar como comentários nativos
+            if task_id:
+                rows = db.session.execute(
+                    text("SELECT username, content, created_at FROM demand_notes "
+                         "WHERE demand_id = :did ORDER BY created_at ASC"),
+                    {'did': d.id}
+                ).fetchall()
+                notes = [{'username': r[0], 'content': r[1],
+                          'createdAt': r[2].isoformat() if r[2] else None} for r in rows]
+                if notes:
+                    comments_posted += _post_notes_as_comments(task_id, notes)
+        except Exception as e:
+            failed += 1
+            errors.append(str(e)[:120])
+            app.logger.error(f'ClickUp backup error (demand {d.id}): {e}')
+
+    if sent > 0:
+        db.session.commit()
+
+    remaining = ws_filter(Demand, user_id, workspace_id).filter(
+        Demand.clickup_task_id.is_(None)).count()
+
+    return jsonify({
+        'sent': sent, 'failed': failed, 'comments': comments_posted,
         'remaining': remaining, 'done': remaining == 0,
         'errors': errors[:3]
     }), 200
@@ -4830,6 +5079,7 @@ def chamado_abrir(token_value):
             "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_contato VARCHAR(120)",
             "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_raw VARCHAR(200)",
             "ALTER TABLE demands ADD COLUMN IF NOT EXISTS chamado_local_novo BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE demands ADD COLUMN IF NOT EXISTS clickup_task_id VARCHAR(50)",
         ]:
             db.session.execute(text(_col))
         db.session.commit()
