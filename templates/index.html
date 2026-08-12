@@ -2037,6 +2037,7 @@
                     <button class="btn btn-secondary" style="width:auto;" onclick="testClickupConnection()">🔌 Testar Conexão</button>
                     <button class="btn btn-secondary" style="width:auto;" onclick="runClickupDiagnose()">🔍 Diagnóstico</button>
                     <button class="btn btn-primary" style="width:auto;" onclick="openClickupMigrateModal()">🔄 Migrar Histórico</button>
+                    <button class="btn btn-primary" style="width:auto; background:var(--led-blue); border-color:var(--led-blue);" onclick="openClickupBackupModal()">💾 Backup das Ativas</button>
                 </div>
                 <div id="clickupDiagnoseResult" style="display:none; margin-top:0.75rem; background:var(--panel-raised); border-radius:var(--radius); padding:0.85rem 1rem; font-size:0.75rem; font-family:monospace; white-space:pre-wrap; max-height:300px; overflow-y:auto;"></div>
                 <div id="clickupAlert" class="alert" style="margin-top:0.75rem;"></div>
@@ -2754,6 +2755,28 @@
                 ⚠️ Apenas administradores podem gerar links de convite.
             </div>
             <div id="workspaceInviteAlert" class="alert" style="margin-top:0.75rem;"></div>
+        </div>
+    </div>
+
+    <!-- MODAL: BACKUP DAS DEMANDAS ATIVAS -->
+    <div id="clickupBackupModal" class="modal">
+        <div class="modal-content" style="max-width:500px;">
+            <span class="close-modal" onclick="document.getElementById('clickupBackupModal').classList.remove('show')">&times;</span>
+            <div class="modal-header">💾 Backup das Demandas Ativas</div>
+            <p style="font-size:0.78rem; color:var(--text-secondary); margin-bottom:1rem;">
+                Copia todas as demandas <strong>abertas</strong> para o ClickUp, com checklist e anotações como comentários nativos.
+                As demandas continuam no Painel de Bordo normalmente — isto é apenas um backup.
+            </p>
+            <div id="clickupBackupProgress" style="display:none;">
+                <div style="background:var(--panel-raised); border-radius:var(--radius); height:8px; margin-bottom:0.75rem; overflow:hidden;">
+                    <div id="clickupBackupBar" style="background:var(--led-blue); height:100%; width:0%; transition:width 0.4s; border-radius:var(--radius);"></div>
+                </div>
+                <div id="clickupBackupLabel" style="font-size:0.78rem; color:var(--text-secondary); text-align:center; margin-bottom:1rem;">Iniciando...</div>
+            </div>
+            <div id="clickupBackupResult" style="display:none; margin-bottom:1rem;"></div>
+            <div id="clickupBackupAlert" class="alert"></div>
+            <button class="btn btn-primary" id="clickupBackupBtn" onclick="startClickupBackup()" style="margin-right:.5rem;">▶️ Iniciar Backup</button>
+            <button class="btn btn-secondary" onclick="document.getElementById('clickupBackupModal').classList.remove('show')">Fechar</button>
         </div>
     </div>
 
@@ -9806,6 +9829,94 @@ filterCards();
             finally { btn.disabled = false; btn.textContent = '🔌 Testar Conexão'; }
         }
 
+        // ── Backup das demandas ATIVAS ────────────────────────────────────────
+        async function openClickupBackupModal() {
+            document.getElementById('clickupBackupProgress').style.display = 'none';
+            document.getElementById('clickupBackupResult').style.display   = 'none';
+            document.getElementById('clickupBackupAlert').innerHTML        = '';
+            const btn = document.getElementById('clickupBackupBtn');
+            btn.disabled = false; btn.textContent = '▶️ Iniciar Backup';
+
+            try {
+                const r = await fetchWithRetry(`${API_URL}/clickup/backup/count`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                const d = await r.json();
+                if (r.ok) {
+                    document.getElementById('clickupBackupProgress').style.display = '';
+                    document.getElementById('clickupBackupLabel').textContent =
+                        `${d.migrated} já exportadas · ${d.pending} pendentes (de ${d.total} ativas)`;
+                    const pct = d.total > 0 ? Math.round(d.migrated / d.total * 100) : 0;
+                    document.getElementById('clickupBackupBar').style.width = pct + '%';
+                }
+            } catch(e) {}
+            document.getElementById('clickupBackupModal').classList.add('show');
+        }
+
+        async function startClickupBackup() {
+            const btn = document.getElementById('clickupBackupBtn');
+            btn.disabled = true; btn.textContent = 'Exportando...';
+            document.getElementById('clickupBackupProgress').style.display = '';
+            document.getElementById('clickupBackupAlert').innerHTML = '';
+
+            let totalSent = 0, totalFailed = 0, totalComments = 0, totalRemaining = 0;
+            let startMigrated = 0;
+
+            try {
+                const cr = await fetchWithRetry(`${API_URL}/clickup/backup/count`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }, 1);
+                const cd = await cr.json();
+                if (cr.ok) startMigrated = cd.migrated;
+            } catch(e) {}
+
+            while (true) {
+                try {
+                    const r = await fetchWithRetry(`${API_URL}/clickup/backup/batch`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ limit: 5 })
+                    }, 1);
+                    const d = await r.json();
+                    if (!r.ok) { showAlert('clickupBackupAlert', d.error || 'Erro no backup', 'danger'); break; }
+
+                    totalSent      += d.sent;
+                    totalFailed    += d.failed;
+                    totalComments  += (d.comments || 0);
+                    totalRemaining  = d.remaining;
+
+                    const grand = totalSent + totalRemaining;
+                    const pct   = grand > 0 ? Math.round(totalSent / grand * 100) : 100;
+                    document.getElementById('clickupBackupBar').style.width = pct + '%';
+                    document.getElementById('clickupBackupLabel').textContent =
+                        `Exportando... ${totalSent}/${grand} (${pct}%) · 💬 ${totalComments} comentários${totalFailed ? ` · ${totalFailed} falhas` : ''}`;
+
+                    if (d.done) break;
+                    await new Promise(res => setTimeout(res, 400));
+                } catch(e) {
+                    showAlert('clickupBackupAlert', 'Erro de conexão durante o backup', 'danger');
+                    break;
+                }
+            }
+
+            const resultEl = document.getElementById('clickupBackupResult');
+            resultEl.style.display = '';
+            resultEl.innerHTML = `
+                <div style="background:var(--panel-raised); border-radius:var(--radius); padding:0.85rem 1rem; border-left:3px solid ${totalFailed > 0 ? 'var(--amber)' : 'var(--led-green)'};">
+                    <div style="font-weight:700; margin-bottom:4px;">Backup concluído</div>
+                    <div style="font-size:0.78rem; color:var(--text-secondary);">
+                        ✅ ${totalSent} demanda(s) exportada(s)<br>
+                        💬 ${totalComments} anotação(ões) como comentários<br>
+                        ${totalFailed > 0 ? `⚠️ ${totalFailed} falha(s) — rode novamente<br>` : ''}
+                        ${totalRemaining === 0 ? '✅ Todas as ativas estão no ClickUp.' : `⏳ ${totalRemaining} pendentes`}
+                    </div>
+                </div>`;
+
+            btn.disabled = false;
+            btn.textContent = totalRemaining > 0 ? '▶️ Continuar Backup' : '✅ Backup Completo';
+        }
+
+        // ── Backup das demandas ATIVAS ────────────────────────────────────────
         async function openClickupMigrateModal() {
             document.getElementById('clickupMigrateProgress').style.display  = 'none';
             document.getElementById('clickupMigrateResult').style.display    = 'none';
@@ -9840,7 +9951,7 @@ filterCards();
             document.getElementById('clickupMigrateProgress').style.display = '';
             document.getElementById('clickupMigrateAlert').innerHTML = '';
 
-            let totalSent = 0, totalFailed = 0, totalRemaining = 0;
+            let totalSent = 0, totalFailed = 0, totalRemaining = 0, totalComments = 0;
 
             // Busca total
             let total = 1;
@@ -9867,6 +9978,7 @@ filterCards();
 
                     totalSent    += d.sent;
                     totalFailed  += d.failed;
+                    totalComments += (d.comments || 0);
                     totalRemaining = d.remaining;
 
                     const sent  = totalSent - totalStart;
@@ -9875,7 +9987,7 @@ filterCards();
 
                     document.getElementById('clickupProgressBar').style.width  = pct + '%';
                     document.getElementById('clickupProgressLabel').textContent =
-                        `Enviando... ${sent}/${grand} (${pct}%)${totalFailed > 0 ? ` · ${totalFailed} falhas` : ''}`;
+                        `Enviando... ${sent}/${grand} (${pct}%) · 💬 ${totalComments}${totalFailed > 0 ? ` · ${totalFailed} falhas` : ''}`;
 
                     if (d.done) break;
                     await new Promise(res => setTimeout(res, 300)); // pequena pausa entre lotes
@@ -9894,6 +10006,7 @@ filterCards();
                     <div style="font-weight:700; margin-bottom:4px;">Migração concluída</div>
                     <div style="font-size:0.78rem; color:var(--text-secondary);">
                         ✅ ${sent} demandas enviadas ao ClickUp<br>
+                        💬 ${totalComments} anotação(ões) como comentários<br>
                         ${totalFailed > 0 ? `⚠️ ${totalFailed} falhas (tente novamente)<br>` : ''}
                         ${totalRemaining === 0 ? '✅ Tudo migrado! Pode limpar o banco local quando quiser.' : `⏳ ${totalRemaining} ainda pendentes`}
                     </div>
